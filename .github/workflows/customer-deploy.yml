@@ -328,7 +328,6 @@ jobs:
   deploy:
     needs: publish
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
     steps:
       - name: Request Municloud deploy
         env:
@@ -471,4 +470,3 @@ jobs:
           echo "Timed out waiting for Municloud deployment to complete."
           echo "Municloud run: ${RUN_URL}"
           exit 1
-

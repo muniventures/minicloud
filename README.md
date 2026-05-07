@@ -25,5 +25,4 @@ jobs:
       postgres_password: ${{ secrets.MUNICLOUD_POSTGRES_PASSWORD }}
 ```
 
-The caller repository still owns source checkout, Docker image build context, package publishing permissions, and customer secrets. The Municloud runtime repository keeps provider, DNS, SSH, and VPS secrets.
-
+The caller repository still owns source checkout, Docker image build context, package publishing permissions, and customer secrets. Put caller secrets at repository or organization scope; GitHub environment secrets are not available to reusable workflow caller jobs. The Municloud runtime repository keeps provider, DNS, SSH, and VPS secrets.
