@@ -1,0 +1,474 @@
+name: Municloud Customer Deploy
+
+on:
+  workflow_call:
+    inputs:
+      customer:
+        required: true
+        type: string
+      app_name:
+        required: true
+        type: string
+      plan:
+        required: false
+        type: string
+        default: P0
+      environment:
+        required: false
+        type: string
+        default: staging
+      aspnetcore_environment:
+        required: false
+        type: string
+        default: ""
+      deployment_type:
+        required: false
+        type: string
+        default: backend_frontend
+      database:
+        required: false
+        type: string
+        default: sqlite
+      provision_if_missing:
+        required: false
+        type: string
+        default: "true"
+      municloud_repo:
+        required: false
+        type: string
+        default: muniventures/municloud
+      municloud_deploy_workflow:
+        required: false
+        type: string
+        default: municloud-deploy.yml
+      image_tag:
+        required: false
+        type: string
+        default: ""
+      frontend_context:
+        required: false
+        type: string
+        default: ./frontend
+      frontend_dockerfile:
+        required: false
+        type: string
+        default: ""
+      frontend_port:
+        required: false
+        type: string
+        default: "3000"
+      frontend_path:
+        required: false
+        type: string
+        default: "/"
+      frontend_health_path:
+        required: false
+        type: string
+        default: "/"
+      backend_context:
+        required: false
+        type: string
+        default: .
+      backend_dockerfile:
+        required: false
+        type: string
+        default: ""
+      backend_port:
+        required: false
+        type: string
+        default: "8080"
+      backend_path:
+        required: false
+        type: string
+        default: "/api"
+      backend_health_path:
+        required: false
+        type: string
+        default: "/health"
+    secrets:
+      municloud_dispatch_token:
+        required: true
+      postgres_password:
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend_image_ref: ${{ steps.images.outputs.frontend_image_ref }}
+      backend_image_ref: ${{ steps.images.outputs.backend_image_ref }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve image refs
+        id: images
+        shell: bash
+        env:
+          DEPLOYMENT_TYPE: ${{ inputs.deployment_type }}
+          IMAGE_TAG_INPUT: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+
+          IMAGE_TAG="${IMAGE_TAG_INPUT:-${GITHUB_SHA}}"
+          IMAGE_NAMESPACE="$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          FRONTEND_IMAGE_REF=""
+          BACKEND_IMAGE_REF=""
+
+          case "${DEPLOYMENT_TYPE}" in
+            backend_only)
+              BACKEND_IMAGE_REF="${REGISTRY}/${IMAGE_NAMESPACE}/backend:${IMAGE_TAG}"
+              ;;
+            frontend_only)
+              FRONTEND_IMAGE_REF="${REGISTRY}/${IMAGE_NAMESPACE}/frontend:${IMAGE_TAG}"
+              ;;
+            backend_frontend)
+              FRONTEND_IMAGE_REF="${REGISTRY}/${IMAGE_NAMESPACE}/frontend:${IMAGE_TAG}"
+              BACKEND_IMAGE_REF="${REGISTRY}/${IMAGE_NAMESPACE}/backend:${IMAGE_TAG}"
+              ;;
+            *)
+              echo "deployment_type must be backend_only, frontend_only, or backend_frontend."
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "FRONTEND_IMAGE_REF=${FRONTEND_IMAGE_REF}"
+            echo "BACKEND_IMAGE_REF=${BACKEND_IMAGE_REF}"
+          } >> "${GITHUB_ENV}"
+
+          {
+            echo "frontend_image_ref=${FRONTEND_IMAGE_REF}"
+            echo "backend_image_ref=${BACKEND_IMAGE_REF}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build frontend image
+        if: inputs.deployment_type == 'frontend_only' || inputs.deployment_type == 'backend_frontend'
+        shell: bash
+        env:
+          FRONTEND_CONTEXT: ${{ inputs.frontend_context }}
+          FRONTEND_DOCKERFILE: ${{ inputs.frontend_dockerfile }}
+        run: |
+          set -euo pipefail
+
+          args=(docker buildx build --platform linux/amd64 --load -t "${FRONTEND_IMAGE_REF}")
+          if [ -n "${FRONTEND_DOCKERFILE}" ]; then
+            args+=(-f "${FRONTEND_DOCKERFILE}")
+          fi
+          args+=("${FRONTEND_CONTEXT}")
+          "${args[@]}"
+          docker save "${FRONTEND_IMAGE_REF}" -o frontend-image.tar
+
+      - name: Build backend image
+        if: inputs.deployment_type == 'backend_only' || inputs.deployment_type == 'backend_frontend'
+        shell: bash
+        env:
+          BACKEND_CONTEXT: ${{ inputs.backend_context }}
+          BACKEND_DOCKERFILE: ${{ inputs.backend_dockerfile }}
+        run: |
+          set -euo pipefail
+
+          args=(docker buildx build --platform linux/amd64 --load -t "${BACKEND_IMAGE_REF}")
+          if [ -n "${BACKEND_DOCKERFILE}" ]; then
+            args+=(-f "${BACKEND_DOCKERFILE}")
+          fi
+          args+=("${BACKEND_CONTEXT}")
+          "${args[@]}"
+          docker save "${BACKEND_IMAGE_REF}" -o backend-image.tar
+
+      - name: Upload frontend image artifact
+        if: inputs.deployment_type == 'frontend_only' || inputs.deployment_type == 'backend_frontend'
+        uses: actions/upload-artifact@v4
+        with:
+          name: municloud-frontend-image
+          path: frontend-image.tar
+          retention-days: 1
+
+      - name: Upload backend image artifact
+        if: inputs.deployment_type == 'backend_only' || inputs.deployment_type == 'backend_frontend'
+        uses: actions/upload-artifact@v4
+        with:
+          name: municloud-backend-image
+          path: backend-image.tar
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      services_json: ${{ steps.payload.outputs.services_json }}
+    steps:
+      - name: Download frontend image artifact
+        if: inputs.deployment_type == 'frontend_only' || inputs.deployment_type == 'backend_frontend'
+        uses: actions/download-artifact@v4
+        with:
+          name: municloud-frontend-image
+
+      - name: Download backend image artifact
+        if: inputs.deployment_type == 'backend_only' || inputs.deployment_type == 'backend_frontend'
+        uses: actions/download-artifact@v4
+        with:
+          name: municloud-backend-image
+
+      - name: Publish images
+        env:
+          FRONTEND_IMAGE_REF: ${{ needs.build.outputs.frontend_image_ref }}
+          BACKEND_IMAGE_REF: ${{ needs.build.outputs.backend_image_ref }}
+          GHCR_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+
+          if [ -n "${FRONTEND_IMAGE_REF}" ]; then
+            docker load -i frontend-image.tar
+            docker push "${FRONTEND_IMAGE_REF}"
+          fi
+
+          if [ -n "${BACKEND_IMAGE_REF}" ]; then
+            docker load -i backend-image.tar
+            docker push "${BACKEND_IMAGE_REF}"
+          fi
+
+      - name: Build Municloud service payload
+        id: payload
+        env:
+          DEPLOYMENT_TYPE: ${{ inputs.deployment_type }}
+          FRONTEND_IMAGE_REF: ${{ needs.build.outputs.frontend_image_ref }}
+          BACKEND_IMAGE_REF: ${{ needs.build.outputs.backend_image_ref }}
+          ASPNETCORE_ENVIRONMENT_INPUT: ${{ inputs.aspnetcore_environment }}
+          FRONTEND_PORT: ${{ inputs.frontend_port }}
+          FRONTEND_PATH: ${{ inputs.frontend_path }}
+          FRONTEND_HEALTH_PATH: ${{ inputs.frontend_health_path }}
+          BACKEND_PORT: ${{ inputs.backend_port }}
+          BACKEND_PATH: ${{ inputs.backend_path }}
+          BACKEND_HEALTH_PATH: ${{ inputs.backend_health_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          case "${DEPLOYMENT_TYPE}" in
+            backend_only)
+              jq -c -n \
+                --arg backend_image "${BACKEND_IMAGE_REF}" \
+                --argjson backend_port "${BACKEND_PORT}" \
+                --arg backend_path "${BACKEND_PATH}" \
+                --arg backend_health_path "${BACKEND_HEALTH_PATH}" \
+                --arg aspnetcore_environment "${ASPNETCORE_ENVIRONMENT_INPUT}" \
+                '[{
+                  name: "backend",
+                  image: $backend_image,
+                  port: $backend_port,
+                  public: true,
+                  path: $backend_path,
+                  health_path: $backend_health_path,
+                  env: (if $aspnetcore_environment == "" then {} else { ASPNETCORE_ENVIRONMENT: $aspnetcore_environment } end)
+                }]' > municloud-services.json
+              ;;
+            frontend_only)
+              jq -c -n \
+                --arg frontend_image "${FRONTEND_IMAGE_REF}" \
+                --argjson frontend_port "${FRONTEND_PORT}" \
+                --arg frontend_path "${FRONTEND_PATH}" \
+                --arg frontend_health_path "${FRONTEND_HEALTH_PATH}" \
+                '[{
+                  name: "frontend",
+                  image: $frontend_image,
+                  port: $frontend_port,
+                  public: true,
+                  path: $frontend_path,
+                  health_path: $frontend_health_path
+                }]' > municloud-services.json
+              ;;
+            backend_frontend)
+              jq -c -n \
+                --arg frontend_image "${FRONTEND_IMAGE_REF}" \
+                --arg backend_image "${BACKEND_IMAGE_REF}" \
+                --argjson frontend_port "${FRONTEND_PORT}" \
+                --argjson backend_port "${BACKEND_PORT}" \
+                --arg frontend_path "${FRONTEND_PATH}" \
+                --arg backend_path "${BACKEND_PATH}" \
+                --arg frontend_health_path "${FRONTEND_HEALTH_PATH}" \
+                --arg backend_health_path "${BACKEND_HEALTH_PATH}" \
+                --arg aspnetcore_environment "${ASPNETCORE_ENVIRONMENT_INPUT}" \
+                '[
+                  {
+                    name: "frontend",
+                    image: $frontend_image,
+                    port: $frontend_port,
+                    public: true,
+                    path: $frontend_path,
+                    health_path: $frontend_health_path
+                  },
+                  {
+                    name: "backend",
+                    image: $backend_image,
+                    port: $backend_port,
+                    public: true,
+                    path: $backend_path,
+                    health_path: $backend_health_path,
+                    env: (if $aspnetcore_environment == "" then {} else { ASPNETCORE_ENVIRONMENT: $aspnetcore_environment } end)
+                  }
+                ]' > municloud-services.json
+              ;;
+          esac
+
+          SERVICES_JSON="$(cat municloud-services.json)"
+          echo "services_json=${SERVICES_JSON}" >> "${GITHUB_OUTPUT}"
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Request Municloud deploy
+        env:
+          GH_TOKEN: ${{ secrets.municloud_dispatch_token }}
+          POSTGRES_PASSWORD: ${{ secrets.postgres_password }}
+          SERVICES_JSON: ${{ needs.publish.outputs.services_json }}
+          MUNICLOUD_REPO: ${{ inputs.municloud_repo }}
+          MUNICLOUD_DEPLOY_WORKFLOW: ${{ inputs.municloud_deploy_workflow }}
+          CUSTOMER: ${{ inputs.customer }}
+          APP_NAME: ${{ inputs.app_name }}
+          PLAN: ${{ inputs.plan }}
+          PROVISION_IF_MISSING: ${{ inputs.provision_if_missing }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          DEPLOYMENT_TYPE: ${{ inputs.deployment_type }}
+          DATABASE: ${{ inputs.database }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "municloud_dispatch_token is missing or unavailable in this repository."
+            exit 1
+          fi
+
+          if [ "${DATABASE}" = "postgres" ] && [ -z "${POSTGRES_PASSWORD}" ]; then
+            echo "postgres_password is required when database is postgres."
+            exit 1
+          fi
+
+          REQUEST_ID="${GITHUB_REPOSITORY//\//-}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "MUNICLOUD_REQUEST_ID=${REQUEST_ID}" >> "${GITHUB_ENV}"
+
+          gh workflow run "${MUNICLOUD_DEPLOY_WORKFLOW}" \
+            --repo "${MUNICLOUD_REPO}" \
+            -f request_id="${REQUEST_ID}" \
+            -f customer="${CUSTOMER}" \
+            -f app_name="${APP_NAME}" \
+            -f plan="${PLAN}" \
+            -f provision_if_missing="${PROVISION_IF_MISSING}" \
+            -f environment="${ENVIRONMENT}" \
+            -f deployment_type="${DEPLOYMENT_TYPE}" \
+            -f database="${DATABASE}" \
+            -f postgres_password="${POSTGRES_PASSWORD}" \
+            -f services_json="${SERVICES_JSON}"
+
+      - name: Wait for Municloud deploy
+        env:
+          GH_TOKEN: ${{ secrets.municloud_dispatch_token }}
+          MUNICLOUD_REPO: ${{ inputs.municloud_repo }}
+          MUNICLOUD_DEPLOY_WORKFLOW: ${{ inputs.municloud_deploy_workflow }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RUN_ID=""
+          RUN_URL=""
+          for attempt in $(seq 1 60); do
+            RUNS_JSON="$(
+              gh run list \
+                --repo "${MUNICLOUD_REPO}" \
+                --workflow "${MUNICLOUD_DEPLOY_WORKFLOW}" \
+                --limit 30 \
+                --json databaseId,displayTitle,url,createdAt
+            )"
+
+            RUN_ID="$(printf '%s' "${RUNS_JSON}" | jq -r --arg request_id "${MUNICLOUD_REQUEST_ID}" '.[] | select(.displayTitle | contains($request_id)) | .databaseId' | head -n 1)"
+            RUN_URL="$(printf '%s' "${RUNS_JSON}" | jq -r --arg request_id "${MUNICLOUD_REQUEST_ID}" '.[] | select(.displayTitle | contains($request_id)) | .url' | head -n 1)"
+
+            if [ -n "${RUN_ID}" ]; then
+              echo "Municloud run: ${RUN_URL}"
+              break
+            fi
+
+            echo "Waiting for Municloud run to appear (${attempt}/60)..."
+            sleep 5
+          done
+
+          if [ -z "${RUN_ID}" ]; then
+            echo "Timed out waiting for Municloud run for request ${MUNICLOUD_REQUEST_ID}."
+            exit 1
+          fi
+
+          LAST_PROGRESS=""
+          for attempt in $(seq 1 240); do
+            RUN_JSON="$(
+              gh run view "${RUN_ID}" \
+                --repo "${MUNICLOUD_REPO}" \
+                --json status,conclusion,url,jobs
+            )"
+
+            STATUS="$(printf '%s' "${RUN_JSON}" | jq -r '.status')"
+            CONCLUSION="$(printf '%s' "${RUN_JSON}" | jq -r '.conclusion // ""')"
+            RUN_URL="$(printf '%s' "${RUN_JSON}" | jq -r '.url')"
+            PROGRESS="$(
+              printf '%s' "${RUN_JSON}" | jq -r '
+                [ .jobs[]? as $job
+                  | $job.steps[]?
+                  | select(.status != "completed")
+                  | "\($job.name) / \(.name): \(.status)"
+                ] | first // "queued"
+              '
+            )"
+
+            if [ "${PROGRESS}" != "${LAST_PROGRESS}" ]; then
+              echo "Municloud progress: ${PROGRESS}"
+              LAST_PROGRESS="${PROGRESS}"
+            fi
+
+            if [ "${STATUS}" = "completed" ]; then
+              echo "Municloud completed: ${CONCLUSION}"
+              echo "Municloud run: ${RUN_URL}"
+
+              if [ "${CONCLUSION}" != "success" ]; then
+                gh run view "${RUN_ID}" --repo "${MUNICLOUD_REPO}" --log-failed || true
+                exit 1
+              fi
+
+              MUNICLOUD_LOG="$(gh run view "${RUN_ID}" --repo "${MUNICLOUD_REPO}" --log)"
+              WEBSITE_URL="$(printf '%s\n' "${MUNICLOUD_LOG}" | sed -n 's/.*Website URL: \(https:\/\/[^[:space:]]*\).*/\1/p' | tail -n 1)"
+
+              if [ -z "${WEBSITE_URL}" ]; then
+                echo "Municloud deploy succeeded, but the website URL was not found in the Municloud run log."
+                exit 1
+              fi
+
+              echo "Website URL: ${WEBSITE_URL}"
+              {
+                echo "## Municloud deployment"
+                echo ""
+                echo "- Website URL: ${WEBSITE_URL}"
+                echo "- Municloud run: ${RUN_URL}"
+              } >> "${GITHUB_STEP_SUMMARY}"
+
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "Timed out waiting for Municloud deployment to complete."
+          echo "Municloud run: ${RUN_URL}"
+          exit 1
+

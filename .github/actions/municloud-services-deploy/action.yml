@@ -1,0 +1,208 @@
+name: Municloud Services Deploy
+description: Build the Municloud services deploy payload and dispatch the runtime deploy workflow.
+
+inputs:
+  request_id:
+    required: true
+    description: Municloud services deploy request id.
+  environment:
+    required: true
+    description: Municloud environment to deploy.
+  provision_if_missing:
+    required: true
+    description: Create/bootstrap the VPS if missing.
+  api_image:
+    required: true
+    description: API image ref.
+  dashboard_image:
+    required: true
+    description: Dashboard image ref.
+  registry_image:
+    required: true
+    description: Registry image ref.
+  firebase_project_id:
+    required: true
+    description: Firebase project id.
+  gh_owner:
+    required: true
+    description: GitHub owner for runtime deploy workflow.
+  gh_repo:
+    required: true
+    description: GitHub repo for runtime deploy workflow.
+  gh_deploy_workflow_id:
+    required: true
+    description: Runtime deploy workflow id.
+  gh_deploy_ref:
+    required: true
+    description: Runtime deploy ref.
+  gh_token:
+    required: true
+    description: GitHub token allowed to dispatch the runtime deploy workflow.
+  postgres_password:
+    required: true
+    description: Postgres password for the Municloud control plane.
+  secrets_encryption_key:
+    required: true
+    description: Stable API secret encryption key.
+  registry_host:
+    required: false
+    default: ""
+    description: Public registry host override. Defaults to registry-dev.muni.dev for staging and registry.muni.dev for production.
+  registry_ghcr_owner:
+    required: true
+    description: GHCR owner used by the registry proxy.
+  registry_ghcr_username:
+    required: true
+    description: GHCR username used by the registry proxy.
+  registry_ghcr_token:
+    required: true
+    description: GHCR token used by the registry proxy.
+
+runs:
+  using: composite
+  steps:
+    - name: Dispatch Municloud deploy workflow
+      env:
+        GH_TOKEN: ${{ inputs.gh_token }}
+        API_IMAGE: ${{ inputs.api_image }}
+        DASHBOARD_IMAGE: ${{ inputs.dashboard_image }}
+        REGISTRY_IMAGE: ${{ inputs.registry_image }}
+        APP_ENV: ${{ inputs.environment }}
+        PROVISION_IF_MISSING: ${{ inputs.provision_if_missing }}
+        FIREBASE_PROJECT_ID: ${{ inputs.firebase_project_id }}
+        MUNICLOUD_GH_OWNER: ${{ inputs.gh_owner }}
+        MUNICLOUD_GH_REPO: ${{ inputs.gh_repo }}
+        MUNICLOUD_GH_DEPLOY_WORKFLOW_ID: ${{ inputs.gh_deploy_workflow_id }}
+        MUNICLOUD_GH_DEPLOY_REF: ${{ inputs.gh_deploy_ref }}
+        MUNICLOUD_GH_TOKEN: ${{ inputs.gh_token }}
+        MUNICLOUD_POSTGRES_PASSWORD: ${{ inputs.postgres_password }}
+        MUNICLOUD_SECRETS_ENCRYPTION_KEY: ${{ inputs.secrets_encryption_key }}
+        MUNICLOUD_REGISTRY_HOST: ${{ inputs.registry_host }}
+        MUNICLOUD_REGISTRY_GHCR_OWNER: ${{ inputs.registry_ghcr_owner }}
+        MUNICLOUD_REGISTRY_GHCR_USERNAME: ${{ inputs.registry_ghcr_username }}
+        MUNICLOUD_REGISTRY_GHCR_TOKEN: ${{ inputs.registry_ghcr_token }}
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        if [ -z "${MUNICLOUD_GH_TOKEN}" ]; then
+          echo "MUNICLOUD_GH_TOKEN platform environment secret is required."
+          exit 1
+        fi
+
+        if [ -z "${MUNICLOUD_POSTGRES_PASSWORD}" ]; then
+          echo "MUNICLOUD_POSTGRES_PASSWORD platform environment secret is required."
+          exit 1
+        fi
+
+        if [ -z "${MUNICLOUD_SECRETS_ENCRYPTION_KEY}" ]; then
+          echo "MUNICLOUD_SECRETS_ENCRYPTION_KEY platform environment secret is required."
+          exit 1
+        fi
+
+        if [ -z "${MUNICLOUD_REGISTRY_GHCR_TOKEN}" ]; then
+          echo "MUNICLOUD_REGISTRY_GHCR_TOKEN platform environment secret is required so the Municloud registry service can push to Municloud-owned GHCR."
+          exit 1
+        fi
+
+        case "${APP_ENV}" in
+          staging)
+            CUSTOM_DOMAIN="cloud-dev.muni.dev"
+            DEFAULT_REGISTRY_HOST="registry-dev.muni.dev"
+            ;;
+          production)
+            CUSTOM_DOMAIN="cloud.muni.dev"
+            DEFAULT_REGISTRY_HOST="registry.muni.dev"
+            ;;
+          *)
+            echo "Unsupported Municloud services environment: ${APP_ENV}"
+            exit 1
+            ;;
+        esac
+
+        if [ -z "${MUNICLOUD_REGISTRY_HOST}" ]; then
+          MUNICLOUD_REGISTRY_HOST="${DEFAULT_REGISTRY_HOST}"
+        fi
+
+        SERVICES_JSON="$(
+          jq -cn \
+            --arg dashboard_image "${DASHBOARD_IMAGE}" \
+            --arg api_image "${API_IMAGE}" \
+            --arg registry_image "${REGISTRY_IMAGE}" \
+            --arg firebase_project_id "${FIREBASE_PROJECT_ID}" \
+            --arg gh_owner "${MUNICLOUD_GH_OWNER}" \
+            --arg gh_repo "${MUNICLOUD_GH_REPO}" \
+            --arg gh_workflow_id "${MUNICLOUD_GH_DEPLOY_WORKFLOW_ID}" \
+            --arg gh_ref "${MUNICLOUD_GH_DEPLOY_REF}" \
+            --arg gh_token "${MUNICLOUD_GH_TOKEN}" \
+            --arg secrets_encryption_key "${MUNICLOUD_SECRETS_ENCRYPTION_KEY}" \
+            --arg registry_host "${MUNICLOUD_REGISTRY_HOST}" \
+            --arg registry_ghcr_owner "${MUNICLOUD_REGISTRY_GHCR_OWNER}" \
+            --arg registry_ghcr_username "${MUNICLOUD_REGISTRY_GHCR_USERNAME}" \
+            --arg registry_ghcr_token "${MUNICLOUD_REGISTRY_GHCR_TOKEN}" \
+            '[
+              {
+                name: "frontend",
+                image: $dashboard_image,
+                port: 8080,
+                public: true,
+                path: "/",
+                health_path: "/health"
+              },
+              {
+                name: "backend",
+                image: $api_image,
+                port: 8080,
+                public: true,
+                path: "/api",
+                health_path: "/health",
+                env: {
+                  ASPNETCORE_ENVIRONMENT: "Production",
+                  ASPNETCORE_URLS: "http://+:8080",
+                  Http__PathBase: "/api",
+                  Database__Provider: "Postgres",
+                  Database__RunMigrationsOnStartup: "true",
+                  Firebase__ProjectId: $firebase_project_id,
+                  GitHub__Token: $gh_token,
+                  GitHub__Owner: $gh_owner,
+                  GitHub__Repo: $gh_repo,
+                  GitHub__DeployWorkflowId: $gh_workflow_id,
+                  GitHub__DeployRef: $gh_ref,
+                  Secrets__EncryptionKey: $secrets_encryption_key
+                }
+              },
+              {
+                name: "registry",
+                image: $registry_image,
+                port: 8080,
+                public: true,
+                host: $registry_host,
+                path: "/",
+                health_path: "/health",
+                env: {
+                  ASPNETCORE_ENVIRONMENT: "Production",
+                  ASPNETCORE_URLS: "http://+:8080",
+                  Registry__ExternalHost: $registry_host,
+                  Registry__ApiBaseUrl: "http://backend:8080",
+                  Registry__UpstreamHost: "ghcr.io",
+                  Registry__UpstreamOwner: $registry_ghcr_owner,
+                  Registry__UpstreamUsername: $registry_ghcr_username,
+                  Registry__UpstreamToken: $registry_ghcr_token
+                }
+              }
+            ]'
+        )"
+
+        gh workflow run "${MUNICLOUD_GH_DEPLOY_WORKFLOW_ID}" \
+          --repo "${MUNICLOUD_GH_OWNER}/${MUNICLOUD_GH_REPO}" \
+          --ref "${MUNICLOUD_GH_DEPLOY_REF}" \
+          -f request_id="${{ inputs.request_id }}" \
+          -f app_name="municloud" \
+          -f customer="internal" \
+          -f provision_if_missing="${PROVISION_IF_MISSING}" \
+          -f environment="${APP_ENV}" \
+          -f deployment_type="custom" \
+          -f database="postgres" \
+          -f custom_domain="${CUSTOM_DOMAIN}" \
+          -f postgres_password="${MUNICLOUD_POSTGRES_PASSWORD}" \
+          -f services_json="${SERVICES_JSON}"
