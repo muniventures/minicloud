@@ -62,6 +62,68 @@ public sealed class CliConfigTests
     }
 
     [Fact]
+    public void Parse_preserves_quoted_yaml_scalars()
+    {
+        var result = MunicloudConfigLoader.Parse(
+        [
+            "app: teamcore",
+            "deploymentType: backend_only",
+            "services:",
+            "  backend:",
+            "    image: \"ghcr.io/customer/teamcore/backend:abc123\"",
+            "    port: 8080",
+            "    public: true",
+            "    path: \"/api#v1\"",
+            "    healthPath: \"/health#ready\"",
+            "    env:",
+            "      FEATURE_VALUE: \"enabled # not a comment\""
+        ]);
+
+        Assert.True(result.IsValid);
+        Assert.Equal("/api#v1", result.Config?.Services["backend"].Path);
+        Assert.Equal("/health#ready", result.Config?.Services["backend"].HealthPath);
+        Assert.Equal("enabled # not a comment", result.Config?.Services["backend"].Env?["FEATURE_VALUE"]);
+    }
+
+    [Fact]
+    public void Parse_reports_yaml_syntax_errors()
+    {
+        var result = MunicloudConfigLoader.Parse(
+        [
+            "app: teamcore",
+            "services:",
+            "  backend:",
+            "    port: [8080"
+        ]);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Diagnostics, x => x.Field == "config" && x.Message.Contains("Invalid YAML", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Parse_rejects_nested_environment_values()
+    {
+        var result = MunicloudConfigLoader.Parse(
+        [
+            "app: teamcore",
+            "deploymentType: backend_only",
+            "services:",
+            "  backend:",
+            "    image: ghcr.io/customer/teamcore/backend:abc123",
+            "    port: 8080",
+            "    public: true",
+            "    path: /",
+            "    healthPath: /health",
+            "    env:",
+            "      FEATURE:",
+            "        ENABLED: true"
+        ]);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Diagnostics, x => x.Field == "services.backend.env.FEATURE");
+    }
+
+    [Fact]
     public void Parse_rejects_invalid_environment_variable_names()
     {
         var result = MunicloudConfigLoader.Parse(

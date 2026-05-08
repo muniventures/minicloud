@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using YamlDotNet.Core;
+using YamlDotNet.RepresentationModel;
 
 namespace Municloud.Cli.Config;
 
@@ -32,110 +34,21 @@ public static partial class MunicloudConfigLoader
     public static ConfigLoadResult Parse(IReadOnlyList<string> lines)
     {
         var diagnostics = new List<ConfigDiagnostic>();
-        var root = new Dictionary<string, string>(StringComparer.Ordinal);
-        var services = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
-        var serviceEnvs = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
-        string? currentSection = null;
-        string? currentService = null;
-        string? currentServiceSection = null;
-
-        for (var index = 0; index < lines.Count; index++)
+        var root = LoadRootMapping(string.Join(Environment.NewLine, lines), diagnostics);
+        if (root is null)
         {
-            var rawLine = StripComment(lines[index]);
-            if (string.IsNullOrWhiteSpace(rawLine))
-            {
-                continue;
-            }
-
-            var indent = rawLine.TakeWhile(char.IsWhiteSpace).Count();
-            var line = rawLine.Trim();
-            var parts = line.Split(':', 2);
-            if (parts.Length != 2)
-            {
-                diagnostics.Add(new ConfigDiagnostic($"line {index + 1}", "Expected 'key: value'."));
-                continue;
-            }
-
-            var key = parts[0].Trim();
-            var value = Unquote(parts[1].Trim());
-
-            if (indent == 0)
-            {
-                currentService = null;
-                currentServiceSection = null;
-                if (string.IsNullOrEmpty(value))
-                {
-                    currentSection = key;
-                    if (currentSection != "services")
-                    {
-                        diagnostics.Add(new ConfigDiagnostic(key, "Only the 'services' mapping is supported as a nested section."));
-                    }
-
-                    continue;
-                }
-
-                currentSection = null;
-                root[key] = value;
-                continue;
-            }
-
-            if (currentSection != "services")
-            {
-                diagnostics.Add(new ConfigDiagnostic($"line {index + 1}", "Nested values are only supported under 'services'."));
-                continue;
-            }
-
-            if (indent == 2 && string.IsNullOrEmpty(value))
-            {
-                currentService = key;
-                currentServiceSection = null;
-                services[currentService] = new Dictionary<string, string>(StringComparer.Ordinal);
-                serviceEnvs[currentService] = new Dictionary<string, string>(StringComparer.Ordinal);
-                continue;
-            }
-
-            if (indent == 4 && currentService is not null && string.IsNullOrEmpty(value) && string.Equals(key, "env", StringComparison.Ordinal))
-            {
-                currentServiceSection = "env";
-                continue;
-            }
-
-            if (indent >= 6 && currentService is not null && string.Equals(currentServiceSection, "env", StringComparison.Ordinal))
-            {
-                serviceEnvs[currentService][key] = value;
-                continue;
-            }
-
-            if (indent >= 4 && currentService is not null)
-            {
-                currentServiceSection = null;
-                services[currentService][key] = value;
-                continue;
-            }
-
-            diagnostics.Add(new ConfigDiagnostic($"line {index + 1}", "Service values must be nested under a service name."));
+            return new ConfigLoadResult(null, diagnostics);
         }
 
+        ValidateSupportedRootShape(root, diagnostics);
+        var services = ParseServices(root, diagnostics);
         var config = new MunicloudConfig(
-            root.GetValueOrDefault("app") ?? "",
-            root.GetValueOrDefault("environment"),
-            root.GetValueOrDefault("deploymentType"),
-            root.GetValueOrDefault("database"),
-            root.GetValueOrDefault("commitSha"),
-            services.ToDictionary(
-                x => x.Key,
-                x => new MunicloudServiceConfig(
-                    x.Value.GetValueOrDefault("sourcePath"),
-                    x.Value.GetValueOrDefault("dockerfile"),
-                    x.Value.GetValueOrDefault("image"),
-                    ParseInt(x.Value.GetValueOrDefault("port"), diagnostics, $"services.{x.Key}.port"),
-                    ParseBool(x.Value.GetValueOrDefault("public"), diagnostics, $"services.{x.Key}.public"),
-                    x.Value.GetValueOrDefault("path"),
-                    x.Value.GetValueOrDefault("healthPath"),
-                    serviceEnvs.TryGetValue(x.Key, out var env) && env.Count > 0
-                        ? new Dictionary<string, string>(env, StringComparer.Ordinal)
-                        : null),
-                StringComparer.Ordinal));
+            GetScalar(root, "app", "app", diagnostics) ?? "",
+            GetScalar(root, "environment", "environment", diagnostics),
+            GetScalar(root, "deploymentType", "deploymentType", diagnostics),
+            GetScalar(root, "database", "database", diagnostics),
+            GetScalar(root, "commitSha", "commitSha", diagnostics),
+            services);
 
         diagnostics.AddRange(MunicloudConfigValidator.Validate(config));
         return new ConfigLoadResult(config, diagnostics);
@@ -143,8 +56,151 @@ public static partial class MunicloudConfigLoader
 
     private static ConfigLoadResult Invalid(ConfigDiagnostic diagnostic) => new(null, [diagnostic]);
 
-    private static int? ParseInt(string? value, List<ConfigDiagnostic> diagnostics, string field)
+    private static YamlMappingNode? LoadRootMapping(string yaml, List<ConfigDiagnostic> diagnostics)
     {
+        try
+        {
+            var stream = new YamlStream();
+            stream.Load(new StringReader(yaml));
+            var root = stream.Documents.Count > 0 ? stream.Documents[0].RootNode : null;
+
+            if (root is null or YamlScalarNode { Value: null or "" })
+            {
+                diagnostics.Add(new ConfigDiagnostic("config", "Config file is empty."));
+                return null;
+            }
+
+            if (root is not YamlMappingNode mapping)
+            {
+                diagnostics.Add(new ConfigDiagnostic("config", "Config root must be a YAML mapping."));
+                return null;
+            }
+
+            return mapping;
+        }
+        catch (YamlException ex)
+        {
+            diagnostics.Add(new ConfigDiagnostic("config", $"Invalid YAML: {ex.Message}"));
+            return null;
+        }
+    }
+
+    private static void ValidateSupportedRootShape(YamlMappingNode root, List<ConfigDiagnostic> diagnostics)
+    {
+        foreach (var (keyNode, valueNode) in root.Children)
+        {
+            var key = ScalarKey(keyNode, "config", diagnostics);
+            if (key is null)
+            {
+                continue;
+            }
+
+            if (key == "services")
+            {
+                if (valueNode is not YamlMappingNode)
+                {
+                    diagnostics.Add(new ConfigDiagnostic("services", "Services must be a YAML mapping."));
+                }
+
+                continue;
+            }
+
+            if (valueNode is YamlMappingNode or YamlSequenceNode)
+            {
+                diagnostics.Add(new ConfigDiagnostic(key, "Only the 'services' mapping is supported as a nested section."));
+            }
+        }
+    }
+
+    private static IReadOnlyDictionary<string, MunicloudServiceConfig> ParseServices(YamlMappingNode root, List<ConfigDiagnostic> diagnostics)
+    {
+        if (!TryGetNode(root, "services", out var servicesNode) || servicesNode is not YamlMappingNode servicesMapping)
+        {
+            return new Dictionary<string, MunicloudServiceConfig>(StringComparer.Ordinal);
+        }
+
+        var services = new Dictionary<string, MunicloudServiceConfig>(StringComparer.Ordinal);
+        foreach (var (serviceKeyNode, serviceNode) in servicesMapping.Children)
+        {
+            var serviceName = ScalarKey(serviceKeyNode, "services", diagnostics);
+            if (serviceName is null)
+            {
+                continue;
+            }
+
+            if (serviceNode is not YamlMappingNode serviceMapping)
+            {
+                diagnostics.Add(new ConfigDiagnostic($"services.{serviceName}", "Service values must be a YAML mapping."));
+                continue;
+            }
+
+            services[serviceName] = new MunicloudServiceConfig(
+                GetScalar(serviceMapping, "sourcePath", $"services.{serviceName}.sourcePath", diagnostics),
+                GetScalar(serviceMapping, "dockerfile", $"services.{serviceName}.dockerfile", diagnostics),
+                GetScalar(serviceMapping, "image", $"services.{serviceName}.image", diagnostics),
+                GetInt(serviceMapping, "port", $"services.{serviceName}.port", diagnostics),
+                GetBool(serviceMapping, "public", $"services.{serviceName}.public", diagnostics),
+                GetScalar(serviceMapping, "path", $"services.{serviceName}.path", diagnostics),
+                GetScalar(serviceMapping, "healthPath", $"services.{serviceName}.healthPath", diagnostics),
+                GetEnvironment(serviceMapping, serviceName, diagnostics));
+        }
+
+        return services;
+    }
+
+    private static IReadOnlyDictionary<string, string>? GetEnvironment(YamlMappingNode serviceMapping, string serviceName, List<ConfigDiagnostic> diagnostics)
+    {
+        if (!TryGetNode(serviceMapping, "env", out var envNode))
+        {
+            return null;
+        }
+
+        if (envNode is not YamlMappingNode envMapping)
+        {
+            diagnostics.Add(new ConfigDiagnostic($"services.{serviceName}.env", "Environment variables must be a YAML mapping."));
+            return null;
+        }
+
+        var env = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (envKeyNode, envValueNode) in envMapping.Children)
+        {
+            var envKey = ScalarKey(envKeyNode, $"services.{serviceName}.env", diagnostics);
+            if (envKey is null)
+            {
+                continue;
+            }
+
+            if (envValueNode is not YamlScalarNode scalar || scalar.Value is null)
+            {
+                diagnostics.Add(new ConfigDiagnostic($"services.{serviceName}.env.{envKey}", "Environment variable values must be strings."));
+                continue;
+            }
+
+            env[envKey] = scalar.Value;
+        }
+
+        return env.Count > 0 ? env : null;
+    }
+
+    private static string? GetScalar(YamlMappingNode mapping, string key, string field, List<ConfigDiagnostic> diagnostics)
+    {
+        if (!TryGetNode(mapping, key, out var valueNode))
+        {
+            return null;
+        }
+
+        if (valueNode is YamlScalarNode scalar)
+        {
+            return scalar.Value;
+        }
+
+        diagnostics.Add(new ConfigDiagnostic(field, "Value must be a scalar."));
+        return null;
+    }
+
+    private static int? GetInt(YamlMappingNode mapping, string key, string field, List<ConfigDiagnostic> diagnostics)
+    {
+        var value = GetScalar(mapping, key, field, diagnostics);
         if (string.IsNullOrWhiteSpace(value))
         {
             return null;
@@ -159,8 +215,9 @@ public static partial class MunicloudConfigLoader
         return null;
     }
 
-    private static bool? ParseBool(string? value, List<ConfigDiagnostic> diagnostics, string field)
+    private static bool? GetBool(YamlMappingNode mapping, string key, string field, List<ConfigDiagnostic> diagnostics)
     {
+        var value = GetScalar(mapping, key, field, diagnostics);
         if (string.IsNullOrWhiteSpace(value))
         {
             return null;
@@ -175,33 +232,30 @@ public static partial class MunicloudConfigLoader
         return null;
     }
 
-    private static string StripComment(string line)
+    private static bool TryGetNode(YamlMappingNode mapping, string key, out YamlNode value)
     {
-        var inQuote = false;
-        for (var i = 0; i < line.Length; i++)
+        foreach (var (keyNode, valueNode) in mapping.Children)
         {
-            if (line[i] is '"' or '\'')
+            if (keyNode is YamlScalarNode scalar && scalar.Value == key)
             {
-                inQuote = !inQuote;
-            }
-
-            if (!inQuote && line[i] == '#')
-            {
-                return line[..i];
+                value = valueNode;
+                return true;
             }
         }
 
-        return line;
+        value = new YamlScalarNode();
+        return false;
     }
 
-    private static string Unquote(string value)
+    private static string? ScalarKey(YamlNode keyNode, string field, List<ConfigDiagnostic> diagnostics)
     {
-        if (value.Length >= 2 && ((value[0] == '"' && value[^1] == '"') || (value[0] == '\'' && value[^1] == '\'')))
+        if (keyNode is YamlScalarNode scalar && !string.IsNullOrWhiteSpace(scalar.Value))
         {
-            return value[1..^1];
+            return scalar.Value;
         }
 
-        return value;
+        diagnostics.Add(new ConfigDiagnostic(field, "YAML mapping keys must be non-empty scalars."));
+        return null;
     }
 
     [GeneratedRegex("^[a-z0-9][a-z0-9-]*$")]
