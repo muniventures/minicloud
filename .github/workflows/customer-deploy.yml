@@ -3,9 +3,6 @@ name: Municloud Customer Deploy
 on:
   workflow_call:
     inputs:
-      customer:
-        required: true
-        type: string
       app_name:
         required: true
         type: string
@@ -29,18 +26,10 @@ on:
         required: false
         type: string
         default: sqlite
-      provision_if_missing:
+      municloud_api_url:
         required: false
         type: string
-        default: "true"
-      municloud_repo:
-        required: false
-        type: string
-        default: muniventures/municloud
-      municloud_deploy_workflow:
-        required: false
-        type: string
-        default: municloud-deploy.yml
+        default: https://cloud.muni.dev/api
       image_tag:
         required: false
         type: string
@@ -86,7 +75,7 @@ on:
         type: string
         default: "/health"
     secrets:
-      municloud_dispatch_token:
+      municloud_api_key:
         required: true
       postgres_password:
         required: false
@@ -330,16 +319,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Request Municloud deploy
+        id: deploy
         env:
-          GH_TOKEN: ${{ secrets.municloud_dispatch_token }}
+          MUNICLOUD_API_KEY: ${{ secrets.municloud_api_key }}
           POSTGRES_PASSWORD: ${{ secrets.postgres_password }}
           SERVICES_JSON: ${{ needs.publish.outputs.services_json }}
-          MUNICLOUD_REPO: ${{ inputs.municloud_repo }}
-          MUNICLOUD_DEPLOY_WORKFLOW: ${{ inputs.municloud_deploy_workflow }}
-          CUSTOMER: ${{ inputs.customer }}
+          MUNICLOUD_API_URL: ${{ inputs.municloud_api_url }}
           APP_NAME: ${{ inputs.app_name }}
           PLAN: ${{ inputs.plan }}
-          PROVISION_IF_MISSING: ${{ inputs.provision_if_missing }}
           ENVIRONMENT: ${{ inputs.environment }}
           DEPLOYMENT_TYPE: ${{ inputs.deployment_type }}
           DATABASE: ${{ inputs.database }}
@@ -347,126 +334,150 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "municloud_dispatch_token is missing or unavailable in this repository."
+          if [ -z "${MUNICLOUD_API_KEY}" ]; then
+            echo "municloud_api_key is missing or unavailable in this repository."
             exit 1
           fi
+          echo "::add-mask::${MUNICLOUD_API_KEY}"
 
           if [ "${DATABASE}" = "postgres" ] && [ -z "${POSTGRES_PASSWORD}" ]; then
             echo "postgres_password is required when database is postgres."
             exit 1
           fi
 
-          REQUEST_ID="${GITHUB_REPOSITORY//\//-}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          echo "MUNICLOUD_REQUEST_ID=${REQUEST_ID}" >> "${GITHUB_ENV}"
+          MUNICLOUD_API_URL="${MUNICLOUD_API_URL%/}"
 
-          gh workflow run "${MUNICLOUD_DEPLOY_WORKFLOW}" \
-            --repo "${MUNICLOUD_REPO}" \
-            -f request_id="${REQUEST_ID}" \
-            -f customer="${CUSTOMER}" \
-            -f app_name="${APP_NAME}" \
-            -f plan="${PLAN}" \
-            -f provision_if_missing="${PROVISION_IF_MISSING}" \
-            -f environment="${ENVIRONMENT}" \
-            -f deployment_type="${DEPLOYMENT_TYPE}" \
-            -f database="${DATABASE}" \
-            -f postgres_password="${POSTGRES_PASSWORD}" \
-            -f services_json="${SERVICES_JSON}"
+          api_get() {
+            curl --fail-with-body -sS \
+              -H "Authorization: Bearer ${MUNICLOUD_API_KEY}" \
+              -H "Accept: application/json" \
+              "$1"
+          }
 
-      - name: Wait for Municloud deploy
-        env:
-          GH_TOKEN: ${{ secrets.municloud_dispatch_token }}
-          MUNICLOUD_REPO: ${{ inputs.municloud_repo }}
-          MUNICLOUD_DEPLOY_WORKFLOW: ${{ inputs.municloud_deploy_workflow }}
-        shell: bash
-        run: |
-          set -euo pipefail
+          api_post() {
+            curl --fail-with-body -sS \
+              -X POST \
+              -H "Authorization: Bearer ${MUNICLOUD_API_KEY}" \
+              -H "Accept: application/json" \
+              -H "Content-Type: application/json" \
+              --data-binary "$2" \
+              "$1"
+          }
 
-          RUN_ID=""
-          RUN_URL=""
-          for attempt in $(seq 1 60); do
-            RUNS_JSON="$(
-              gh run list \
-                --repo "${MUNICLOUD_REPO}" \
-                --workflow "${MUNICLOUD_DEPLOY_WORKFLOW}" \
-                --limit 30 \
-                --json databaseId,displayTitle,url,createdAt
-            )"
-
-            RUN_ID="$(printf '%s' "${RUNS_JSON}" | jq -r --arg request_id "${MUNICLOUD_REQUEST_ID}" '.[] | select(.displayTitle | contains($request_id)) | .databaseId' | head -n 1)"
-            RUN_URL="$(printf '%s' "${RUNS_JSON}" | jq -r --arg request_id "${MUNICLOUD_REQUEST_ID}" '.[] | select(.displayTitle | contains($request_id)) | .url' | head -n 1)"
-
-            if [ -n "${RUN_ID}" ]; then
-              echo "Municloud run: ${RUN_URL}"
-              break
-            fi
-
-            echo "Waiting for Municloud run to appear (${attempt}/60)..."
-            sleep 5
-          done
-
-          if [ -z "${RUN_ID}" ]; then
-            echo "Timed out waiting for Municloud run for request ${MUNICLOUD_REQUEST_ID}."
+          ME_JSON="$(api_get "${MUNICLOUD_API_URL}/v1/me")"
+          ORGANIZATION_ID="$(printf '%s' "${ME_JSON}" | jq -r '.organizations[0].id // ""')"
+          ORGANIZATION_SLUG="$(printf '%s' "${ME_JSON}" | jq -r '.organizations[0].slug // ""')"
+          if [ -z "${ORGANIZATION_ID}" ]; then
+            echo "Municloud API key is not associated with an organization."
             exit 1
           fi
 
-          LAST_PROGRESS=""
+          APP_SLUG="$(printf '%s' "${APP_NAME}" | tr '[:upper:]' '[:lower:]')"
+          APPS_JSON="$(api_get "${MUNICLOUD_API_URL}/v1/apps?organizationId=${ORGANIZATION_ID}")"
+          APP_ID="$(printf '%s' "${APPS_JSON}" | jq -r --arg app "${APP_SLUG}" '.[] | select((.slug | ascii_downcase) == $app or (.id | ascii_downcase) == $app) | .id' | head -n 1)"
+
+          if [ -z "${APP_ID}" ]; then
+            CREATE_APP_JSON="$(
+              jq -cn \
+                --arg organization_id "${ORGANIZATION_ID}" \
+                --arg name "${APP_NAME}" \
+                --arg slug "${APP_SLUG}" \
+                --arg environment "${ENVIRONMENT}" \
+                --arg plan "${PLAN}" \
+                --arg deployment_type "${DEPLOYMENT_TYPE}" \
+                --arg database "${DATABASE}" \
+                '{
+                  organizationId: $organization_id,
+                  name: $name,
+                  slug: $slug,
+                  defaultEnvironment: $environment,
+                  plan: ($plan | ascii_downcase),
+                  deploymentType: $deployment_type,
+                  database: $database
+                }'
+            )"
+            APP_JSON="$(api_post "${MUNICLOUD_API_URL}/v1/apps" "${CREATE_APP_JSON}")"
+            APP_ID="$(printf '%s' "${APP_JSON}" | jq -r '.id')"
+            echo "Created Municloud app ${APP_ID} in ${ORGANIZATION_SLUG}."
+          fi
+
+          SERVICES_FOR_API="$(
+            printf '%s' "${SERVICES_JSON}" | jq -c '[.[] | {
+              name,
+              image,
+              port,
+              public,
+              path,
+              healthPath: .health_path,
+              env: (.env // null)
+            }]'
+          )"
+
+          DEPLOYMENT_JSON="$(
+            jq -cn \
+              --arg app_id "${APP_ID}" \
+              --arg environment "${ENVIRONMENT}" \
+              --arg deployment_type "${DEPLOYMENT_TYPE}" \
+              --arg database "${DATABASE}" \
+              --arg commit_sha "${GITHUB_SHA}" \
+              --arg postgres_password "${POSTGRES_PASSWORD}" \
+              --argjson services "${SERVICES_FOR_API}" \
+              '{
+                appId: $app_id,
+                environment: $environment,
+                deploymentType: $deployment_type,
+                database: $database,
+                commitSha: $commit_sha,
+                services: $services,
+                postgresPassword: (if $postgres_password == "" then null else $postgres_password end)
+              }'
+          )"
+
+          CREATED_JSON="$(api_post "${MUNICLOUD_API_URL}/v1/deployments" "${DEPLOYMENT_JSON}")"
+          DEPLOYMENT_ID="$(printf '%s' "${CREATED_JSON}" | jq -r '.id')"
+          STATUS="$(printf '%s' "${CREATED_JSON}" | jq -r '.status')"
+          WEBSITE_URL="$(printf '%s' "${CREATED_JSON}" | jq -r '.websiteUrl // ""')"
+          echo "Municloud deployment: ${DEPLOYMENT_ID}"
+          echo "Status: ${STATUS}"
+
+          LAST_STATUS="${STATUS}"
           for attempt in $(seq 1 240); do
-            RUN_JSON="$(
-              gh run view "${RUN_ID}" \
-                --repo "${MUNICLOUD_REPO}" \
-                --json status,conclusion,url,jobs
-            )"
+            DEPLOYMENT_JSON="$(api_post "${MUNICLOUD_API_URL}/v1/deployments/${DEPLOYMENT_ID}/refresh" "{}")"
+            STATUS="$(printf '%s' "${DEPLOYMENT_JSON}" | jq -r '.status')"
+            WEBSITE_URL="$(printf '%s' "${DEPLOYMENT_JSON}" | jq -r '.websiteUrl // ""')"
+            CONSOLE_URL="$(printf '%s' "${DEPLOYMENT_JSON}" | jq -r '.consoleUrl // ""')"
 
-            STATUS="$(printf '%s' "${RUN_JSON}" | jq -r '.status')"
-            CONCLUSION="$(printf '%s' "${RUN_JSON}" | jq -r '.conclusion // ""')"
-            RUN_URL="$(printf '%s' "${RUN_JSON}" | jq -r '.url')"
-            PROGRESS="$(
-              printf '%s' "${RUN_JSON}" | jq -r '
-                [ .jobs[]? as $job
-                  | $job.steps[]?
-                  | select(.status != "completed")
-                  | "\($job.name) / \(.name): \(.status)"
-                ] | first // "queued"
-              '
-            )"
-
-            if [ "${PROGRESS}" != "${LAST_PROGRESS}" ]; then
-              echo "Municloud progress: ${PROGRESS}"
-              LAST_PROGRESS="${PROGRESS}"
+            if [ "${STATUS}" != "${LAST_STATUS}" ]; then
+              echo "Status: ${STATUS}"
+              LAST_STATUS="${STATUS}"
             fi
 
-            if [ "${STATUS}" = "completed" ]; then
-              echo "Municloud completed: ${CONCLUSION}"
-              echo "Municloud run: ${RUN_URL}"
-
-              if [ "${CONCLUSION}" != "success" ]; then
-                gh run view "${RUN_ID}" --repo "${MUNICLOUD_REPO}" --log-failed || true
+            case "${STATUS}" in
+              succeeded)
+                echo "Website URL: ${WEBSITE_URL}"
+                {
+                  echo "## Municloud deployment"
+                  echo ""
+                  echo "- Deployment: ${DEPLOYMENT_ID}"
+                  echo "- Website URL: ${WEBSITE_URL}"
+                  echo "- Console: ${CONSOLE_URL}"
+                } >> "${GITHUB_STEP_SUMMARY}"
+                exit 0
+                ;;
+              failed|canceled)
+                FAILURE_CODE="$(printf '%s' "${DEPLOYMENT_JSON}" | jq -r '.failureCode // .status')"
+                FAILURE_MESSAGE="$(printf '%s' "${DEPLOYMENT_JSON}" | jq -r '.failureMessage // ""')"
+                echo "Municloud deployment ${STATUS}: ${FAILURE_CODE}"
+                if [ -n "${FAILURE_MESSAGE}" ]; then
+                  echo "Message: ${FAILURE_MESSAGE}"
+                fi
                 exit 1
-              fi
+                ;;
+            esac
 
-              MUNICLOUD_LOG="$(gh run view "${RUN_ID}" --repo "${MUNICLOUD_REPO}" --log)"
-              WEBSITE_URL="$(printf '%s\n' "${MUNICLOUD_LOG}" | sed -n 's/.*Website URL: \(https:\/\/[^[:space:]]*\).*/\1/p' | tail -n 1)"
-
-              if [ -z "${WEBSITE_URL}" ]; then
-                echo "Municloud deploy succeeded, but the website URL was not found in the Municloud run log."
-                exit 1
-              fi
-
-              echo "Website URL: ${WEBSITE_URL}"
-              {
-                echo "## Municloud deployment"
-                echo ""
-                echo "- Website URL: ${WEBSITE_URL}"
-                echo "- Municloud run: ${RUN_URL}"
-              } >> "${GITHUB_STEP_SUMMARY}"
-
-              exit 0
-            fi
-
-            sleep 10
+            sleep 2
           done
 
           echo "Timed out waiting for Municloud deployment to complete."
-          echo "Municloud run: ${RUN_URL}"
+          echo "Deployment: ${DEPLOYMENT_ID}"
           exit 1
