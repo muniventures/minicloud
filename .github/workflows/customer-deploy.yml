@@ -3,7 +3,7 @@ name: Municloud Customer Deploy
 on:
   workflow_call:
     inputs:
-      app_name:
+      minicloud_app_id:
         required: true
         type: string
       plan:
@@ -329,8 +329,7 @@ jobs:
           POSTGRES_PASSWORD: ${{ secrets.postgres_password }}
           SERVICES_JSON: ${{ needs.publish.outputs.services_json }}
           MUNICLOUD_API_URL: ${{ inputs.municloud_api_url }}
-          APP_NAME: ${{ inputs.app_name }}
-          PLAN: ${{ inputs.plan }}
+          MUNICLOUD_APP_ID: ${{ inputs.minicloud_app_id }}
           ENVIRONMENT: ${{ inputs.environment }}
           DEPLOYMENT_TYPE: ${{ inputs.deployment_type }}
           DATABASE: ${{ inputs.database }}
@@ -344,19 +343,22 @@ jobs:
           fi
           echo "::add-mask::${MUNICLOUD_API_KEY}"
 
+          if [ -z "${MUNICLOUD_APP_ID}" ]; then
+            echo "minicloud_app_id is required. Use the app id from the Minicloud console URL, for example app_52kqllu8k1nq4kg352kqllu8."
+            exit 1
+          fi
+
+          if ! [[ "${MUNICLOUD_APP_ID}" =~ ^app_[A-Za-z0-9]+$ ]]; then
+            echo "minicloud_app_id must look like app_52kqllu8k1nq4kg352kqllu8."
+            exit 1
+          fi
+
           if [ "${DATABASE}" = "postgres" ] && [ -z "${POSTGRES_PASSWORD}" ]; then
             echo "postgres_password is required when database is postgres."
             exit 1
           fi
 
           MUNICLOUD_API_URL="${MUNICLOUD_API_URL%/}"
-
-          api_get() {
-            curl --fail-with-body -sS \
-              -H "Authorization: Bearer ${MUNICLOUD_API_KEY}" \
-              -H "Accept: application/json" \
-              "$1"
-          }
 
           api_post() {
             curl --fail-with-body -sS \
@@ -367,43 +369,6 @@ jobs:
               --data-binary "$2" \
               "$1"
           }
-
-          ME_JSON="$(api_get "${MUNICLOUD_API_URL}/v1/me")"
-          ORGANIZATION_ID="$(printf '%s' "${ME_JSON}" | jq -r '.organizations[0].id // ""')"
-          ORGANIZATION_SLUG="$(printf '%s' "${ME_JSON}" | jq -r '.organizations[0].slug // ""')"
-          if [ -z "${ORGANIZATION_ID}" ]; then
-            echo "Municloud API key is not associated with an organization."
-            exit 1
-          fi
-
-          APP_SLUG="$(printf '%s' "${APP_NAME}" | tr '[:upper:]' '[:lower:]')"
-          APPS_JSON="$(api_get "${MUNICLOUD_API_URL}/v1/apps?organizationId=${ORGANIZATION_ID}")"
-          APP_ID="$(printf '%s' "${APPS_JSON}" | jq -r --arg app "${APP_SLUG}" '.[] | select((.slug | ascii_downcase) == $app or (.id | ascii_downcase) == $app) | .id' | head -n 1)"
-
-          if [ -z "${APP_ID}" ]; then
-            CREATE_APP_JSON="$(
-              jq -cn \
-                --arg organization_id "${ORGANIZATION_ID}" \
-                --arg name "${APP_NAME}" \
-                --arg slug "${APP_SLUG}" \
-                --arg environment "${ENVIRONMENT}" \
-                --arg plan "${PLAN}" \
-                --arg deployment_type "${DEPLOYMENT_TYPE}" \
-                --arg database "${DATABASE}" \
-                '{
-                  organizationId: $organization_id,
-                  name: $name,
-                  slug: $slug,
-                  defaultEnvironment: $environment,
-                  plan: ($plan | ascii_downcase),
-                  deploymentType: $deployment_type,
-                  database: $database
-                }'
-            )"
-            APP_JSON="$(api_post "${MUNICLOUD_API_URL}/v1/apps" "${CREATE_APP_JSON}")"
-            APP_ID="$(printf '%s' "${APP_JSON}" | jq -r '.id')"
-            echo "Created Municloud app ${APP_ID} in ${ORGANIZATION_SLUG}."
-          fi
 
           SERVICES_FOR_API="$(
             printf '%s' "${SERVICES_JSON}" | jq -c '[.[] | {
@@ -419,7 +384,7 @@ jobs:
 
           DEPLOYMENT_JSON="$(
             jq -cn \
-              --arg app_id "${APP_ID}" \
+              --arg app_id "${MUNICLOUD_APP_ID}" \
               --arg environment "${ENVIRONMENT}" \
               --arg deployment_type "${DEPLOYMENT_TYPE}" \
               --arg database "${DATABASE}" \

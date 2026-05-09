@@ -6,19 +6,15 @@ Use the reusable Minicloud workflow when you want GitHub Actions to build images
 
 Create a Minicloud API key in the console with these scopes:
 
-- `apps:read`
-- `apps:write`
 - `deployments:create`
 - `deployments:read`
 
-Add these repository or organization secrets to your app repository:
+Add these secrets to your app repository. Repository or organization secrets work. Environment secrets also work when they are defined in the GitHub environment passed as the workflow `environment` input.
 
 | Secret | Required | Description |
 | --- | --- | --- |
 | `MUNICLOUD_API_KEY` | Yes | Minicloud API key from the console. |
 | `MUNICLOUD_POSTGRES_PASSWORD` | Only for `database: postgres` | Postgres password used by the deployment. |
-
-GitHub environment secrets are not passed to reusable workflow jobs. Use repository or organization secrets.
 
 Set workflow permissions:
 
@@ -49,7 +45,7 @@ jobs:
   minicloud:
     uses: muniventures/minicloud/.github/workflows/customer-deploy.yml@main
     with:
-      app_name: my-api
+      minicloud_app_id: app_52kqllu8k1nq4kg352kqllu8
       database: postgres
       backend_context: .
       backend_dockerfile: Dockerfile
@@ -80,7 +76,7 @@ jobs:
   minicloud:
     uses: muniventures/minicloud/.github/workflows/customer-deploy.yml@main
     with:
-      app_name: teamcore
+      minicloud_app_id: app_52kqllu8k1nq4kg352kqllu8
       database: postgres
       aspnetcore_environment: Staging
       frontend_context: ./modules/ui/dashboard
@@ -101,7 +97,7 @@ jobs:
 
 | Input | Required | Default | Description |
 | --- | --- | --- | --- |
-| `app_name` | Yes | | Stable app slug in Minicloud. |
+| `minicloud_app_id` | Yes | | App id from the Minicloud console URL, for example `app_52kqllu8k1nq4kg352kqllu8`. |
 | `plan` | No | `P0` | Minicloud plan. |
 | `aspnetcore_environment` | No | empty | Adds `ASPNETCORE_ENVIRONMENT` to backend service env when set. |
 | `database` | No | `sqlite` | `sqlite` or `postgres`. |
@@ -124,7 +120,7 @@ The workflow runs three jobs:
 
 - `minicloud - build`: builds Docker images for the configured services.
 - `minicloud - publish`: pushes images to GHCR and creates the service payload.
-- `minicloud - deploy`: calls the Minicloud API, creates the app if needed, starts a deployment, and waits for completion.
+- `minicloud - deploy`: calls the Minicloud API for the configured app id, starts a deployment, and waits for completion.
 
 ## Image Names
 
