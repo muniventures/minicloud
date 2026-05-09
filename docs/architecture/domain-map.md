@@ -86,7 +86,7 @@ Planned code:
 
 ## Secrets
 
-Owns GitHub Actions secret expectations and app runtime environment files.
+Owns GitHub Actions secret expectations and app runtime env-var files.
 
 Docs:
 

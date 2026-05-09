@@ -2,8 +2,6 @@ namespace Municloud.Cli.Config;
 
 public sealed record MunicloudConfig(
     string App,
-    string? Environment,
-    string? DeploymentType,
     string? Database,
     string? CommitSha,
     IReadOnlyDictionary<string, MunicloudServiceConfig> Services);

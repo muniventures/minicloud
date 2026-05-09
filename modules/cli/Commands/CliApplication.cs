@@ -166,18 +166,16 @@ public sealed partial class CliApplication
         _console.WriteLine("Municloud init");
         _console.WriteLine();
 
-        var app = PromptSlug("App slug", DefaultSlugFromDirectory());
-        var deploymentType = PromptDeploymentType();
-        var database = PromptChoice("Database", [("sqlite", "SQLite"), ("postgres", "Postgres")], "sqlite");
-        var environment = advanced ? PromptSlug("Environment", "staging") : "staging";
+        var app = PromptAppName();
+        var database = PromptSingleSelect("Database", [("postgres", "Postgres"), ("sqlite", "SQLite")], "postgres");
 
         var services = new Dictionary<string, MunicloudServiceConfig>(StringComparer.Ordinal);
-        foreach (var serviceName in PromptServiceNamesFor(deploymentType))
+        foreach (var serviceName in PromptServiceNames())
         {
             _console.WriteLine();
             _console.WriteLine($"{ToTitle(serviceName)} service");
-            var sourcePath = PromptDirectory($"{ToTitle(serviceName)} source folder", DefaultSourcePath(serviceName));
-            var defaults = DefaultServiceOptions(app, serviceName, deploymentType);
+            var sourcePath = PromptDirectory($"{ToTitle(serviceName)} source folder");
+            var defaults = DefaultServiceOptions(app, serviceName);
             var image = advanced ? PromptOptional($"{ToTitle(serviceName)} push image", defaults.Image) : null;
             var port = advanced ? PromptPort($"{ToTitle(serviceName)} port", defaults.Port) : defaults.Port;
             var routePath = advanced ? PromptPath($"{ToTitle(serviceName)} public path", defaults.Path) : defaults.Path;
@@ -186,7 +184,7 @@ public sealed partial class CliApplication
             services[serviceName] = new MunicloudServiceConfig(sourcePath, null, image, port, true, routePath, healthPath);
         }
 
-        var config = new MunicloudConfig(app, environment, deploymentType, database, null, services);
+        var config = new MunicloudConfig(app, database, null, services);
         var diagnostics = MunicloudConfigValidator.Validate(config);
         if (diagnostics.Count > 0)
         {
@@ -199,7 +197,7 @@ public sealed partial class CliApplication
         _console.WriteLine($"Created {outputPath}");
         if (!advanced)
         {
-            _console.WriteLine("Used defaults for environment, registry image refs, ports, routes, and health checks.");
+            _console.WriteLine("Used defaults for registry image refs, ports, routes, and health checks.");
             _console.WriteLine("Run 'municloud init --advanced' to customize every option.");
         }
         _console.WriteLine($"Next: municloud deploy --config {outputPath}");
@@ -210,8 +208,6 @@ public sealed partial class CliApplication
     {
         var configPath = GetOption(args, "--config") ?? MunicloudConfigLoader.ResolveDefaultPath();
         var appOverride = GetOption(args, "--app");
-        var environmentOverride = GetOption(args, "--environment");
-        var deploymentTypeOverride = GetOption(args, "--deployment-type");
         var databaseOverride = GetOption(args, "--database");
         var postgresPassword = GetOption(args, "--pgpassword");
         var imageTag = GetOption(args, "--tag") ?? "latest";
@@ -258,7 +254,7 @@ public sealed partial class CliApplication
         var app = FindApp(apps, appSlug);
         if (app is null)
         {
-            app = await CreateAppFromConfigAsync(config, organization, appSlug, environmentOverride, deploymentTypeOverride, databaseOverride, cancellationToken);
+            app = await CreateAppFromConfigAsync(config, organization, appSlug, databaseOverride, cancellationToken);
         }
 
         if (!noPublish)
@@ -277,8 +273,6 @@ public sealed partial class CliApplication
 
         var request = new CreateDeploymentRequest(
             app.Id,
-            environmentOverride ?? config.Environment ?? app.DefaultEnvironment,
-            deploymentTypeOverride ?? config.DeploymentType ?? app.DeploymentType,
             databaseOverride ?? config.Database ?? app.Database,
             config.CommitSha,
             config.Services.Select(x => new DeploymentServiceRequest(
@@ -359,7 +353,6 @@ public sealed partial class CliApplication
         var appOrDeployment = args.FirstOrDefault(x => !x.StartsWith("-", StringComparison.Ordinal));
         var source = GetOption(args, "--source");
         var service = GetOption(args, "--service");
-        var environment = GetOption(args, "--environment");
         var since = GetOption(args, "--since");
         var tailValue = GetOption(args, "--tail");
         var tail = int.TryParse(tailValue, out var parsedTail) ? parsedTail : 100;
@@ -411,7 +404,7 @@ public sealed partial class CliApplication
             return CliExitCodes.ValidationError;
         }
 
-        var runtimeLogs = await _apiClient.GetRuntimeLogsAsync(app.Id, environment, source, service, tail, since, cancellationToken);
+        var runtimeLogs = await _apiClient.GetRuntimeLogsAsync(app.Id, source, service, tail, since, cancellationToken);
         foreach (var log in runtimeLogs)
         {
             _console.WriteLine($"{log.ObservedAt:O} [{log.Source}/{log.Stream}] {log.Content}");
@@ -449,7 +442,7 @@ public sealed partial class CliApplication
         var apps = await _apiClient.GetAppsAsync(organization.Id, cancellationToken);
         foreach (var app in apps)
         {
-            _console.WriteLine($"{app.Slug}\t{app.DefaultEnvironment}\t{app.DeploymentType}\t{app.Database}");
+            _console.WriteLine($"{app.Slug}\t{app.Database}");
         }
 
         return CliExitCodes.Success;
@@ -482,8 +475,6 @@ public sealed partial class CliApplication
 
         _console.WriteLine($"App: {app.Name}");
         _console.WriteLine($"Slug: {app.Slug}");
-        _console.WriteLine($"Environment: {app.DefaultEnvironment}");
-        _console.WriteLine($"Deployment type: {app.DeploymentType}");
         _console.WriteLine($"Database: {app.Database}");
         if (app.LatestDeployment is not null)
         {
@@ -501,8 +492,6 @@ public sealed partial class CliApplication
         MunicloudConfig config,
         OrganizationSummary organization,
         string appSlug,
-        string? environmentOverride,
-        string? deploymentTypeOverride,
         string? databaseOverride,
         CancellationToken cancellationToken)
     {
@@ -511,9 +500,7 @@ public sealed partial class CliApplication
             organization.Id,
             DisplayNameFromSlug(createSlug),
             createSlug,
-            environmentOverride ?? config.Environment ?? "staging",
             "p0",
-            deploymentTypeOverride ?? config.DeploymentType ?? "custom",
             databaseOverride ?? config.Database ?? "sqlite");
 
         _console.WriteLine($"App '{createSlug}' was not found in organization '{organization.Name}'. Creating it from municloud.yml...");
@@ -583,7 +570,6 @@ public sealed partial class CliApplication
     {
         _console.WriteLine($"Deployment: {deployment.Id}");
         _console.WriteLine($"App: {deployment.AppId}");
-        _console.WriteLine($"Environment: {deployment.Environment}");
         _console.WriteLine($"Status: {deployment.Status}");
         if (!string.IsNullOrWhiteSpace(deployment.WebsiteUrl))
         {
@@ -642,9 +628,9 @@ public sealed partial class CliApplication
         _console.WriteLine("  municloud login --token <token>");
         _console.WriteLine("  municloud init [--advanced] [--config municloud.yml] [--force]");
         _console.WriteLine("  municloud token set <token>");
-        _console.WriteLine("  municloud deploy [--config municloud.yml] [--app app] [--environment env] [--deployment-type type] [--database db] [--pgpassword password] [--tag tag] [--no-publish] [--publish-only] [--verbose]");
+        _console.WriteLine("  municloud deploy [--config municloud.yml] [--app app] [--database db] [--pgpassword password] [--tag tag] [--no-publish] [--publish-only] [--verbose]");
         _console.WriteLine("  municloud status [deployment-id]");
-        _console.WriteLine("  municloud logs [app|deployment-id] [--environment env] [--service service] [--source source] [--tail count] [--since 30m]");
+        _console.WriteLine("  municloud logs [app|deployment-id] [--service service] [--source source] [--tail count] [--since 30m]");
         _console.WriteLine("  municloud apps list");
         _console.WriteLine("  municloud apps inspect <app>");
         _console.WriteLine("  municloud --env");
@@ -677,52 +663,50 @@ public sealed partial class CliApplication
         return null;
     }
 
-    private string PromptDeploymentType()
+    private string PromptSingleSelect(string label, IReadOnlyList<(string Value, string Label)> choices, string defaultValue)
     {
-        _console.WriteLine("Deployment type:");
-        _console.WriteLine("  1. backend");
-        _console.WriteLine("  2. frontend");
-        _console.WriteLine("  3. both");
-        _console.WriteLine("  4. custom");
+        var selectedIndex = Math.Max(0, choices.ToList().FindIndex(x => x.Value == defaultValue));
+        const int StaticLineCount = 2;
+        var rendered = false;
 
         while (true)
         {
-            var value = PromptRequired("Choose deployment type", "both").Trim().ToLowerInvariant();
-            switch (value)
-            {
-                case "1":
-                case "backend":
-                case "backend_only":
-                    return "backend_only";
-                case "2":
-                case "frontend":
-                case "frontend_only":
-                    return "frontend_only";
-                case "3":
-                case "both":
-                case "backend_frontend":
-                    return "backend_frontend";
-                case "4":
-                case "custom":
-                    return "custom";
-            }
+            RenderSingleSelect(label, choices, selectedIndex, rendered ? StaticLineCount + choices.Count : 0);
+            rendered = true;
 
-            _console.WriteError("Choose backend, frontend, both, or custom.");
+            var key = _console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = selectedIndex == 0 ? choices.Count - 1 : selectedIndex - 1;
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = selectedIndex == choices.Count - 1 ? 0 : selectedIndex + 1;
+                    break;
+                case ConsoleKey.Enter:
+                    _console.WriteLine();
+                    return choices[selectedIndex].Value;
+            }
         }
     }
 
-    private string PromptChoice(string label, IReadOnlyList<(string Value, string Label)> choices, string defaultValue)
+    private void RenderSingleSelect(string label, IReadOnlyList<(string Value, string Label)> choices, int selectedIndex, int previousLineCount)
     {
-        _console.WriteLine($"{label}: {string.Join(", ", choices.Select(x => x.Value))}");
-        while (true)
+        if (_console.SupportsAnsi && previousLineCount > 0)
         {
-            var value = PromptRequired(label, defaultValue).Trim().ToLowerInvariant();
-            if (choices.Any(x => x.Value == value))
-            {
-                return value;
-            }
+            _console.Write($"\u001b[{previousLineCount}F\u001b[J");
+        }
+        else if (previousLineCount > 0)
+        {
+            _console.WriteLine();
+        }
 
-            _console.WriteError($"{label} must be one of: {string.Join(", ", choices.Select(x => x.Value))}.");
+        _console.WriteLine($"{label}:");
+        _console.WriteLine("Use Up/Down arrows and Enter to select.");
+        for (var i = 0; i < choices.Count; i++)
+        {
+            var marker = i == selectedIndex ? ">" : " ";
+            _console.WriteLine($"{marker} {choices[i].Label}");
         }
     }
 
@@ -736,15 +720,29 @@ public sealed partial class CliApplication
                 return value;
             }
 
-            _console.WriteError($"{label} must use lowercase letters, numbers, and dashes.");
+            _console.WriteError($"{label} must use lowercase letters, numbers, dashes, and underscores.");
         }
     }
 
-    private string PromptDirectory(string label, string defaultValue)
+    private string PromptAppName()
     {
         while (true)
         {
-            var value = PromptRequired(label, defaultValue).Trim();
+            var value = PromptRequired("App name").Trim();
+            if (MunicloudConfigLoader.AppNameRegex().IsMatch(value))
+            {
+                return value.ToLowerInvariant();
+            }
+
+            _console.WriteError("App name must use letters, numbers, dashes, and underscores.");
+        }
+    }
+
+    private string PromptDirectory(string label)
+    {
+        while (true)
+        {
+            var value = PromptRequired(label).Trim();
             if (Directory.Exists(value))
             {
                 return value;
@@ -797,6 +795,21 @@ public sealed partial class CliApplication
         }
     }
 
+    private string PromptRequired(string label)
+    {
+        while (true)
+        {
+            _console.WriteLine($"{label}:");
+            var value = _console.ReadLine();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+
+            _console.WriteError($"{label} is required.");
+        }
+    }
+
     private string? PromptOptional(string label, string defaultValue)
     {
         _console.WriteLine($"{label} [{defaultValue}]:");
@@ -818,27 +831,19 @@ public sealed partial class CliApplication
             value.Trim().Equals("yes", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static IReadOnlyList<string> ServiceNamesFor(string deploymentType) =>
-        deploymentType switch
-        {
-            "backend_only" => ["backend"],
-            "frontend_only" => ["frontend"],
-            "custom" => [],
-            _ => ["frontend", "backend"]
-        };
-
-    private IReadOnlyList<string> PromptServiceNamesFor(string deploymentType)
+    private IReadOnlyList<string> PromptServiceNames()
     {
-        if (deploymentType != "custom")
-        {
-            return ServiceNamesFor(deploymentType);
-        }
-
         var count = PromptServiceCount();
         var names = new List<string>();
         while (names.Count < count)
         {
-            var serviceName = PromptSlug($"Service {names.Count + 1} name", names.Count == 0 ? "web" : $"service-{names.Count + 1}");
+            var defaultName = names.Count switch
+            {
+                0 => "frontend",
+                1 => "backend",
+                _ => $"service-{names.Count + 1}"
+            };
+            var serviceName = PromptSlug($"Service {names.Count + 1} name", defaultName);
             if (names.Contains(serviceName, StringComparer.Ordinal))
             {
                 _console.WriteError("Service names must be unique.");
@@ -865,31 +870,11 @@ public sealed partial class CliApplication
         }
     }
 
-    private static string DefaultSlugFromDirectory()
-    {
-        var name = new DirectoryInfo(Environment.CurrentDirectory).Name.ToLowerInvariant();
-        var slug = string.Concat(name.Select(character => char.IsLetterOrDigit(character) ? character : '-')).Trim('-');
-        return string.IsNullOrWhiteSpace(slug) ? "my-app" : slug;
-    }
-
-    private static string DefaultSourcePath(string serviceName)
-    {
-        var candidates = serviceName switch
-        {
-            "frontend" or "dashboard" => new[] { "frontend", "dashboard", "web", "client", "modules/frontend", "modules/dashboard", "modules/web", "modules/ui" },
-            "backend" or "api" => new[] { "backend", "api", "server", "modules/backend", "modules/api", "modules/server" },
-            "registry" => new[] { "registry", "modules/registry" },
-            _ => [serviceName, $"modules/{serviceName}", "."]
-        };
-
-        return candidates.FirstOrDefault(Directory.Exists) ?? ".";
-    }
-
-    private (string Image, int Port, string Path, string HealthPath) DefaultServiceOptions(string app, string serviceName, string deploymentType) =>
+    private (string Image, int Port, string Path, string HealthPath) DefaultServiceOptions(string app, string serviceName) =>
         serviceName switch
         {
             "frontend" or "dashboard" => ($"{_environment.RegistryHost}/{app}/{serviceName}:latest", 3000, "/", "/"),
-            "backend" or "api" => ($"{_environment.RegistryHost}/{app}/{serviceName}:latest", 8080, deploymentType == "backend_frontend" || serviceName == "api" ? "/api" : "/", "/health"),
+            "backend" or "api" => ($"{_environment.RegistryHost}/{app}/{serviceName}:latest", 8080, "/api", "/health"),
             "registry" => ($"{_environment.RegistryHost}/{app}/registry:latest", 8080, "/", "/health"),
             _ => ($"{_environment.RegistryHost}/{app}/{serviceName}:latest", 8080, "/", "/")
         };

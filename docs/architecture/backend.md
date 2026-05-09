@@ -63,14 +63,12 @@ An app is the customer-facing deployable unit. App records own:
 
 - app name and slug
 - organization/customer ownership
-- environment names
-- deployment type (`backend_only`, `frontend_only`, `backend_frontend`, `custom`)
-- service definitions
+- - service definitions
 - default domain and custom domain metadata
 - selected plan
 - current deployment pointer
 
-Service definitions are control-plane records that describe image name, port, path, public exposure, and health path. They are not Docker Compose files; Compose is generated at deploy time by the deployment/runtime layer. Apps can define one to five services. The built-in deployment types keep opinionated service shapes for common apps, while `custom` allows arbitrary service names.
+Service definitions are control-plane records that describe image name, port, path, public exposure, and health path. They are not Docker Compose files; Compose is generated at deploy time by the deployment/runtime layer. Apps can define one to five services. 
 
 ### Deployments
 
@@ -106,7 +104,7 @@ Servers are Municloud-owned VPS instances. The control plane owns the server reg
 - bootstrap status
 - runtime version
 - registration token status
-- assigned app/environment ownership
+- assigned app ownership
 
 Avoid storing long-lived per-server SSH private keys in the control plane. V1 should prefer one-time bootstrap registration tokens and an outbound runtime token/agent model. SSH may remain a V0 implementation detail behind service interfaces.
 

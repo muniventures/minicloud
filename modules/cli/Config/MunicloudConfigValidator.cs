@@ -4,14 +4,6 @@ public static class MunicloudConfigValidator
 {
     public const int MaxDeploymentServices = 5;
 
-    private static readonly ISet<string> DeploymentTypes = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "backend_only",
-        "frontend_only",
-        "backend_frontend",
-        "custom"
-    };
-
     private static readonly ISet<string> Databases = new HashSet<string>(StringComparer.Ordinal)
     {
         "sqlite",
@@ -21,17 +13,7 @@ public static class MunicloudConfigValidator
     public static IReadOnlyList<ConfigDiagnostic> Validate(MunicloudConfig config)
     {
         var diagnostics = new List<ConfigDiagnostic>();
-        ValidateSlug(diagnostics, config.App, "app", "App is required and must be a slug.");
-
-        if (!string.IsNullOrWhiteSpace(config.Environment))
-        {
-            ValidateSlug(diagnostics, config.Environment, "environment", "Environment must be a slug.");
-        }
-
-        if (!string.IsNullOrWhiteSpace(config.DeploymentType) && !DeploymentTypes.Contains(config.DeploymentType))
-        {
-            diagnostics.Add(new ConfigDiagnostic("deploymentType", "Deployment type must be backend_only, frontend_only, backend_frontend, or custom."));
-        }
+        ValidateSlug(diagnostics, config.App, "app", "App is required and must use lowercase letters, numbers, dashes, and underscores.");
 
         if (!string.IsNullOrWhiteSpace(config.Database) && !Databases.Contains(config.Database))
         {
@@ -52,7 +34,7 @@ public static class MunicloudConfigValidator
         var publicServices = 0;
         foreach (var (name, service) in config.Services)
         {
-            ValidateSlug(diagnostics, name, $"services.{name}", "Service name must be a slug.");
+            ValidateSlug(diagnostics, name, $"services.{name}", "Service name must use lowercase letters, numbers, dashes, and underscores.");
 
             if (service.Port is null)
             {
@@ -104,32 +86,7 @@ public static class MunicloudConfigValidator
             diagnostics.Add(new ConfigDiagnostic("services", "At least one public service is required."));
         }
 
-        ValidateServiceShape(config, diagnostics);
         return diagnostics;
-    }
-
-    private static void ValidateServiceShape(MunicloudConfig config, List<ConfigDiagnostic> diagnostics)
-    {
-        if (string.IsNullOrWhiteSpace(config.DeploymentType))
-        {
-            return;
-        }
-
-        var names = config.Services.Keys.ToHashSet(StringComparer.Ordinal);
-        switch (config.DeploymentType)
-        {
-            case "backend_only" when names.Count != 1 || !names.Contains("backend"):
-                diagnostics.Add(new ConfigDiagnostic("services", "backend_only requires one service named 'backend'."));
-                break;
-            case "frontend_only" when names.Count != 1 || !names.Contains("frontend"):
-                diagnostics.Add(new ConfigDiagnostic("services", "frontend_only requires one service named 'frontend'."));
-                break;
-            case "backend_frontend" when names.Count != 2 || !names.SetEquals(["frontend", "backend"]):
-                diagnostics.Add(new ConfigDiagnostic("services", "backend_frontend requires exactly 'frontend' and 'backend' services."));
-                break;
-            case "custom":
-                break;
-        }
     }
 
     private static void ValidateSlug(List<ConfigDiagnostic> diagnostics, string? value, string field, string message)

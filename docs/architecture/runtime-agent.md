@@ -26,7 +26,7 @@ The deploy workflow should:
 
 1. Create or refresh the runtime server registration with `POST /v1/apps/{appId}/runtime-servers`.
 2. Write the returned token to `/opt/municloud/agent/runtime-token` with mode `0600`.
-3. Write `config.json` with server/app/environment identity and API base URL.
+3. Write `config.json` with server/app identity and API base URL.
 4. Install the binary and `municloud-agent.service`.
 5. Run `templates/runtime/install-municloud-agent.sh`.
 6. Confirm `lastSeenAt` updates through `GET /v1/apps/{appId}/runtime-status`.

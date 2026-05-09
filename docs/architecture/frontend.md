@@ -109,7 +109,7 @@ Shows current apps, latest deployments, failed deployments, active servers, and 
 
 ### Apps
 
-Owns app list, app creation, app settings, service definitions, deployment type, default domain, custom domain metadata, and current deployment state.
+Owns app list, app creation, app settings, service definitions, default domain, custom domain metadata, and current deployment state.
 
 ### Deployments
 
@@ -121,7 +121,7 @@ Owns API key creation, one-time secret reveal, scope selection, key list, last-u
 
 ### Servers
 
-Owns server plan, provider, location, runtime version, bootstrap status, assigned app/environment, and diagnostic visibility. Server management should stay intentionally minimal for V1.
+Owns server plan, provider, location, runtime version, bootstrap status, assigned app, and diagnostic visibility. Server management should stay intentionally minimal for V1.
 
 ### Domains
 

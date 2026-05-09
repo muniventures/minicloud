@@ -44,8 +44,6 @@ public static partial class MunicloudConfigLoader
         var services = ParseServices(root, diagnostics);
         var config = new MunicloudConfig(
             GetScalar(root, "app", "app", diagnostics) ?? "",
-            GetScalar(root, "environment", "environment", diagnostics),
-            GetScalar(root, "deploymentType", "deploymentType", diagnostics),
             GetScalar(root, "database", "database", diagnostics),
             GetScalar(root, "commitSha", "commitSha", diagnostics),
             services);
@@ -258,6 +256,9 @@ public static partial class MunicloudConfigLoader
         return null;
     }
 
-    [GeneratedRegex("^[a-z0-9][a-z0-9-]*$")]
+    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9_-]*$")]
+    internal static partial Regex AppNameRegex();
+
+    [GeneratedRegex("^[a-z0-9][a-z0-9_-]*$")]
     internal static partial Regex SlugRegex();
 }

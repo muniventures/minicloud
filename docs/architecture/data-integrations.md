@@ -11,7 +11,7 @@ V0 should avoid a database. State lives in:
 - provider API token in GitHub Actions secrets
 - provider server ID/IP/SKU metadata
 - GHCR images and tags
-- server-side app environment files
+- server-side app env-var files
 - `/opt/municloud/apps/<app>/deploys.json`
 - Docker Compose project state
 - Caddy config fragments
@@ -63,7 +63,7 @@ GitHub Container Registry is the default image registry.
 
 For CLI-first V1 deployments, Municloud should expose `registry-dev.muni.dev`
 for dev/staging and `registry.muni.dev` for production as GHCR-backed
-Docker/OCI upload proxies. Docker clients push through the environment registry
+Docker/OCI upload proxies. Docker clients push through the registry
 host; Municloud validates tenant-scoped registry tokens and
 forwards upload-related registry protocol calls to a Municloud-owned GHCR
 namespace with server-side credentials. The runtime pulls the resulting
@@ -77,7 +77,7 @@ Image tags:
 
 - commit SHA tag for every deployable build
 - optional `latest` tag for convenience
-- optional environment tag later
+- optional app tag later
 
 The runtime should deploy immutable SHA tags by default.
 

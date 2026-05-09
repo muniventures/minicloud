@@ -66,10 +66,7 @@ services:
 
 Config validation should fail with actionable messages. Avoid silently guessing dangerous values such as domains, exposed ports, secret names, or privileged commands.
 
-Config supports one to five services. `backend_only`, `frontend_only`, and
-`backend_frontend` remain shortcuts for common service shapes. Use `custom` for
-arbitrary multi-service apps such as the Municloud control plane itself
-(`api`, `dashboard`, and `registry`).
+Config supports one to five services. Service names and routes define the deployment shape.
 
 ## Commands
 
@@ -155,7 +152,7 @@ discovers `municloudconfig.yml` when present for local convenience, but new
 projects should use `municloud.yml`.
 
 By default, `municloud deploy` should build each service image from the
-configured `sourcePath`, push it through the environment registry host
+configured `sourcePath`, push it through the registry host
 (`registry-dev.muni.dev` for dev/staging, `registry.muni.dev` for production),
 resolve the resulting Municloud-owned GHCR refs, and create the deployment with
 those runtime-pullable refs. Use `--no-publish` only when the configured image

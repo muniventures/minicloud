@@ -19,9 +19,7 @@ public sealed record AppResponse(
     string OrganizationId,
     string Name,
     string Slug,
-    string DefaultEnvironment,
     string Plan,
-    string DeploymentType,
     string Database,
     LatestDeploymentResponse? LatestDeployment);
 
@@ -29,9 +27,7 @@ public sealed record CreateAppRequest(
     string OrganizationId,
     string Name,
     string Slug,
-    string DefaultEnvironment,
     string Plan,
-    string DeploymentType,
     string Database);
 
 public sealed record LatestDeploymentResponse(
@@ -42,8 +38,6 @@ public sealed record LatestDeploymentResponse(
 
 public sealed record CreateDeploymentRequest(
     string AppId,
-    string Environment,
-    string DeploymentType,
     string Database,
     string? CommitSha,
     IReadOnlyList<DeploymentServiceRequest> Services,
@@ -71,8 +65,6 @@ public sealed record DeploymentResponse(
     string Id,
     string AppId,
     string OrganizationId,
-    string Environment,
-    string DeploymentType,
     string Database,
     string Status,
     string? WebsiteUrl,
@@ -108,7 +100,6 @@ public sealed record DeploymentLogResponse(
 public sealed record RuntimeLogResponse(
     string Id,
     string ServerId,
-    string Environment,
     string Source,
     string? Service,
     string Stream,

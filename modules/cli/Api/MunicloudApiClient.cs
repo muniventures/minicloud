@@ -68,7 +68,6 @@ public sealed class MunicloudApiClient
 
     public Task<IReadOnlyList<RuntimeLogResponse>> GetRuntimeLogsAsync(
         string appId,
-        string? environment,
         string? source,
         string? service,
         int tail,
@@ -79,10 +78,6 @@ public sealed class MunicloudApiClient
         {
             $"tail={tail}"
         };
-        if (!string.IsNullOrWhiteSpace(environment))
-        {
-            query.Add($"environment={Uri.EscapeDataString(environment)}");
-        }
         if (!string.IsNullOrWhiteSpace(source))
         {
             query.Add($"source={Uri.EscapeDataString(source)}");

@@ -6,13 +6,11 @@ namespace Municloud.Tests;
 public sealed class CliConfigTests
 {
     [Fact]
-    public void Parse_accepts_backend_frontend_config()
+    public void Parse_accepts_multi_service_config()
     {
         var result = MunicloudConfigLoader.Parse(
         [
             "app: teamcore",
-            "environment: staging",
-            "deploymentType: backend_frontend",
             "database: sqlite",
             "services:",
             "  frontend:",
@@ -43,7 +41,6 @@ public sealed class CliConfigTests
         var result = MunicloudConfigLoader.Parse(
         [
             "app: teamcore",
-            "deploymentType: backend_only",
             "services:",
             "  backend:",
             "    image: ghcr.io/customer/teamcore/backend:abc123",
@@ -62,12 +59,51 @@ public sealed class CliConfigTests
     }
 
     [Fact]
+    public void Parse_accepts_underscores_in_slugs()
+    {
+        var result = MunicloudConfigLoader.Parse(
+        [
+            "app: vet_core",
+            "services:",
+            "  web_api:",
+            "    port: 8080",
+            "    public: true",
+            "    path: /",
+            "    healthPath: /health"
+        ]);
+
+        Assert.True(result.IsValid);
+        Assert.Equal("vet_core", result.Config?.App);
+        Assert.Contains("web_api", result.Config?.Services.Keys ?? []);
+    }
+
+    [Theory]
+    [InlineData("VetCore")]
+    [InlineData("vet core")]
+    [InlineData("vet.core")]
+    public void Parse_rejects_invalid_app_slugs(string app)
+    {
+        var result = MunicloudConfigLoader.Parse(
+        [
+            $"app: {app}",
+            "services:",
+            "  backend:",
+            "    port: 8080",
+            "    public: true",
+            "    path: /",
+            "    healthPath: /health"
+        ]);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Diagnostics, x => x.Field == "app");
+    }
+
+    [Fact]
     public void Parse_preserves_quoted_yaml_scalars()
     {
         var result = MunicloudConfigLoader.Parse(
         [
             "app: teamcore",
-            "deploymentType: backend_only",
             "services:",
             "  backend:",
             "    image: \"ghcr.io/customer/teamcore/backend:abc123\"",
@@ -106,7 +142,6 @@ public sealed class CliConfigTests
         var result = MunicloudConfigLoader.Parse(
         [
             "app: teamcore",
-            "deploymentType: backend_only",
             "services:",
             "  backend:",
             "    image: ghcr.io/customer/teamcore/backend:abc123",
@@ -129,7 +164,6 @@ public sealed class CliConfigTests
         var result = MunicloudConfigLoader.Parse(
         [
             "app: teamcore",
-            "deploymentType: backend_only",
             "services:",
             "  backend:",
             "    image: ghcr.io/customer/teamcore/backend:abc123",
@@ -151,7 +185,6 @@ public sealed class CliConfigTests
         var result = MunicloudConfigLoader.Parse(
         [
             "app: teamcore",
-            "deploymentType: frontend_only",
             "services:",
             "  frontend:",
             "    port: 70000",
@@ -172,7 +205,6 @@ public sealed class CliConfigTests
         var result = MunicloudConfigLoader.Parse(
         [
             "app: teamcore",
-            "deploymentType: backend_frontend",
             "database: postgres",
             "services:",
             "  frontend:",
@@ -195,32 +227,10 @@ public sealed class CliConfigTests
     }
 
     [Fact]
-    public void Parse_rejects_deployment_type_service_shape_mismatch()
-    {
-        var result = MunicloudConfigLoader.Parse(
-        [
-            "app: teamcore",
-            "deploymentType: backend_only",
-            "services:",
-            "  frontend:",
-            "    image: ghcr.io/customer/teamcore/frontend:abc123",
-            "    port: 3000",
-            "    public: true",
-            "    path: /",
-            "    healthPath: /"
-        ]);
-
-        Assert.False(result.IsValid);
-        Assert.Contains(result.Diagnostics, x => x.Field == "services" && x.Message.Contains("backend_only", StringComparison.Ordinal));
-    }
-
-    [Fact]
     public void Write_round_trips_init_style_config()
     {
         var config = new MunicloudConfig(
             "teamcore",
-            "staging",
-            "backend_only",
             "sqlite",
             null,
             new Dictionary<string, MunicloudServiceConfig>
@@ -243,7 +253,6 @@ public sealed class CliConfigTests
         var result = MunicloudConfigLoader.Parse(
         [
             "app: municloud",
-            "deploymentType: custom",
             "database: postgres",
             "services:",
             "  api:",
@@ -369,7 +378,6 @@ public sealed class CliConfigTests
         var lines = new List<string>
         {
             "app: teamcore",
-            "deploymentType: custom",
             "services:"
         };
         for (var index = 1; index <= 6; index++)

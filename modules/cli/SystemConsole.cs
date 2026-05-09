@@ -7,6 +7,7 @@ public interface IConsole
     void WriteLine(string message = "");
     void WriteError(string message);
     string? ReadLine();
+    ConsoleKeyInfo ReadKey(bool intercept);
 }
 
 public sealed class SystemConsole : IConsole
@@ -34,4 +35,5 @@ public sealed class SystemConsole : IConsole
     public void WriteLine(string message = "") => Console.WriteLine(message);
     public void WriteError(string message) => Console.Error.WriteLine(message);
     public string? ReadLine() => Console.ReadLine();
+    public ConsoleKeyInfo ReadKey(bool intercept) => Console.ReadKey(intercept);
 }
