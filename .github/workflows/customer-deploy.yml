@@ -89,6 +89,7 @@ env:
 
 jobs:
   build:
+    name: minicloud - build
     runs-on: ubuntu-latest
     outputs:
       frontend_image_ref: ${{ steps.images.outputs.frontend_image_ref }}
@@ -191,6 +192,7 @@ jobs:
           retention-days: 1
 
   publish:
+    name: minicloud - publish
     needs: build
     runs-on: ubuntu-latest
     outputs:
@@ -315,6 +317,7 @@ jobs:
           echo "services_json=${SERVICES_JSON}" >> "${GITHUB_OUTPUT}"
 
   deploy:
+    name: minicloud - deploy
     needs: publish
     runs-on: ubuntu-latest
     steps:
