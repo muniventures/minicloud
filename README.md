@@ -52,16 +52,11 @@ Verify:
 municloud --help
 ```
 
-## CLI Release
-
-Create a GitHub release by pushing a version tag:
+Show configured CLI environment defaults:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+municloud --env
 ```
-
-The `CLI Release` workflow builds self-contained binaries for Linux, macOS, and Windows, then uploads archives, installers, and `checksums.txt` to the GitHub release.
 
 ## Customer Deploy Workflow
 
@@ -69,7 +64,7 @@ Customer repositories can call the reusable workflow instead of copying the depl
 
 ```yaml
 jobs:
-  deploy:
+  minicloud:
     uses: muniventures/minicloud/.github/workflows/customer-deploy.yml@main
     with:
       app_name: teamcore

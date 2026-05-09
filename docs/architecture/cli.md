@@ -145,6 +145,7 @@ The initial `modules/cli` implementation targets the V1 hosted-control-plane con
 - exposes `municloud status <deployment-id>`
 - exposes `municloud logs <deployment-id> [--source source] [--tail count]`
 - exposes `municloud apps list` and `municloud apps inspect <app>`
+- exposes `municloud --env` for API and registry environment defaults
 
 `MUNICLOUD_API_URL` overrides the API base URL and defaults to
 `https://cloud.muni.dev/api`.

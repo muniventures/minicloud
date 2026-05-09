@@ -45,6 +45,12 @@ public sealed partial class CliApplication
             return CliExitCodes.Success;
         }
 
+        if (args[0] == "--env")
+        {
+            PrintEnvironment();
+            return CliExitCodes.Success;
+        }
+
         try
         {
             return args[0] switch
@@ -641,7 +647,12 @@ public sealed partial class CliApplication
         _console.WriteLine("  municloud logs [app|deployment-id] [--environment env] [--service service] [--source source] [--tail count] [--since 30m]");
         _console.WriteLine("  municloud apps list");
         _console.WriteLine("  municloud apps inspect <app>");
-        _console.WriteLine();
+        _console.WriteLine("  municloud --env");
+    }
+
+    private void PrintEnvironment()
+    {
+        _console.WriteLine("Municloud CLI environment");
         _console.WriteLine($"Environment: {CliEnvironment.ApiUrlEnvironmentVariable} defaults to {_environment.ApiBaseUrl}");
         _console.WriteLine($"Registry: {CliEnvironment.RegistryHostEnvironmentVariable} defaults to {_environment.RegistryHost}");
         _console.WriteLine($"Runtime registry owner: {CliEnvironment.RegistryGhcrOwnerEnvironmentVariable} defaults to {_environment.RegistryGhcrOwner}");
