@@ -135,6 +135,7 @@ The initial `modules/cli` implementation targets the V1 hosted-control-plane con
 - supports `municloud init` as a short interactive wizard that writes `municloud.yml`
 - supports `municloud init --advanced` for full config customization
 - validates `municloud.yml` before API calls
+- requires `appId` in `municloud.yml`; `municloud init` selects an existing app or creates one before writing config
 - publishes service images with Docker during `municloud deploy`
 - creates deployments with `municloud deploy`
 - forwards per-service `env` mappings from `municloud.yml` into deployment workflow `services_json`

@@ -37,6 +37,8 @@ From your app repository:
 municloud init
 ```
 
+The wizard lists existing apps in your organization and includes `Create new app`. The generated `municloud.yml` always includes the selected or newly created `appId`.
+
 For more prompts:
 
 ```bash
@@ -56,6 +58,7 @@ Minimal backend app:
 
 ```yaml
 app: my-api
+appId: app_123
 database: postgres
 services:
   backend:
@@ -142,6 +145,7 @@ municloud deploy --no-publish
 | Field | Required | Description |
 | --- | --- | --- |
 | `app` | Yes | Stable app slug. Use lowercase letters, numbers, dashes, or underscores. |
+| `appId` | Yes | Stable Municloud app ID. `municloud deploy` requires this value and sends it with the deployment. |
 | `database` | No | `sqlite` or `postgres`. |
 | `commitSha` | No | Optional source revision to attach to the deployment. |
 | `services` | Yes | Map of service definitions. One to five services. |
@@ -184,6 +188,8 @@ Build, publish, create deployment, and wait:
 ```bash
 municloud deploy
 ```
+
+On deploy, the CLI requires `appId` in `municloud.yml`. App selection or app creation happens in `municloud init`, not during deploy.
 
 Common overrides:
 
@@ -232,4 +238,3 @@ Supported environment variables:
 | `MUNICLOUD_REGISTRY_HOST` | Registry host used for CLI image publishing. |
 | `MUNICLOUD_REGISTRY_GHCR_OWNER` | Runtime GHCR owner. |
 | `MUNICLOUD_RUNTIME_REGISTRY_PREFIX` | Runtime image prefix. |
-

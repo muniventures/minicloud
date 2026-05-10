@@ -9,12 +9,18 @@ Create a Minicloud API key in the console with these scopes:
 - `deployments:create`
 - `deployments:read`
 
-Add these secrets to your app repository. Repository or organization secrets work. Environment secrets also work when they are defined in the GitHub environment passed as the workflow `environment` input.
+Add these secrets to your app repository. Repository or organization secrets work.
 
 | Secret | Required | Description |
 | --- | --- | --- |
 | `MUNICLOUD_API_KEY` | Yes | Minicloud API key from the console. |
 | `MUNICLOUD_POSTGRES_PASSWORD` | Only for `database: postgres` | Postgres password used by the deployment. |
+
+Add this repository or organization variable:
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `MUNICLOUD_APP_ID` | Yes | App id from the Municloud console URL, for example `app_52kqllu8k1nq4kg352kqllu8`. |
 
 Set workflow permissions:
 
@@ -45,7 +51,7 @@ jobs:
   minicloud:
     uses: muniventures/minicloud/.github/workflows/customer-deploy.yml@main
     with:
-      minicloud_app_id: app_52kqllu8k1nq4kg352kqllu8
+      app_id: ${{ vars.MUNICLOUD_APP_ID }}
       database: postgres
       backend_context: .
       backend_dockerfile: Dockerfile
@@ -76,7 +82,7 @@ jobs:
   minicloud:
     uses: muniventures/minicloud/.github/workflows/customer-deploy.yml@main
     with:
-      minicloud_app_id: app_52kqllu8k1nq4kg352kqllu8
+      app_id: ${{ vars.MUNICLOUD_APP_ID }}
       database: postgres
       aspnetcore_environment: Staging
       frontend_context: ./modules/ui/dashboard
@@ -97,18 +103,17 @@ jobs:
 
 | Input | Required | Default | Description |
 | --- | --- | --- | --- |
-| `minicloud_app_id` | Yes | | App id from the Minicloud console URL, for example `app_52kqllu8k1nq4kg352kqllu8`. |
-| `plan` | No | `P0` | Minicloud plan. |
+| `app_id` | Yes | | App id from the Municloud console URL. Pass `${{ vars.MUNICLOUD_APP_ID }}` from the caller workflow. |
 | `aspnetcore_environment` | No | empty | Adds `ASPNETCORE_ENVIRONMENT` to backend service env when set. |
 | `database` | No | `sqlite` | `sqlite` or `postgres`. |
 | `municloud_api_url` | No | `https://cloud.muni.dev/api` | API URL override. |
 | `image_tag` | No | commit SHA | Docker image tag. |
-| `frontend_context` | No | `./frontend` | Frontend Docker build context. |
+| `frontend_context` | No | empty | Frontend Docker build context. Leave empty to skip the frontend service. |
 | `frontend_dockerfile` | No | empty | Frontend Dockerfile path. |
 | `frontend_port` | No | `3000` | Frontend container port. |
 | `frontend_path` | No | `/` | Frontend public route path. |
 | `frontend_health_path` | No | `/` | Frontend health check path. |
-| `backend_context` | No | `.` | Backend Docker build context. |
+| `backend_context` | No | `.` | Backend Docker build context. Leave empty to skip the backend service. |
 | `backend_dockerfile` | No | empty | Backend Dockerfile path. |
 | `backend_port` | No | `8080` | Backend container port. |
 | `backend_path` | No | `/api` | Backend public route path. |

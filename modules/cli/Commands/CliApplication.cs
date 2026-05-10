@@ -56,7 +56,7 @@ public sealed partial class CliApplication
             return args[0] switch
             {
                 "token" => await RunTokenAsync(args.Skip(1).ToArray(), cancellationToken),
-                "init" => RunInit(args.Skip(1).ToArray()),
+                "init" => await RunInitAsync(args.Skip(1).ToArray(), cancellationToken),
                 "login" => await RunLoginAsync(args.Skip(1).ToArray(), cancellationToken),
                 "deploy" => await RunDeployAsync(args.Skip(1).ToArray(), cancellationToken),
                 "status" => await RunStatusAsync(args.Skip(1).ToArray(), cancellationToken),
@@ -150,7 +150,7 @@ public sealed partial class CliApplication
         return CliExitCodes.Success;
     }
 
-    private int RunInit(string[] args)
+    private async Task<int> RunInitAsync(string[] args, CancellationToken cancellationToken)
     {
         var outputPath = GetOption(args, "--config") ?? "municloud.yml";
         var advanced = args.Contains("--advanced", StringComparer.Ordinal);
@@ -166,8 +166,16 @@ public sealed partial class CliApplication
         _console.WriteLine("Municloud init");
         _console.WriteLine();
 
-        var app = PromptAppName();
-        var database = PromptSingleSelect("Database", [("postgres", "Postgres"), ("sqlite", "SQLite")], "postgres");
+        var me = await _apiClient.GetMeAsync(cancellationToken);
+        var organization = me.Organizations.FirstOrDefault();
+        if (organization is null)
+        {
+            _console.WriteError("Auth error: your token is not associated with an organization.");
+            return CliExitCodes.AuthError;
+        }
+
+        var app = await PromptAppSelectionAsync(organization, cancellationToken);
+        var database = app.Database;
 
         var services = new Dictionary<string, MunicloudServiceConfig>(StringComparer.Ordinal);
         foreach (var serviceName in PromptServiceNames())
@@ -175,7 +183,7 @@ public sealed partial class CliApplication
             _console.WriteLine();
             _console.WriteLine($"{ToTitle(serviceName)} service");
             var sourcePath = PromptDirectory($"{ToTitle(serviceName)} source folder");
-            var defaults = DefaultServiceOptions(app, serviceName);
+            var defaults = DefaultServiceOptions(app.Slug, serviceName);
             var image = advanced ? PromptOptional($"{ToTitle(serviceName)} push image", defaults.Image) : null;
             var port = advanced ? PromptPort($"{ToTitle(serviceName)} port", defaults.Port) : defaults.Port;
             var routePath = advanced ? PromptPath($"{ToTitle(serviceName)} public path", defaults.Path) : defaults.Path;
@@ -184,7 +192,10 @@ public sealed partial class CliApplication
             services[serviceName] = new MunicloudServiceConfig(sourcePath, null, image, port, true, routePath, healthPath);
         }
 
-        var config = new MunicloudConfig(app, database, null, services);
+        var config = new MunicloudConfig(app.Slug, database, null, services)
+        {
+            AppId = app.Id
+        };
         var diagnostics = MunicloudConfigValidator.Validate(config);
         if (diagnostics.Count > 0)
         {
@@ -207,7 +218,6 @@ public sealed partial class CliApplication
     private async Task<int> RunDeployAsync(string[] args, CancellationToken cancellationToken)
     {
         var configPath = GetOption(args, "--config") ?? MunicloudConfigLoader.ResolveDefaultPath();
-        var appOverride = GetOption(args, "--app");
         var databaseOverride = GetOption(args, "--database");
         var postgresPassword = GetOption(args, "--pgpassword");
         var imageTag = GetOption(args, "--tag") ?? "latest";
@@ -242,19 +252,12 @@ public sealed partial class CliApplication
         }
 
         var me = await _apiClient.GetMeAsync(cancellationToken);
-        var organization = me.Organizations.FirstOrDefault();
+        var app = await _apiClient.GetAppAsync(config.AppId!, cancellationToken);
+        var organization = me.Organizations.FirstOrDefault(x => x.Id == app.OrganizationId);
         if (organization is null)
         {
-            _console.WriteError("Auth error: your token is not associated with an organization.");
+            _console.WriteError($"Auth error: your token is not associated with app '{config.AppId}'.");
             return CliExitCodes.AuthError;
-        }
-
-        var appSlug = appOverride ?? config.App;
-        var apps = await _apiClient.GetAppsAsync(organization.Id, cancellationToken);
-        var app = FindApp(apps, appSlug);
-        if (app is null)
-        {
-            app = await CreateAppFromConfigAsync(config, organization, appSlug, databaseOverride, cancellationToken);
         }
 
         if (!noPublish)
@@ -488,11 +491,30 @@ public sealed partial class CliApplication
         return CliExitCodes.Success;
     }
 
-    private async Task<AppResponse> CreateAppFromConfigAsync(
-        MunicloudConfig config,
+    private async Task<AppResponse> PromptAppSelectionAsync(OrganizationSummary organization, CancellationToken cancellationToken)
+    {
+        var apps = await _apiClient.GetAppsAsync(organization.Id, cancellationToken);
+        var choices = apps
+            .OrderBy(app => app.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(app => (Value: app.Id, Label: $"{app.Name} ({app.Slug})"))
+            .Append((Value: "__create__", Label: "Create new app"))
+            .ToArray();
+
+        var selected = PromptSingleSelect("App", choices, choices[0].Value);
+        if (selected != "__create__")
+        {
+            return apps.Single(app => app.Id == selected);
+        }
+
+        var appSlug = PromptAppName();
+        var database = PromptSingleSelect("Database", [("postgres", "Postgres"), ("sqlite", "SQLite")], "postgres");
+        return await CreateAppAsync(organization, appSlug, database, cancellationToken);
+    }
+
+    private async Task<AppResponse> CreateAppAsync(
         OrganizationSummary organization,
         string appSlug,
-        string? databaseOverride,
+        string database,
         CancellationToken cancellationToken)
     {
         var createSlug = appSlug.ToLowerInvariant();
@@ -501,9 +523,9 @@ public sealed partial class CliApplication
             DisplayNameFromSlug(createSlug),
             createSlug,
             "p0",
-            databaseOverride ?? config.Database ?? "sqlite");
+            database);
 
-        _console.WriteLine($"App '{createSlug}' was not found in organization '{organization.Name}'. Creating it from municloud.yml...");
+        _console.WriteLine($"Creating app '{createSlug}' in organization '{organization.Name}'...");
         return await _apiClient.CreateAppAsync(request, cancellationToken);
     }
 
@@ -628,7 +650,7 @@ public sealed partial class CliApplication
         _console.WriteLine("  municloud login --token <token>");
         _console.WriteLine("  municloud init [--advanced] [--config municloud.yml] [--force]");
         _console.WriteLine("  municloud token set <token>");
-        _console.WriteLine("  municloud deploy [--config municloud.yml] [--app app] [--database db] [--pgpassword password] [--tag tag] [--no-publish] [--publish-only] [--verbose]");
+        _console.WriteLine("  municloud deploy [--config municloud.yml] [--database db] [--pgpassword password] [--tag tag] [--no-publish] [--publish-only] [--verbose]");
         _console.WriteLine("  municloud status [deployment-id]");
         _console.WriteLine("  municloud logs [app|deployment-id] [--service service] [--source source] [--tail count] [--since 30m]");
         _console.WriteLine("  municloud apps list");

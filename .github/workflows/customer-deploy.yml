@@ -3,25 +3,13 @@ name: Municloud Customer Deploy
 on:
   workflow_call:
     inputs:
-      minicloud_app_id:
+      app_id:
         required: true
         type: string
-      plan:
-        required: false
-        type: string
-        default: P0
-      environment:
-        required: false
-        type: string
-        default: staging
       aspnetcore_environment:
         required: false
         type: string
         default: ""
-      deployment_type:
-        required: false
-        type: string
-        default: backend_frontend
       database:
         required: false
         type: string
@@ -37,7 +25,7 @@ on:
       frontend_context:
         required: false
         type: string
-        default: ./frontend
+        default: ""
       frontend_dockerfile:
         required: false
         type: string
@@ -104,8 +92,9 @@ jobs:
         id: images
         shell: bash
         env:
-          DEPLOYMENT_TYPE: ${{ inputs.deployment_type }}
           IMAGE_TAG_INPUT: ${{ inputs.image_tag }}
+          FRONTEND_CONTEXT: ${{ inputs.frontend_context }}
+          BACKEND_CONTEXT: ${{ inputs.backend_context }}
         run: |
           set -euo pipefail
 
@@ -114,22 +103,18 @@ jobs:
           FRONTEND_IMAGE_REF=""
           BACKEND_IMAGE_REF=""
 
-          case "${DEPLOYMENT_TYPE}" in
-            backend_only)
-              BACKEND_IMAGE_REF="${REGISTRY}/${IMAGE_NAMESPACE}/backend:${IMAGE_TAG}"
-              ;;
-            frontend_only)
-              FRONTEND_IMAGE_REF="${REGISTRY}/${IMAGE_NAMESPACE}/frontend:${IMAGE_TAG}"
-              ;;
-            backend_frontend)
-              FRONTEND_IMAGE_REF="${REGISTRY}/${IMAGE_NAMESPACE}/frontend:${IMAGE_TAG}"
-              BACKEND_IMAGE_REF="${REGISTRY}/${IMAGE_NAMESPACE}/backend:${IMAGE_TAG}"
-              ;;
-            *)
-              echo "deployment_type must be backend_only, frontend_only, or backend_frontend."
-              exit 1
-              ;;
-          esac
+          if [ -n "${FRONTEND_CONTEXT}" ]; then
+            FRONTEND_IMAGE_REF="${REGISTRY}/${IMAGE_NAMESPACE}/frontend:${IMAGE_TAG}"
+          fi
+
+          if [ -n "${BACKEND_CONTEXT}" ]; then
+            BACKEND_IMAGE_REF="${REGISTRY}/${IMAGE_NAMESPACE}/backend:${IMAGE_TAG}"
+          fi
+
+          if [ -z "${FRONTEND_IMAGE_REF}" ] && [ -z "${BACKEND_IMAGE_REF}" ]; then
+            echo "At least one service context is required."
+            exit 1
+          fi
 
           {
             echo "FRONTEND_IMAGE_REF=${FRONTEND_IMAGE_REF}"
@@ -142,7 +127,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Build frontend image
-        if: inputs.deployment_type == 'frontend_only' || inputs.deployment_type == 'backend_frontend'
+        if: inputs.frontend_context != ''
         shell: bash
         env:
           FRONTEND_CONTEXT: ${{ inputs.frontend_context }}
@@ -159,7 +144,7 @@ jobs:
           docker save "${FRONTEND_IMAGE_REF}" -o frontend-image.tar
 
       - name: Build backend image
-        if: inputs.deployment_type == 'backend_only' || inputs.deployment_type == 'backend_frontend'
+        if: inputs.backend_context != ''
         shell: bash
         env:
           BACKEND_CONTEXT: ${{ inputs.backend_context }}
@@ -176,7 +161,7 @@ jobs:
           docker save "${BACKEND_IMAGE_REF}" -o backend-image.tar
 
       - name: Upload frontend image artifact
-        if: inputs.deployment_type == 'frontend_only' || inputs.deployment_type == 'backend_frontend'
+        if: inputs.frontend_context != ''
         uses: actions/upload-artifact@v4
         with:
           name: municloud-frontend-image
@@ -184,7 +169,7 @@ jobs:
           retention-days: 1
 
       - name: Upload backend image artifact
-        if: inputs.deployment_type == 'backend_only' || inputs.deployment_type == 'backend_frontend'
+        if: inputs.backend_context != ''
         uses: actions/upload-artifact@v4
         with:
           name: municloud-backend-image
@@ -199,13 +184,13 @@ jobs:
       services_json: ${{ steps.payload.outputs.services_json }}
     steps:
       - name: Download frontend image artifact
-        if: inputs.deployment_type == 'frontend_only' || inputs.deployment_type == 'backend_frontend'
+        if: inputs.frontend_context != ''
         uses: actions/download-artifact@v4
         with:
           name: municloud-frontend-image
 
       - name: Download backend image artifact
-        if: inputs.deployment_type == 'backend_only' || inputs.deployment_type == 'backend_frontend'
+        if: inputs.backend_context != ''
         uses: actions/download-artifact@v4
         with:
           name: municloud-backend-image
@@ -233,7 +218,6 @@ jobs:
       - name: Build Municloud service payload
         id: payload
         env:
-          DEPLOYMENT_TYPE: ${{ inputs.deployment_type }}
           FRONTEND_IMAGE_REF: ${{ needs.build.outputs.frontend_image_ref }}
           BACKEND_IMAGE_REF: ${{ needs.build.outputs.backend_image_ref }}
           ASPNETCORE_ENVIRONMENT_INPUT: ${{ inputs.aspnetcore_environment }}
@@ -247,71 +231,43 @@ jobs:
         run: |
           set -euo pipefail
 
-          case "${DEPLOYMENT_TYPE}" in
-            backend_only)
-              jq -c -n \
-                --arg backend_image "${BACKEND_IMAGE_REF}" \
-                --argjson backend_port "${BACKEND_PORT}" \
-                --arg backend_path "${BACKEND_PATH}" \
-                --arg backend_health_path "${BACKEND_HEALTH_PATH}" \
-                --arg aspnetcore_environment "${ASPNETCORE_ENVIRONMENT_INPUT}" \
-                '[{
-                  name: "backend",
-                  image: $backend_image,
-                  port: $backend_port,
-                  public: true,
-                  path: $backend_path,
-                  health_path: $backend_health_path,
-                  env: (if $aspnetcore_environment == "" then {} else { ASPNETCORE_ENVIRONMENT: $aspnetcore_environment } end)
-                }]' > municloud-services.json
-              ;;
-            frontend_only)
-              jq -c -n \
-                --arg frontend_image "${FRONTEND_IMAGE_REF}" \
-                --argjson frontend_port "${FRONTEND_PORT}" \
-                --arg frontend_path "${FRONTEND_PATH}" \
-                --arg frontend_health_path "${FRONTEND_HEALTH_PATH}" \
-                '[{
-                  name: "frontend",
-                  image: $frontend_image,
-                  port: $frontend_port,
-                  public: true,
-                  path: $frontend_path,
-                  health_path: $frontend_health_path
-                }]' > municloud-services.json
-              ;;
-            backend_frontend)
-              jq -c -n \
-                --arg frontend_image "${FRONTEND_IMAGE_REF}" \
-                --arg backend_image "${BACKEND_IMAGE_REF}" \
-                --argjson frontend_port "${FRONTEND_PORT}" \
-                --argjson backend_port "${BACKEND_PORT}" \
-                --arg frontend_path "${FRONTEND_PATH}" \
-                --arg backend_path "${BACKEND_PATH}" \
-                --arg frontend_health_path "${FRONTEND_HEALTH_PATH}" \
-                --arg backend_health_path "${BACKEND_HEALTH_PATH}" \
-                --arg aspnetcore_environment "${ASPNETCORE_ENVIRONMENT_INPUT}" \
-                '[
-                  {
-                    name: "frontend",
-                    image: $frontend_image,
-                    port: $frontend_port,
-                    public: true,
-                    path: $frontend_path,
-                    health_path: $frontend_health_path
-                  },
-                  {
-                    name: "backend",
-                    image: $backend_image,
-                    port: $backend_port,
-                    public: true,
-                    path: $backend_path,
-                    health_path: $backend_health_path,
-                    env: (if $aspnetcore_environment == "" then {} else { ASPNETCORE_ENVIRONMENT: $aspnetcore_environment } end)
-                  }
-                ]' > municloud-services.json
-              ;;
-          esac
+          services='[]'
+
+          if [ -n "${FRONTEND_IMAGE_REF}" ]; then
+            services="$(printf '%s' "${services}" | jq -c \
+              --arg frontend_image "${FRONTEND_IMAGE_REF}" \
+              --argjson frontend_port "${FRONTEND_PORT}" \
+              --arg frontend_path "${FRONTEND_PATH}" \
+              --arg frontend_health_path "${FRONTEND_HEALTH_PATH}" \
+              '. + [{
+                name: "frontend",
+                image: $frontend_image,
+                port: $frontend_port,
+                public: true,
+                path: $frontend_path,
+                health_path: $frontend_health_path
+              }]')"
+          fi
+
+          if [ -n "${BACKEND_IMAGE_REF}" ]; then
+            services="$(printf '%s' "${services}" | jq -c \
+              --arg backend_image "${BACKEND_IMAGE_REF}" \
+              --argjson backend_port "${BACKEND_PORT}" \
+              --arg backend_path "${BACKEND_PATH}" \
+              --arg backend_health_path "${BACKEND_HEALTH_PATH}" \
+              --arg aspnetcore_environment "${ASPNETCORE_ENVIRONMENT_INPUT}" \
+              '. + [{
+                name: "backend",
+                image: $backend_image,
+                port: $backend_port,
+                public: true,
+                path: $backend_path,
+                health_path: $backend_health_path,
+                env: (if $aspnetcore_environment == "" then {} else { ASPNETCORE_ENVIRONMENT: $aspnetcore_environment } end)
+              }]')"
+          fi
+
+          printf '%s' "${services}" > municloud-services.json
 
           SERVICES_JSON="$(cat municloud-services.json)"
           echo "services_json=${SERVICES_JSON}" >> "${GITHUB_OUTPUT}"
@@ -320,7 +276,6 @@ jobs:
     name: deploy
     needs: publish
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
     steps:
       - name: Request Municloud deploy
         id: deploy
@@ -329,9 +284,7 @@ jobs:
           POSTGRES_PASSWORD: ${{ secrets.postgres_password }}
           SERVICES_JSON: ${{ needs.publish.outputs.services_json }}
           MUNICLOUD_API_URL: ${{ inputs.municloud_api_url }}
-          MUNICLOUD_APP_ID: ${{ inputs.minicloud_app_id }}
-          ENVIRONMENT: ${{ inputs.environment }}
-          DEPLOYMENT_TYPE: ${{ inputs.deployment_type }}
+          APP_ID: ${{ inputs.app_id }}
           DATABASE: ${{ inputs.database }}
         shell: bash
         run: |
@@ -343,13 +296,13 @@ jobs:
           fi
           echo "::add-mask::${MUNICLOUD_API_KEY}"
 
-          if [ -z "${MUNICLOUD_APP_ID}" ]; then
-            echo "minicloud_app_id is required. Use the app id from the Minicloud console URL, for example app_52kqllu8k1nq4kg352kqllu8."
+          if [ -z "${APP_ID}" ]; then
+            echo "app_id is required. Use the app id from the Minicloud console URL, for example app_52kqllu8k1nq4kg352kqllu8."
             exit 1
           fi
 
-          if ! [[ "${MUNICLOUD_APP_ID}" =~ ^app_[A-Za-z0-9]+$ ]]; then
-            echo "minicloud_app_id must look like app_52kqllu8k1nq4kg352kqllu8."
+          if ! [[ "${APP_ID}" =~ ^app_[A-Za-z0-9]+$ ]]; then
+            echo "app_id must look like app_52kqllu8k1nq4kg352kqllu8."
             exit 1
           fi
 
@@ -384,17 +337,13 @@ jobs:
 
           DEPLOYMENT_JSON="$(
             jq -cn \
-              --arg app_id "${MUNICLOUD_APP_ID}" \
-              --arg environment "${ENVIRONMENT}" \
-              --arg deployment_type "${DEPLOYMENT_TYPE}" \
+              --arg app_id "${APP_ID}" \
               --arg database "${DATABASE}" \
               --arg commit_sha "${GITHUB_SHA}" \
               --arg postgres_password "${POSTGRES_PASSWORD}" \
               --argjson services "${SERVICES_FOR_API}" \
               '{
                 appId: $app_id,
-                environment: $environment,
-                deploymentType: $deployment_type,
                 database: $database,
                 commitSha: $commit_sha,
                 services: $services,

@@ -15,6 +15,11 @@ public static class MunicloudConfigValidator
         var diagnostics = new List<ConfigDiagnostic>();
         ValidateSlug(diagnostics, config.App, "app", "App is required and must use lowercase letters, numbers, dashes, and underscores.");
 
+        if (string.IsNullOrWhiteSpace(config.AppId))
+        {
+            diagnostics.Add(new ConfigDiagnostic("appId", "App ID is required. Run 'municloud init' to select or create an app."));
+        }
+
         if (!string.IsNullOrWhiteSpace(config.Database) && !Databases.Contains(config.Database))
         {
             diagnostics.Add(new ConfigDiagnostic("database", "Database must be sqlite or postgres."));

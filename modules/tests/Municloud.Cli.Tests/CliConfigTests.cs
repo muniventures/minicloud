@@ -11,6 +11,7 @@ public sealed class CliConfigTests
         var result = MunicloudConfigLoader.Parse(
         [
             "app: teamcore",
+            "appId: app_123",
             "database: sqlite",
             "services:",
             "  frontend:",
@@ -31,6 +32,7 @@ public sealed class CliConfigTests
         Assert.True(result.IsValid);
         Assert.NotNull(result.Config);
         Assert.Equal("teamcore", result.Config.App);
+        Assert.Equal("app_123", result.Config.AppId);
         Assert.Equal(2, result.Config.Services.Count);
         Assert.Equal("modules/frontend", result.Config.Services["frontend"].SourcePath);
     }
@@ -41,6 +43,7 @@ public sealed class CliConfigTests
         var result = MunicloudConfigLoader.Parse(
         [
             "app: teamcore",
+            "appId: app_123",
             "services:",
             "  backend:",
             "    image: ghcr.io/customer/teamcore/backend:abc123",
@@ -64,6 +67,7 @@ public sealed class CliConfigTests
         var result = MunicloudConfigLoader.Parse(
         [
             "app: vet_core",
+            "appId: app_123",
             "services:",
             "  web_api:",
             "    port: 8080",
@@ -86,6 +90,7 @@ public sealed class CliConfigTests
         var result = MunicloudConfigLoader.Parse(
         [
             $"app: {app}",
+            "appId: app_123",
             "services:",
             "  backend:",
             "    port: 8080",
@@ -99,11 +104,30 @@ public sealed class CliConfigTests
     }
 
     [Fact]
+    public void Parse_rejects_missing_app_id()
+    {
+        var result = MunicloudConfigLoader.Parse(
+        [
+            "app: teamcore",
+            "services:",
+            "  backend:",
+            "    port: 8080",
+            "    public: true",
+            "    path: /",
+            "    healthPath: /health"
+        ]);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Diagnostics, x => x.Field == "appId");
+    }
+
+    [Fact]
     public void Parse_preserves_quoted_yaml_scalars()
     {
         var result = MunicloudConfigLoader.Parse(
         [
             "app: teamcore",
+            "appId: app_123",
             "services:",
             "  backend:",
             "    image: \"ghcr.io/customer/teamcore/backend:abc123\"",
@@ -127,6 +151,7 @@ public sealed class CliConfigTests
         var result = MunicloudConfigLoader.Parse(
         [
             "app: teamcore",
+            "appId: app_123",
             "services:",
             "  backend:",
             "    port: [8080"
@@ -142,6 +167,7 @@ public sealed class CliConfigTests
         var result = MunicloudConfigLoader.Parse(
         [
             "app: teamcore",
+            "appId: app_123",
             "services:",
             "  backend:",
             "    image: ghcr.io/customer/teamcore/backend:abc123",
@@ -164,6 +190,7 @@ public sealed class CliConfigTests
         var result = MunicloudConfigLoader.Parse(
         [
             "app: teamcore",
+            "appId: app_123",
             "services:",
             "  backend:",
             "    image: ghcr.io/customer/teamcore/backend:abc123",
@@ -205,6 +232,7 @@ public sealed class CliConfigTests
         var result = MunicloudConfigLoader.Parse(
         [
             "app: teamcore",
+            "appId: app_123",
             "database: postgres",
             "services:",
             "  frontend:",
@@ -236,13 +264,17 @@ public sealed class CliConfigTests
             new Dictionary<string, MunicloudServiceConfig>
             {
                 ["backend"] = new("modules/api", null, "ghcr.io/customer/teamcore-backend:latest", 8080, true, "/", "/health")
-            });
+            })
+        {
+            AppId = "app_123"
+        };
 
         var yaml = MunicloudConfigWriter.Write(config);
         var result = MunicloudConfigLoader.Parse(yaml.Split(Environment.NewLine));
 
         Assert.True(result.IsValid);
         Assert.NotNull(result.Config);
+        Assert.Equal("app_123", result.Config.AppId);
         Assert.Equal("modules/api", result.Config.Services["backend"].SourcePath);
         Assert.Equal("ghcr.io/customer/teamcore-backend:latest", result.Config.Services["backend"].Image);
     }
@@ -253,6 +285,7 @@ public sealed class CliConfigTests
         var result = MunicloudConfigLoader.Parse(
         [
             "app: municloud",
+            "appId: app_123",
             "database: postgres",
             "services:",
             "  api:",

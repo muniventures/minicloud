@@ -46,7 +46,10 @@ public static partial class MunicloudConfigLoader
             GetScalar(root, "app", "app", diagnostics) ?? "",
             GetScalar(root, "database", "database", diagnostics),
             GetScalar(root, "commitSha", "commitSha", diagnostics),
-            services);
+            services)
+        {
+            AppId = GetScalar(root, "appId", "appId", diagnostics)
+        };
 
         diagnostics.AddRange(MunicloudConfigValidator.Validate(config));
         return new ConfigLoadResult(config, diagnostics);

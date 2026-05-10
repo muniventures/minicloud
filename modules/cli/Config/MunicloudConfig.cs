@@ -4,7 +4,10 @@ public sealed record MunicloudConfig(
     string App,
     string? Database,
     string? CommitSha,
-    IReadOnlyDictionary<string, MunicloudServiceConfig> Services);
+    IReadOnlyDictionary<string, MunicloudServiceConfig> Services)
+{
+    public string? AppId { get; init; }
+}
 
 public sealed record MunicloudServiceConfig(
     string? SourcePath,
