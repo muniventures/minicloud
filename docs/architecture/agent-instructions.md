@@ -38,6 +38,7 @@ V1 is the productized version exposed to other developers as a mini-SaaS. Municl
 ## Working agreement
 
 - Keep changes narrowly scoped to the request.
+- For every change, choose the most stable, solid, and predictable path, not the easiest implementation path. Match established product and codebase patterns first, avoid ambiguous behavior, reject invalid or unknown inputs where relevant, and validate narrowly before executing side effects.
 - Prefer centralizing shared behavior in the existing architectural boundary instead of recreating orchestration per feature. If several areas need the same runtime behavior, first look for a shared service, shared dashboard runtime, or shared API boundary before adding per-feature state machines.
 - Follow the architecture docs and update them when behavior or boundaries change.
 - Prefer idempotent scripts and commands.

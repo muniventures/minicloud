@@ -60,25 +60,33 @@ jobs:
           IMAGE_NAMESPACE="$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
 
           services="$(
-            printf '%s' "${SERVICES_INPUT}" | jq -c '
-              if type == "array" then
-                .
-              elif type == "object" then
-                to_entries | map(.value + { name: .key })
-              else
-                error("services must be a JSON array or object")
+            printf '%s' "${SERVICES_INPUT}" | ruby -ryaml -rjson -e '
+              services = YAML.safe_load($stdin.read, permitted_classes: [], aliases: false)
+              unless services.is_a?(Array)
+                warn "services must be a YAML array"
+                exit 1
               end
+
+              unless services.all? { |service| service.is_a?(Hash) }
+                warn "each service must be a YAML mapping"
+                exit 1
+              end
+
+              puts JSON.generate(services)
             '
           )"
 
           printf '%s' "${services}" | jq -e '
             def valid_name: test("^[a-z0-9_-]+$");
             def valid_env_key: test("^[A-Za-z_][A-Za-z0-9_]*$");
+            def known_service_keys: ["name", "sourcePath", "dockerfile", "image", "port", "public", "path", "healthPath", "env"];
 
             if length < 1 then
               error("services must include at least one service")
             elif length > 5 then
               error("services supports at most five services")
+            elif any(.[]; (keys - known_service_keys) | length > 0) then
+              error("services contains unknown service properties")
             elif ([.[].name] | unique | length) != length then
               error("service names must be unique")
             elif any(.[]; (.name | type) != "string" or (.name | valid_name | not)) then

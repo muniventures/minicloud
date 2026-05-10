@@ -54,16 +54,13 @@ jobs:
       app_id: ${{ vars.MUNICLOUD_APP_ID }}
       database: postgres
       services: |
-        {
-          "backend": {
-            "sourcePath": ".",
-            "dockerfile": "Dockerfile",
-            "port": 8080,
-            "public": true,
-            "path": "/",
-            "healthPath": "/health"
-          }
-        }
+        - name: backend
+          sourcePath: .
+          dockerfile: Dockerfile
+          port: 8080
+          public: true
+          path: /
+          healthPath: /health
     secrets:
       municloud_api_key: ${{ secrets.MUNICLOUD_API_KEY }}
       postgres_password: ${{ secrets.MUNICLOUD_POSTGRES_PASSWORD }}
@@ -91,26 +88,21 @@ jobs:
       app_id: ${{ vars.MUNICLOUD_APP_ID }}
       database: postgres
       services: |
-        {
-          "frontend": {
-            "sourcePath": "./modules/ui/dashboard",
-            "port": 3000,
-            "public": true,
-            "path": "/",
-            "healthPath": "/"
-          },
-          "backend": {
-            "sourcePath": ".",
-            "dockerfile": "modules/api/Dockerfile",
-            "port": 8080,
-            "public": true,
-            "path": "/api",
-            "healthPath": "/health",
-            "env": {
-              "ASPNETCORE_ENVIRONMENT": "Staging"
-            }
-          }
-        }
+        - name: frontend
+          sourcePath: ./modules/ui/dashboard
+          port: 3000
+          public: true
+          path: /
+          healthPath: /
+        - name: backend
+          sourcePath: .
+          dockerfile: modules/api/Dockerfile
+          port: 8080
+          public: true
+          path: /api
+          healthPath: /health
+          env:
+            ASPNETCORE_ENVIRONMENT: Staging
     secrets:
       municloud_api_key: ${{ secrets.MUNICLOUD_API_KEY }}
       postgres_password: ${{ secrets.MUNICLOUD_POSTGRES_PASSWORD }}
@@ -123,48 +115,27 @@ jobs:
 | `app_id` | Yes | | App id from the Municloud console URL. Pass `${{ vars.MUNICLOUD_APP_ID }}` from the caller workflow. |
 | `database` | No | `sqlite` | `sqlite` or `postgres`. |
 | `minicloud_environment` | No | `prod` | `prod` or `staging`. `prod` uses the production Minicloud API. `staging` uses `https://municloud-dev.muni.dev/api`. |
-| `services` | Yes | | JSON service object or array. Uses the same service fields as `municloud.yml`; use JSON because reusable workflow inputs cannot receive native YAML maps/lists. |
+| `services` | Yes | | YAML service array. Uses the same service fields as `municloud.yml`, with `name` added because a workflow input cannot receive the keyed `services` map directly. |
 | `image_tag` | No | commit SHA | Docker image tag. |
 
 ## Services
 
-`services` accepts either a JSON object keyed by service name or a JSON array with an explicit `name` field.
-
-Object form:
+`services` accepts a YAML array with one mapping per service:
 
 ```yaml
 services: |
-  {
-    "backend": {
-      "sourcePath": ".",
-      "dockerfile": "Dockerfile",
-      "port": 8080,
-      "public": true,
-      "path": "/",
-      "healthPath": "/health"
-    }
-  }
-```
-
-Array form:
-
-```yaml
-services: |
-  [
-    {
-      "name": "backend",
-      "sourcePath": ".",
-      "dockerfile": "Dockerfile",
-      "port": 8080,
-      "public": true,
-      "path": "/",
-      "healthPath": "/health"
-    }
-  ]
+  - name: backend
+    sourcePath: .
+    dockerfile: Dockerfile
+    port: 8080
+    public: true
+    path: /
+    healthPath: /health
 ```
 
 | Field | Required | Description |
 | --- | --- | --- |
+| `name` | Yes | Service name. Must use lowercase letters, numbers, dashes, and underscores. |
 | `sourcePath` | Required when the workflow builds the image | Docker build context. |
 | `dockerfile` | No | Dockerfile path. Defaults to Docker's normal lookup in `sourcePath`. |
 | `image` | Required for prebuilt image services; optional when `sourcePath` is set | Full image reference. If omitted for a built service, the workflow publishes `ghcr.io/<owner>/<repo>/<service>:<sha>`. |
