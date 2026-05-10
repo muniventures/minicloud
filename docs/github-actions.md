@@ -53,11 +53,17 @@ jobs:
     with:
       app_id: ${{ vars.MUNICLOUD_APP_ID }}
       database: postgres
-      backend_context: .
-      backend_dockerfile: Dockerfile
-      backend_port: "8080"
-      backend_path: /
-      backend_health_path: /health
+      services: |
+        {
+          "backend": {
+            "sourcePath": ".",
+            "dockerfile": "Dockerfile",
+            "port": 8080,
+            "public": true,
+            "path": "/",
+            "healthPath": "/health"
+          }
+        }
     secrets:
       municloud_api_key: ${{ secrets.MUNICLOUD_API_KEY }}
       postgres_password: ${{ secrets.MUNICLOUD_POSTGRES_PASSWORD }}
@@ -84,16 +90,27 @@ jobs:
     with:
       app_id: ${{ vars.MUNICLOUD_APP_ID }}
       database: postgres
-      aspnetcore_environment: Staging
-      frontend_context: ./modules/ui/dashboard
-      frontend_port: "3000"
-      frontend_path: /
-      frontend_health_path: /
-      backend_context: .
-      backend_dockerfile: modules/api/Dockerfile
-      backend_port: "8080"
-      backend_path: /api
-      backend_health_path: /health
+      services: |
+        {
+          "frontend": {
+            "sourcePath": "./modules/ui/dashboard",
+            "port": 3000,
+            "public": true,
+            "path": "/",
+            "healthPath": "/"
+          },
+          "backend": {
+            "sourcePath": ".",
+            "dockerfile": "modules/api/Dockerfile",
+            "port": 8080,
+            "public": true,
+            "path": "/api",
+            "healthPath": "/health",
+            "env": {
+              "ASPNETCORE_ENVIRONMENT": "Staging"
+            }
+          }
+        }
     secrets:
       municloud_api_key: ${{ secrets.MUNICLOUD_API_KEY }}
       postgres_password: ${{ secrets.MUNICLOUD_POSTGRES_PASSWORD }}
@@ -104,27 +121,64 @@ jobs:
 | Input | Required | Default | Description |
 | --- | --- | --- | --- |
 | `app_id` | Yes | | App id from the Municloud console URL. Pass `${{ vars.MUNICLOUD_APP_ID }}` from the caller workflow. |
-| `aspnetcore_environment` | No | empty | Adds `ASPNETCORE_ENVIRONMENT` to backend service env when set. |
 | `database` | No | `sqlite` | `sqlite` or `postgres`. |
+| `services` | Yes | | JSON service object or array. Uses the same service fields as `municloud.yml`; use JSON because reusable workflow inputs cannot receive native YAML maps/lists. |
 | `municloud_api_url` | No | `https://cloud.muni.dev/api` | API URL override. |
 | `image_tag` | No | commit SHA | Docker image tag. |
-| `frontend_context` | No | empty | Frontend Docker build context. Leave empty to skip the frontend service. |
-| `frontend_dockerfile` | No | empty | Frontend Dockerfile path. |
-| `frontend_port` | No | `3000` | Frontend container port. |
-| `frontend_path` | No | `/` | Frontend public route path. |
-| `frontend_health_path` | No | `/` | Frontend health check path. |
-| `backend_context` | No | `.` | Backend Docker build context. Leave empty to skip the backend service. |
-| `backend_dockerfile` | No | empty | Backend Dockerfile path. |
-| `backend_port` | No | `8080` | Backend container port. |
-| `backend_path` | No | `/api` | Backend public route path. |
-| `backend_health_path` | No | `/health` | Backend health check path. |
+
+## Services
+
+`services` accepts either a JSON object keyed by service name or a JSON array with an explicit `name` field.
+
+Object form:
+
+```yaml
+services: |
+  {
+    "backend": {
+      "sourcePath": ".",
+      "dockerfile": "Dockerfile",
+      "port": 8080,
+      "public": true,
+      "path": "/",
+      "healthPath": "/health"
+    }
+  }
+```
+
+Array form:
+
+```yaml
+services: |
+  [
+    {
+      "name": "backend",
+      "sourcePath": ".",
+      "dockerfile": "Dockerfile",
+      "port": 8080,
+      "public": true,
+      "path": "/",
+      "healthPath": "/health"
+    }
+  ]
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `sourcePath` | Required when the workflow builds the image | Docker build context. |
+| `dockerfile` | No | Dockerfile path. Defaults to Docker's normal lookup in `sourcePath`. |
+| `image` | Required for prebuilt image services; optional when `sourcePath` is set | Full image reference. If omitted for a built service, the workflow publishes `ghcr.io/<owner>/<repo>/<service>:<sha>`. |
+| `port` | Yes | Internal container port, `1` to `65535`. |
+| `public` | Yes | Whether the service receives public HTTP traffic. At least one service must be public. |
+| `path` | Yes | Public route path. Must start with `/`. |
+| `healthPath` | Yes | HTTP health check path. Must start with `/`. |
+| `env` | No | String key/value environment variables for the service. |
 
 ## What The Workflow Does
 
-The workflow runs three jobs:
+The workflow runs two jobs:
 
-- `minicloud - build`: builds Docker images for the configured services.
-- `minicloud - publish`: pushes images to GHCR and creates the service payload.
+- `minicloud - publish`: builds configured service images, pushes them to GHCR, and creates the service payload.
 - `minicloud - deploy`: calls the Minicloud API for the configured app id, starts a deployment, and waits for completion.
 
 ## Image Names
@@ -132,8 +186,7 @@ The workflow runs three jobs:
 Images are published to:
 
 ```text
-ghcr.io/<owner>/<repo>/frontend:<sha>
-ghcr.io/<owner>/<repo>/backend:<sha>
+ghcr.io/<owner>/<repo>/<service>:<sha>
 ```
 
 Use `image_tag` to override the tag.

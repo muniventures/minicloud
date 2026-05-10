@@ -6,14 +6,13 @@ on:
       app_id:
         required: true
         type: string
-      aspnetcore_environment:
-        required: false
-        type: string
-        default: ""
       database:
         required: false
         type: string
         default: sqlite
+      services:
+        required: true
+        type: string
       municloud_api_url:
         required: false
         type: string
@@ -22,46 +21,6 @@ on:
         required: false
         type: string
         default: ""
-      frontend_context:
-        required: false
-        type: string
-        default: ""
-      frontend_dockerfile:
-        required: false
-        type: string
-        default: ""
-      frontend_port:
-        required: false
-        type: string
-        default: "3000"
-      frontend_path:
-        required: false
-        type: string
-        default: "/"
-      frontend_health_path:
-        required: false
-        type: string
-        default: "/"
-      backend_context:
-        required: false
-        type: string
-        default: .
-      backend_dockerfile:
-        required: false
-        type: string
-        default: ""
-      backend_port:
-        required: false
-        type: string
-        default: "8080"
-      backend_path:
-        required: false
-        type: string
-        default: "/api"
-      backend_health_path:
-        required: false
-        type: string
-        default: "/health"
     secrets:
       municloud_api_key:
         required: true
@@ -76,201 +35,125 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  build:
-    name: build
+  publish:
+    name: publish
     runs-on: ubuntu-latest
     outputs:
-      frontend_image_ref: ${{ steps.images.outputs.frontend_image_ref }}
-      backend_image_ref: ${{ steps.images.outputs.backend_image_ref }}
+      services_json: ${{ steps.payload.outputs.services_json }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Resolve image refs
-        id: images
-        shell: bash
+      - name: Build and publish service images
+        id: payload
         env:
+          SERVICES_INPUT: ${{ inputs.services }}
           IMAGE_TAG_INPUT: ${{ inputs.image_tag }}
-          FRONTEND_CONTEXT: ${{ inputs.frontend_context }}
-          BACKEND_CONTEXT: ${{ inputs.backend_context }}
+          GHCR_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
 
           IMAGE_TAG="${IMAGE_TAG_INPUT:-${GITHUB_SHA}}"
           IMAGE_NAMESPACE="$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
-          FRONTEND_IMAGE_REF=""
-          BACKEND_IMAGE_REF=""
 
-          if [ -n "${FRONTEND_CONTEXT}" ]; then
-            FRONTEND_IMAGE_REF="${REGISTRY}/${IMAGE_NAMESPACE}/frontend:${IMAGE_TAG}"
-          fi
+          services="$(
+            printf '%s' "${SERVICES_INPUT}" | jq -c '
+              if type == "array" then
+                .
+              elif type == "object" then
+                to_entries | map(.value + { name: .key })
+              else
+                error("services must be a JSON array or object")
+              end
+            '
+          )"
 
-          if [ -n "${BACKEND_CONTEXT}" ]; then
-            BACKEND_IMAGE_REF="${REGISTRY}/${IMAGE_NAMESPACE}/backend:${IMAGE_TAG}"
-          fi
+          printf '%s' "${services}" | jq -e '
+            def valid_name: test("^[a-z0-9_-]+$");
+            def valid_env_key: test("^[A-Za-z_][A-Za-z0-9_]*$");
 
-          if [ -z "${FRONTEND_IMAGE_REF}" ] && [ -z "${BACKEND_IMAGE_REF}" ]; then
-            echo "At least one service context is required."
-            exit 1
-          fi
+            if length < 1 then
+              error("services must include at least one service")
+            elif length > 5 then
+              error("services supports at most five services")
+            elif ([.[].name] | unique | length) != length then
+              error("service names must be unique")
+            elif any(.[]; (.name | type) != "string" or (.name | valid_name | not)) then
+              error("service names must use lowercase letters, numbers, dashes, and underscores")
+            elif any(.[]; ((.image // "") == "" and (.sourcePath // "") == "")) then
+              error("each service must include image or sourcePath")
+            elif any(.[]; (.port | tonumber? // 0) < 1 or (.port | tonumber? // 0) > 65535) then
+              error("service port must be between 1 and 65535")
+            elif any(.[]; (.public | type) != "boolean") then
+              error("service public must be true or false")
+            elif any(.[]; (.path | type) != "string" or (.path | startswith("/") | not)) then
+              error("service path must start with /")
+            elif any(.[]; (.healthPath | type) != "string" or (.healthPath | startswith("/") | not)) then
+              error("service healthPath must start with /")
+            elif ([.[] | select(.public)] | length) == 0 then
+              error("at least one public service is required")
+            elif any(.[]; (.env? != null) and ((.env | type) != "object")) then
+              error("service env must be an object")
+            elif any(.[]; (.env? // {}) | to_entries | any(.[]; (.key | valid_env_key | not) or ((.value | type) != "string"))) then
+              error("service env keys must be valid environment variable names and values must be strings")
+            else
+              true
+            end
+          ' >/dev/null
 
-          {
-            echo "FRONTEND_IMAGE_REF=${FRONTEND_IMAGE_REF}"
-            echo "BACKEND_IMAGE_REF=${BACKEND_IMAGE_REF}"
-          } >> "${GITHUB_ENV}"
-
-          {
-            echo "frontend_image_ref=${FRONTEND_IMAGE_REF}"
-            echo "backend_image_ref=${BACKEND_IMAGE_REF}"
-          } >> "${GITHUB_OUTPUT}"
-
-      - name: Build frontend image
-        if: inputs.frontend_context != ''
-        shell: bash
-        env:
-          FRONTEND_CONTEXT: ${{ inputs.frontend_context }}
-          FRONTEND_DOCKERFILE: ${{ inputs.frontend_dockerfile }}
-        run: |
-          set -euo pipefail
-
-          args=(docker buildx build --platform linux/amd64 --load -t "${FRONTEND_IMAGE_REF}")
-          if [ -n "${FRONTEND_DOCKERFILE}" ]; then
-            args+=(-f "${FRONTEND_DOCKERFILE}")
-          fi
-          args+=("${FRONTEND_CONTEXT}")
-          "${args[@]}"
-          docker save "${FRONTEND_IMAGE_REF}" -o frontend-image.tar
-
-      - name: Build backend image
-        if: inputs.backend_context != ''
-        shell: bash
-        env:
-          BACKEND_CONTEXT: ${{ inputs.backend_context }}
-          BACKEND_DOCKERFILE: ${{ inputs.backend_dockerfile }}
-        run: |
-          set -euo pipefail
-
-          args=(docker buildx build --platform linux/amd64 --load -t "${BACKEND_IMAGE_REF}")
-          if [ -n "${BACKEND_DOCKERFILE}" ]; then
-            args+=(-f "${BACKEND_DOCKERFILE}")
-          fi
-          args+=("${BACKEND_CONTEXT}")
-          "${args[@]}"
-          docker save "${BACKEND_IMAGE_REF}" -o backend-image.tar
-
-      - name: Upload frontend image artifact
-        if: inputs.frontend_context != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: municloud-frontend-image
-          path: frontend-image.tar
-          retention-days: 1
-
-      - name: Upload backend image artifact
-        if: inputs.backend_context != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: municloud-backend-image
-          path: backend-image.tar
-          retention-days: 1
-
-  publish:
-    name: publish
-    needs: build
-    runs-on: ubuntu-latest
-    outputs:
-      services_json: ${{ steps.payload.outputs.services_json }}
-    steps:
-      - name: Download frontend image artifact
-        if: inputs.frontend_context != ''
-        uses: actions/download-artifact@v4
-        with:
-          name: municloud-frontend-image
-
-      - name: Download backend image artifact
-        if: inputs.backend_context != ''
-        uses: actions/download-artifact@v4
-        with:
-          name: municloud-backend-image
-
-      - name: Publish images
-        env:
-          FRONTEND_IMAGE_REF: ${{ needs.build.outputs.frontend_image_ref }}
-          BACKEND_IMAGE_REF: ${{ needs.build.outputs.backend_image_ref }}
-          GHCR_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
           echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
 
-          if [ -n "${FRONTEND_IMAGE_REF}" ]; then
-            docker load -i frontend-image.tar
-            docker push "${FRONTEND_IMAGE_REF}"
-          fi
+          services_count="$(printf '%s' "${services}" | jq 'length')"
+          published='[]'
 
-          if [ -n "${BACKEND_IMAGE_REF}" ]; then
-            docker load -i backend-image.tar
-            docker push "${BACKEND_IMAGE_REF}"
-          fi
+          for index in $(seq 0 "$((services_count - 1))"); do
+            service="$(printf '%s' "${services}" | jq -c --argjson index "${index}" '.[$index]')"
+            name="$(printf '%s' "${service}" | jq -r '.name')"
+            source_path="$(printf '%s' "${service}" | jq -r '.sourcePath // ""')"
+            dockerfile="$(printf '%s' "${service}" | jq -r '.dockerfile // ""')"
+            image="$(printf '%s' "${service}" | jq -r '.image // ""')"
 
-      - name: Build Municloud service payload
-        id: payload
-        env:
-          FRONTEND_IMAGE_REF: ${{ needs.build.outputs.frontend_image_ref }}
-          BACKEND_IMAGE_REF: ${{ needs.build.outputs.backend_image_ref }}
-          ASPNETCORE_ENVIRONMENT_INPUT: ${{ inputs.aspnetcore_environment }}
-          FRONTEND_PORT: ${{ inputs.frontend_port }}
-          FRONTEND_PATH: ${{ inputs.frontend_path }}
-          FRONTEND_HEALTH_PATH: ${{ inputs.frontend_health_path }}
-          BACKEND_PORT: ${{ inputs.backend_port }}
-          BACKEND_PATH: ${{ inputs.backend_path }}
-          BACKEND_HEALTH_PATH: ${{ inputs.backend_health_path }}
-        shell: bash
-        run: |
-          set -euo pipefail
+            if [ -n "${source_path}" ]; then
+              if [ -z "${image}" ]; then
+                image="${REGISTRY}/${IMAGE_NAMESPACE}/${name}:${IMAGE_TAG}"
+              fi
 
-          services='[]'
+              args=(docker buildx build --platform linux/amd64 --load -t "${image}")
+              if [ -n "${dockerfile}" ]; then
+                args+=(-f "${dockerfile}")
+              fi
+              args+=("${source_path}")
 
-          if [ -n "${FRONTEND_IMAGE_REF}" ]; then
-            services="$(printf '%s' "${services}" | jq -c \
-              --arg frontend_image "${FRONTEND_IMAGE_REF}" \
-              --argjson frontend_port "${FRONTEND_PORT}" \
-              --arg frontend_path "${FRONTEND_PATH}" \
-              --arg frontend_health_path "${FRONTEND_HEALTH_PATH}" \
-              '. + [{
-                name: "frontend",
-                image: $frontend_image,
-                port: $frontend_port,
-                public: true,
-                path: $frontend_path,
-                health_path: $frontend_health_path
-              }]')"
-          fi
+              "${args[@]}"
+              docker push "${image}"
+            fi
 
-          if [ -n "${BACKEND_IMAGE_REF}" ]; then
-            services="$(printf '%s' "${services}" | jq -c \
-              --arg backend_image "${BACKEND_IMAGE_REF}" \
-              --argjson backend_port "${BACKEND_PORT}" \
-              --arg backend_path "${BACKEND_PATH}" \
-              --arg backend_health_path "${BACKEND_HEALTH_PATH}" \
-              --arg aspnetcore_environment "${ASPNETCORE_ENVIRONMENT_INPUT}" \
-              '. + [{
-                name: "backend",
-                image: $backend_image,
-                port: $backend_port,
-                public: true,
-                path: $backend_path,
-                health_path: $backend_health_path,
-                env: (if $aspnetcore_environment == "" then {} else { ASPNETCORE_ENVIRONMENT: $aspnetcore_environment } end)
-              }]')"
-          fi
+            service="$(
+              printf '%s' "${service}" | jq -c \
+                --arg image "${image}" \
+                '{
+                  name,
+                  image: $image,
+                  port: (.port | tonumber),
+                  public,
+                  path,
+                  health_path: .healthPath,
+                  env: (.env // null)
+                }'
+            )"
+            published="$(jq -cn --argjson services "${published}" --argjson service "${service}" '$services + [$service]')"
+          done
 
-          printf '%s' "${services}" > municloud-services.json
+          printf '%s' "${published}" > municloud-services.json
 
-          SERVICES_JSON="$(cat municloud-services.json)"
-          echo "services_json=${SERVICES_JSON}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "services_json<<EOF"
+            cat municloud-services.json
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
 
   deploy:
     name: deploy
@@ -297,7 +180,7 @@ jobs:
           echo "::add-mask::${MUNICLOUD_API_KEY}"
 
           if [ -z "${APP_ID}" ]; then
-            echo "app_id is required. Use the app id from the Minicloud console URL, for example app_52kqllu8k1nq4kg352kqllu8."
+            echo "app_id is required. Use the app id from the Municloud console URL, for example app_52kqllu8k1nq4kg352kqllu8."
             exit 1
           fi
 
