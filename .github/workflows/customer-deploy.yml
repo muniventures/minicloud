@@ -10,13 +10,13 @@ on:
         required: false
         type: string
         default: sqlite
+      minicloud_environment:
+        required: false
+        type: string
+        default: prod
       services:
         required: true
         type: string
-      municloud_api_url:
-        required: false
-        type: string
-        default: https://cloud.muni.dev/api
       image_tag:
         required: false
         type: string
@@ -166,7 +166,7 @@ jobs:
           MUNICLOUD_API_KEY: ${{ secrets.municloud_api_key }}
           POSTGRES_PASSWORD: ${{ secrets.postgres_password }}
           SERVICES_JSON: ${{ needs.publish.outputs.services_json }}
-          MUNICLOUD_API_URL: ${{ inputs.municloud_api_url }}
+          MINICLOUD_ENVIRONMENT: ${{ inputs.minicloud_environment }}
           APP_ID: ${{ inputs.app_id }}
           DATABASE: ${{ inputs.database }}
         shell: bash
@@ -194,7 +194,18 @@ jobs:
             exit 1
           fi
 
-          MUNICLOUD_API_URL="${MUNICLOUD_API_URL%/}"
+          case "${MINICLOUD_ENVIRONMENT}" in
+            prod)
+              MUNICLOUD_API_URL="https://cloud.muni.dev/api"
+              ;;
+            staging)
+              MUNICLOUD_API_URL="https://municloud-dev.muni.dev/api"
+              ;;
+            *)
+              echo "minicloud_environment must be prod or staging."
+              exit 1
+              ;;
+          esac
 
           api_post() {
             curl --fail-with-body -sS \

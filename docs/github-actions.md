@@ -122,8 +122,8 @@ jobs:
 | --- | --- | --- | --- |
 | `app_id` | Yes | | App id from the Municloud console URL. Pass `${{ vars.MUNICLOUD_APP_ID }}` from the caller workflow. |
 | `database` | No | `sqlite` | `sqlite` or `postgres`. |
+| `minicloud_environment` | No | `prod` | `prod` or `staging`. `prod` uses the production Minicloud API. `staging` uses `https://municloud-dev.muni.dev/api`. |
 | `services` | Yes | | JSON service object or array. Uses the same service fields as `municloud.yml`; use JSON because reusable workflow inputs cannot receive native YAML maps/lists. |
-| `municloud_api_url` | No | `https://cloud.muni.dev/api` | API URL override. |
 | `image_tag` | No | commit SHA | Docker image tag. |
 
 ## Services
