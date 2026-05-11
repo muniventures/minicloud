@@ -156,12 +156,7 @@ jobs:
           done
 
           printf '%s' "${published}" > minicloud-services.json
-
-          {
-            echo "services_json<<EOF"
-            cat minicloud-services.json
-            echo "EOF"
-          } >> "${GITHUB_OUTPUT}"
+          printf 'services_json=%s\n' "${published}" >> "${GITHUB_OUTPUT}"
 
   deploy:
     name: deploy
