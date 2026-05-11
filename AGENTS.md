@@ -1,5 +1,8 @@
 # Codex entry point
 
+Never push code unless explicitly asked.
+Never make unsupported inferences. Verify from source or state uncertainty.
+
 Use `docs/architecture/agent-instructions.md` as the shared instruction source for GitHub Copilot, Claude Code, Codex, and other repository-aware agents.
 
 Before doing any work, read these docs in order:
