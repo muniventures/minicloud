@@ -1,18 +1,18 @@
 # Data, storage, and integrations
 
-This document names Municloud data, storage, and external integration surfaces.
+This document names Minicloud data, storage, and external integration surfaces.
 
 ## V0 data
 
 V0 should avoid a database. State lives in:
 
-- `municloud.yml` in the application repository
+- `minicloud.yml` in the application repository
 - GitHub Actions secrets and variables
 - provider API token in GitHub Actions secrets
 - provider server ID/IP/SKU metadata
 - GHCR images and tags
 - server-side app env-var files
-- `/opt/municloud/apps/<app>/deploys.json`
+- `/opt/minicloud/apps/<app>/deploys.json`
 - Docker Compose project state
 - Caddy config fragments
 
@@ -61,16 +61,16 @@ timeline events when GitHub has new state.
 
 GitHub Container Registry is the default image registry.
 
-For CLI-first V1 deployments, Municloud should expose `registry-dev.muni.dev`
+For CLI-first V1 deployments, Minicloud should expose `registry-dev.muni.dev`
 for dev/staging and `registry.muni.dev` for production as GHCR-backed
 Docker/OCI upload proxies. Docker clients push through the registry
-host; Municloud validates tenant-scoped registry tokens and
-forwards upload-related registry protocol calls to a Municloud-owned GHCR
+host; Minicloud validates tenant-scoped registry tokens and
+forwards upload-related registry protocol calls to a Minicloud-owned GHCR
 namespace with server-side credentials. The runtime pulls the resulting
-Municloud-owned GHCR refs directly with Municloud-managed pull auth. This avoids
-customer GHCR pull-token setup and avoids Municloud owning registry blob storage.
+Minicloud-owned GHCR refs directly with Minicloud-managed pull auth. This avoids
+customer GHCR pull-token setup and avoids Minicloud owning registry blob storage.
 The CLI, registry proxy, and internal deployment workflow must agree on the
-same upstream owner, defaulting to `municloud`; otherwise the proxy can publish
+same upstream owner, defaulting to `minicloud`; otherwise the proxy can publish
 to one GHCR namespace while deployments validate and pull from another.
 
 Image tags:
@@ -83,16 +83,16 @@ The runtime should deploy immutable SHA tags by default.
 
 ## Domains and DNS
 
-Municloud config owns app domain intent, but users own DNS. The CLI can verify DNS records and Caddy certificate readiness, but V1 does not need to manage DNS providers.
+Minicloud config owns app domain intent, but users own DNS. The CLI can verify DNS records and Caddy certificate readiness, but V1 does not need to manage DNS providers.
 
 ## Secrets
 
 Secrets live in two places:
 
 - GitHub Actions secrets for build/deploy credentials
-- server-side app env files under `/opt/municloud/apps/<app>/shared/env`
+- server-side app env files under `/opt/minicloud/apps/<app>/shared/env`
 
-Municloud must never commit secrets to git. Secret listing commands must print names and metadata only.
+Minicloud must never commit secrets to git. Secret listing commands must print names and metadata only.
 
 ## Telemetry
 

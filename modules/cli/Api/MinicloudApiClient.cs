@@ -2,23 +2,23 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Municloud.Cli.Auth;
+using Minicloud.Cli.Auth;
 
-namespace Municloud.Cli.Api;
+namespace Minicloud.Cli.Api;
 
-public sealed class MunicloudApiClient
+public sealed class MinicloudApiClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly CliEnvironment _environment;
     private readonly TokenStore _tokenStore;
     private readonly HttpClient _httpClient;
 
-    public MunicloudApiClient(CliEnvironment environment, TokenStore tokenStore)
+    public MinicloudApiClient(CliEnvironment environment, TokenStore tokenStore)
         : this(environment, tokenStore, new HttpClient())
     {
     }
 
-    public MunicloudApiClient(CliEnvironment environment, TokenStore tokenStore, HttpClient httpClient)
+    public MinicloudApiClient(CliEnvironment environment, TokenStore tokenStore, HttpClient httpClient)
     {
         _environment = environment;
         _tokenStore = tokenStore;
@@ -105,7 +105,7 @@ public sealed class MunicloudApiClient
         var token = tokenOverride ?? _tokenStore.GetToken();
         if (string.IsNullOrWhiteSpace(token))
         {
-            throw new ApiException((int)HttpStatusCode.Unauthorized, "missing_token", "Set MUNICLOUD_TOKEN or run 'municloud token set <token>'.");
+            throw new ApiException((int)HttpStatusCode.Unauthorized, "missing_token", "Set MINICLOUD_TOKEN or run 'minicloud token set <token>'.");
         }
 
         using var request = new HttpRequestMessage(method, _environment.ApiBaseUrl + pathAndQuery);
@@ -122,7 +122,7 @@ public sealed class MunicloudApiClient
         }
 
         var result = await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken);
-        return result ?? throw new ApiException((int)response.StatusCode, "empty_response", "Municloud API returned an empty response.");
+        return result ?? throw new ApiException((int)response.StatusCode, "empty_response", "Minicloud API returned an empty response.");
     }
 
     private async Task<T> SendUnauthenticatedAsync<T>(HttpMethod method, string pathAndQuery, object? body, CancellationToken cancellationToken)
@@ -140,7 +140,7 @@ public sealed class MunicloudApiClient
         }
 
         var result = await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken);
-        return result ?? throw new ApiException((int)response.StatusCode, "empty_response", "Municloud API returned an empty response.");
+        return result ?? throw new ApiException((int)response.StatusCode, "empty_response", "Minicloud API returned an empty response.");
     }
 
     private async Task<T?> SendUnauthenticatedMaybeAcceptedAsync<T>(HttpMethod method, string pathAndQuery, object? body, CancellationToken cancellationToken)
@@ -179,6 +179,6 @@ public sealed class MunicloudApiClient
         {
         }
 
-        throw new ApiException((int)response.StatusCode, "api_error", $"Municloud API returned HTTP {(int)response.StatusCode}.");
+        throw new ApiException((int)response.StatusCode, "api_error", $"Minicloud API returned HTTP {(int)response.StatusCode}.");
     }
 }

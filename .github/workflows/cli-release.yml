@@ -61,7 +61,7 @@ jobs:
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
       - name: Test
-        run: dotnet test modules/tests/Municloud.Cli.Tests/Municloud.Cli.Tests.csproj --configuration Release
+        run: dotnet test modules/tests/Minicloud.Cli.Tests/Minicloud.Cli.Tests.csproj --configuration Release
 
       - name: Publish
         shell: bash
@@ -70,20 +70,20 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          dotnet publish modules/cli/Municloud.Cli.csproj \
+          dotnet publish modules/cli/Minicloud.Cli.csproj \
             --configuration Release \
             --runtime "${RID}" \
             --self-contained true \
             -p:PublishSingleFile=true \
             -p:PublishTrimmed=false \
             -p:Version="${VERSION}" \
-            --output "artifacts/municloud-${RID}"
+            --output "artifacts/minicloud-${RID}"
 
           if [[ "${RID}" == win-* ]]; then
-            mv "artifacts/municloud-${RID}/Municloud.Cli.exe" "artifacts/municloud-${RID}/municloud.exe"
+            mv "artifacts/minicloud-${RID}/Minicloud.Cli.exe" "artifacts/minicloud-${RID}/minicloud.exe"
           else
-            mv "artifacts/municloud-${RID}/Municloud.Cli" "artifacts/municloud-${RID}/municloud"
-            chmod +x "artifacts/municloud-${RID}/municloud"
+            mv "artifacts/minicloud-${RID}/Minicloud.Cli" "artifacts/minicloud-${RID}/minicloud"
+            chmod +x "artifacts/minicloud-${RID}/minicloud"
           fi
 
       - name: Archive
@@ -95,14 +95,14 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           if [ "${ARCHIVE}" = "zip" ]; then
-            (cd "artifacts/municloud-${RID}" && zip -r "../../dist/municloud-${RID}.zip" .)
+            (cd "artifacts/minicloud-${RID}" && zip -r "../../dist/minicloud-${RID}.zip" .)
           else
-            tar -czf "dist/municloud-${RID}.tar.gz" -C "artifacts/municloud-${RID}" .
+            tar -czf "dist/minicloud-${RID}.tar.gz" -C "artifacts/minicloud-${RID}" .
           fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: municloud-${{ matrix.rid }}
+          name: minicloud-${{ matrix.rid }}
           path: dist/*
 
   release:
@@ -122,7 +122,7 @@ jobs:
         run: |
           set -euo pipefail
           cp install.sh install.ps1 dist/
-          (cd dist && sha256sum municloud-* > checksums.txt)
+          (cd dist && sha256sum minicloud-* > checksums.txt)
 
       - uses: softprops/action-gh-release@v2
         with:

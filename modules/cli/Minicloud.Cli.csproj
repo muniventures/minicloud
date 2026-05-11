@@ -12,8 +12,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Municloud.Tests" />
-    <InternalsVisibleTo Include="Municloud.Cli.Tests" />
+    <InternalsVisibleTo Include="Minicloud.Tests" />
+    <InternalsVisibleTo Include="Minicloud.Cli.Tests" />
   </ItemGroup>
 
 </Project>

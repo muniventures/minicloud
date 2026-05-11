@@ -1,16 +1,16 @@
 # Provisioning and billing architecture
 
-Municloud manages the VPS under the hood. Customers should not need to create a VPS, connect their own provider account, or understand the provider surface.
+Minicloud manages the VPS under the hood. Customers should not need to create a VPS, connect their own provider account, or understand the provider surface.
 
 ## Product decision
 
-Municloud is the infrastructure merchant of record for V1:
+Minicloud is the infrastructure merchant of record for V1:
 
-- Municloud chooses the VPS provider.
-- Municloud provisions servers in Municloud-owned provider accounts.
-- Municloud pays the provider.
-- Municloud bills the customer the server cost plus a markup.
-- Municloud owns lifecycle operations: create, bootstrap, suspend, resize where supported, rebuild, and destroy.
+- Minicloud chooses the VPS provider.
+- Minicloud provisions servers in Minicloud-owned provider accounts.
+- Minicloud pays the provider.
+- Minicloud bills the customer the server cost plus a markup.
+- Minicloud owns lifecycle operations: create, bootstrap, suspend, resize where supported, rebuild, and destroy.
 
 This is a stronger product promise than bring-your-own-VPS and creates more operational responsibility.
 
@@ -20,9 +20,9 @@ V0 should rehearse the same model, but for internal use:
 
 - choose one default provider first, while keeping workflows provider-aware
 - store provider API tokens in GitHub Actions secrets
-- run `municloud-provision.yml` manually with `workflow_dispatch`
+- run `minicloud-provision.yml` manually with `workflow_dispatch`
 - create the VPS through the provider API
-- pass cloud-init/user-data that installs the Municloud runtime
+- pass cloud-init/user-data that installs the Minicloud runtime
 - resolve server ID, IP, region, type, and provider metadata dynamically from provider labels
 - deploy through the normal GitHub Actions deploy workflow
 
@@ -35,12 +35,12 @@ V1 moves provisioning into the hosted control plane:
 1. Customer signs up and selects a plan.
 2. Customer connects GitHub and chooses a repository.
 3. Customer selects a simple deployment tier, not a raw VPS SKU.
-4. Municloud maps the tier to a provider, region, and server type.
-5. Municloud creates the VPS in a Municloud-owned provider account.
+4. Minicloud maps the tier to a provider, region, and server type.
+5. Minicloud creates the VPS in a Minicloud-owned provider account.
 6. Cloud-init installs the runtime and registers the server.
 7. GitHub Actions builds the image.
-8. Municloud deploys to the managed VPS.
-9. Municloud bills monthly for base VPS cost plus markup.
+8. Minicloud deploys to the managed VPS.
+9. Minicloud bills monthly for base VPS cost plus markup.
 
 Customers can see the plan, region, included resources, and monthly price. They should not need to see provider IDs unless needed for support.
 
@@ -67,7 +67,7 @@ Adapter responsibilities:
 
 ## Plan abstraction
 
-Do not expose raw provider SKUs as the primary product surface. Expose Municloud plans:
+Do not expose raw provider SKUs as the primary product surface. Expose Minicloud plans:
 
 ```text
 Starter
@@ -86,14 +86,14 @@ Pro
   backups and alerts later
 ```
 
-Internally map each Municloud plan to provider SKU, region, disk, bandwidth assumptions, and target margin.
+Internally map each Minicloud plan to provider SKU, region, disk, bandwidth assumptions, and target margin.
 
 ## Pricing model
 
 For V1, price should be simple and predictable:
 
 ```text
-customer_price = provider_monthly_cost + municloud_markup
+customer_price = provider_monthly_cost + minicloud_markup
 ```
 
 Track:
@@ -102,7 +102,7 @@ Track:
 - provider server ID
 - provider SKU
 - provider listed monthly cost
-- Municloud plan
+- Minicloud plan
 - customer monthly price
 - markup amount
 - provisioning date
@@ -131,11 +131,11 @@ Never silently destroy customer data without a clear retention policy and repeat
 
 Provisioned servers should be born ready. Use cloud-init/user-data to:
 
-- create `municloud` runtime user
+- create `minicloud` runtime user
 - install Docker and Compose
 - install Caddy
 - configure firewall
-- create `/opt/municloud`
+- create `/opt/minicloud`
 - install runtime files
 - register with the control plane using a one-time token
 - start a lightweight runtime agent if V1 uses one
@@ -154,7 +154,7 @@ V0 can use SSH from GitHub Actions for speed. V1 should evaluate an outbound run
 
 ## Operational risks
 
-Municloud-owned VPS billing creates real obligations:
+Minicloud-owned VPS billing creates real obligations:
 
 - abuse and spam risk
 - provider account suspension risk

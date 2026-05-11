@@ -1,4 +1,4 @@
-namespace Municloud.Cli;
+namespace Minicloud.Cli;
 
 public interface IConsole
 {

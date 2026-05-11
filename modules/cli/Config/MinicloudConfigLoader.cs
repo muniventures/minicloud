@@ -2,9 +2,9 @@ using System.Text.RegularExpressions;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
-namespace Municloud.Cli.Config;
+namespace Minicloud.Cli.Config;
 
-public static partial class MunicloudConfigLoader
+public static partial class MinicloudConfigLoader
 {
     public static ConfigLoadResult Load(string path)
     {
@@ -18,17 +18,17 @@ public static partial class MunicloudConfigLoader
 
     public static string ResolveDefaultPath()
     {
-        if (File.Exists("municloud.yml"))
+        if (File.Exists("minicloud.yml"))
         {
-            return "municloud.yml";
+            return "minicloud.yml";
         }
 
-        if (File.Exists("municloudconfig.yml"))
+        if (File.Exists("minicloudconfig.yml"))
         {
-            return "municloudconfig.yml";
+            return "minicloudconfig.yml";
         }
 
-        return "municloud.yml";
+        return "minicloud.yml";
     }
 
     public static ConfigLoadResult Parse(IReadOnlyList<string> lines)
@@ -42,7 +42,7 @@ public static partial class MunicloudConfigLoader
 
         ValidateSupportedRootShape(root, diagnostics);
         var services = ParseServices(root, diagnostics);
-        var config = new MunicloudConfig(
+        var config = new MinicloudConfig(
             GetScalar(root, "app", "app", diagnostics) ?? "",
             GetScalar(root, "database", "database", diagnostics),
             GetScalar(root, "commitSha", "commitSha", diagnostics),
@@ -51,7 +51,7 @@ public static partial class MunicloudConfigLoader
             AppId = GetScalar(root, "appId", "appId", diagnostics)
         };
 
-        diagnostics.AddRange(MunicloudConfigValidator.Validate(config));
+        diagnostics.AddRange(MinicloudConfigValidator.Validate(config));
         return new ConfigLoadResult(config, diagnostics);
     }
 
@@ -113,14 +113,14 @@ public static partial class MunicloudConfigLoader
         }
     }
 
-    private static IReadOnlyDictionary<string, MunicloudServiceConfig> ParseServices(YamlMappingNode root, List<ConfigDiagnostic> diagnostics)
+    private static IReadOnlyDictionary<string, MinicloudServiceConfig> ParseServices(YamlMappingNode root, List<ConfigDiagnostic> diagnostics)
     {
         if (!TryGetNode(root, "services", out var servicesNode) || servicesNode is not YamlMappingNode servicesMapping)
         {
-            return new Dictionary<string, MunicloudServiceConfig>(StringComparer.Ordinal);
+            return new Dictionary<string, MinicloudServiceConfig>(StringComparer.Ordinal);
         }
 
-        var services = new Dictionary<string, MunicloudServiceConfig>(StringComparer.Ordinal);
+        var services = new Dictionary<string, MinicloudServiceConfig>(StringComparer.Ordinal);
         foreach (var (serviceKeyNode, serviceNode) in servicesMapping.Children)
         {
             var serviceName = ScalarKey(serviceKeyNode, "services", diagnostics);
@@ -135,7 +135,7 @@ public static partial class MunicloudConfigLoader
                 continue;
             }
 
-            services[serviceName] = new MunicloudServiceConfig(
+            services[serviceName] = new MinicloudServiceConfig(
                 GetScalar(serviceMapping, "sourcePath", $"services.{serviceName}.sourcePath", diagnostics),
                 GetScalar(serviceMapping, "dockerfile", $"services.{serviceName}.dockerfile", diagnostics),
                 GetScalar(serviceMapping, "image", $"services.{serviceName}.image", diagnostics),

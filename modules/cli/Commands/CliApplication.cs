@@ -4,11 +4,11 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Municloud.Cli.Api;
-using Municloud.Cli.Auth;
-using Municloud.Cli.Config;
+using Minicloud.Cli.Api;
+using Minicloud.Cli.Auth;
+using Minicloud.Cli.Config;
 
-namespace Municloud.Cli.Commands;
+namespace Minicloud.Cli.Commands;
 
 public sealed partial class CliApplication
 {
@@ -25,10 +25,10 @@ public sealed partial class CliApplication
     private readonly IConsole _console;
     private readonly CliEnvironment _environment;
     private readonly TokenStore _tokenStore;
-    private readonly MunicloudApiClient _apiClient;
+    private readonly MinicloudApiClient _apiClient;
     private readonly RegistryImageMapper _registryImageMapper;
 
-    public CliApplication(IConsole console, CliEnvironment environment, TokenStore tokenStore, MunicloudApiClient apiClient)
+    public CliApplication(IConsole console, CliEnvironment environment, TokenStore tokenStore, MinicloudApiClient apiClient)
     {
         _console = console;
         _environment = environment;
@@ -96,14 +96,14 @@ public sealed partial class CliApplication
     {
         if (args.Length == 0 || args[0] != "set")
         {
-            _console.WriteError("Usage: municloud token set <token>");
+            _console.WriteError("Usage: minicloud token set <token>");
             return CliExitCodes.ValidationError;
         }
 
         var token = args.ElementAtOrDefault(1);
         if (string.IsNullOrWhiteSpace(token))
         {
-            _console.WriteError("Usage: municloud token set <token>");
+            _console.WriteError("Usage: minicloud token set <token>");
             return CliExitCodes.ValidationError;
         }
 
@@ -134,11 +134,11 @@ public sealed partial class CliApplication
         var session = await _apiClient.CreateCliLoginSessionAsync(cancellationToken);
         if (!noBrowser && TryOpenBrowser(session.LoginUrl))
         {
-            _console.WriteLine("Opening browser for Municloud login...");
+            _console.WriteLine("Opening browser for Minicloud login...");
         }
         else
         {
-            _console.WriteLine("Open this URL to finish Municloud login:");
+            _console.WriteLine("Open this URL to finish Minicloud login:");
             _console.WriteLine(session.LoginUrl);
         }
 
@@ -152,7 +152,7 @@ public sealed partial class CliApplication
 
     private async Task<int> RunInitAsync(string[] args, CancellationToken cancellationToken)
     {
-        var outputPath = GetOption(args, "--config") ?? "municloud.yml";
+        var outputPath = GetOption(args, "--config") ?? "minicloud.yml";
         var advanced = args.Contains("--advanced", StringComparer.Ordinal);
         if (File.Exists(outputPath) && !args.Contains("--force", StringComparer.Ordinal))
         {
@@ -163,7 +163,7 @@ public sealed partial class CliApplication
             }
         }
 
-        _console.WriteLine("Municloud init");
+        _console.WriteLine("Minicloud init");
         _console.WriteLine();
 
         var me = await _apiClient.GetMeAsync(cancellationToken);
@@ -177,7 +177,7 @@ public sealed partial class CliApplication
         var app = await PromptAppSelectionAsync(organization, cancellationToken);
         var database = app.Database;
 
-        var services = new Dictionary<string, MunicloudServiceConfig>(StringComparer.Ordinal);
+        var services = new Dictionary<string, MinicloudServiceConfig>(StringComparer.Ordinal);
         foreach (var serviceName in PromptServiceNames())
         {
             _console.WriteLine();
@@ -189,42 +189,42 @@ public sealed partial class CliApplication
             var routePath = advanced ? PromptPath($"{ToTitle(serviceName)} public path", defaults.Path) : defaults.Path;
             var healthPath = advanced ? PromptPath($"{ToTitle(serviceName)} health path", defaults.HealthPath) : defaults.HealthPath;
 
-            services[serviceName] = new MunicloudServiceConfig(sourcePath, null, image, port, true, routePath, healthPath);
+            services[serviceName] = new MinicloudServiceConfig(sourcePath, null, image, port, true, routePath, healthPath);
         }
 
-        var config = new MunicloudConfig(app.Slug, database, null, services)
+        var config = new MinicloudConfig(app.Slug, database, null, services)
         {
             AppId = app.Id
         };
-        var diagnostics = MunicloudConfigValidator.Validate(config);
+        var diagnostics = MinicloudConfigValidator.Validate(config);
         if (diagnostics.Count > 0)
         {
             PrintDiagnostics(diagnostics);
             return CliExitCodes.ValidationError;
         }
 
-        File.WriteAllText(outputPath, MunicloudConfigWriter.Write(config));
+        File.WriteAllText(outputPath, MinicloudConfigWriter.Write(config));
         _console.WriteLine();
         _console.WriteLine($"Created {outputPath}");
         if (!advanced)
         {
             _console.WriteLine("Used defaults for registry image refs, ports, routes, and health checks.");
-            _console.WriteLine("Run 'municloud init --advanced' to customize every option.");
+            _console.WriteLine("Run 'minicloud init --advanced' to customize every option.");
         }
-        _console.WriteLine($"Next: municloud deploy --config {outputPath}");
+        _console.WriteLine($"Next: minicloud deploy --config {outputPath}");
         return CliExitCodes.Success;
     }
 
     private async Task<int> RunDeployAsync(string[] args, CancellationToken cancellationToken)
     {
-        var configPath = GetOption(args, "--config") ?? MunicloudConfigLoader.ResolveDefaultPath();
+        var configPath = GetOption(args, "--config") ?? MinicloudConfigLoader.ResolveDefaultPath();
         var databaseOverride = GetOption(args, "--database");
         var postgresPassword = GetOption(args, "--pgpassword");
         var imageTag = GetOption(args, "--tag") ?? "latest";
         var noPublish = args.Contains("--no-publish", StringComparer.Ordinal);
         var publishOnly = args.Contains("--publish-only", StringComparer.Ordinal);
         var verbose = args.Contains("--verbose", StringComparer.Ordinal);
-        var configResult = MunicloudConfigLoader.Load(configPath);
+        var configResult = MinicloudConfigLoader.Load(configPath);
         if (!configResult.IsValid || configResult.Config is null)
         {
             PrintDiagnostics(configResult.Diagnostics);
@@ -289,7 +289,7 @@ public sealed partial class CliApplication
             postgresPassword);
 
         var created = await _apiClient.CreateDeploymentAsync(request, cancellationToken);
-        _console.WriteLine($"Municloud deployment {created.Id}");
+        _console.WriteLine($"Minicloud deployment {created.Id}");
         _console.WriteLine($"Status: {created.Status}");
         if (!string.IsNullOrWhiteSpace(created.PostgresPassword))
         {
@@ -313,7 +313,7 @@ public sealed partial class CliApplication
             _console.WriteLine($"Message: {finalDeployment.FailureMessage}");
         }
 
-        _console.WriteLine($"Logs: municloud logs {finalDeployment.Id}");
+        _console.WriteLine($"Logs: minicloud logs {finalDeployment.Id}");
         return CliExitCodes.DeploymentFailed;
     }
 
@@ -420,7 +420,7 @@ public sealed partial class CliApplication
     {
         if (args.Length == 0)
         {
-            _console.WriteError("Usage: municloud apps list|inspect <app>");
+            _console.WriteError("Usage: minicloud apps list|inspect <app>");
             return CliExitCodes.ValidationError;
         }
 
@@ -456,7 +456,7 @@ public sealed partial class CliApplication
         var appIdOrSlug = args.FirstOrDefault();
         if (string.IsNullOrWhiteSpace(appIdOrSlug))
         {
-            _console.WriteError("Usage: municloud apps inspect <app>");
+            _console.WriteError("Usage: minicloud apps inspect <app>");
             return CliExitCodes.ValidationError;
         }
 
@@ -644,23 +644,23 @@ public sealed partial class CliApplication
 
     private void PrintHelp()
     {
-        _console.WriteLine("Municloud CLI");
+        _console.WriteLine("Minicloud CLI");
         _console.WriteLine();
         _console.WriteLine("Usage:");
-        _console.WriteLine("  municloud login --token <token>");
-        _console.WriteLine("  municloud init [--advanced] [--config municloud.yml] [--force]");
-        _console.WriteLine("  municloud token set <token>");
-        _console.WriteLine("  municloud deploy [--config municloud.yml] [--database db] [--pgpassword password] [--tag tag] [--no-publish] [--publish-only] [--verbose]");
-        _console.WriteLine("  municloud status [deployment-id]");
-        _console.WriteLine("  municloud logs [app|deployment-id] [--service service] [--source source] [--tail count] [--since 30m]");
-        _console.WriteLine("  municloud apps list");
-        _console.WriteLine("  municloud apps inspect <app>");
-        _console.WriteLine("  municloud --env");
+        _console.WriteLine("  minicloud login --token <token>");
+        _console.WriteLine("  minicloud init [--advanced] [--config minicloud.yml] [--force]");
+        _console.WriteLine("  minicloud token set <token>");
+        _console.WriteLine("  minicloud deploy [--config minicloud.yml] [--database db] [--pgpassword password] [--tag tag] [--no-publish] [--publish-only] [--verbose]");
+        _console.WriteLine("  minicloud status [deployment-id]");
+        _console.WriteLine("  minicloud logs [app|deployment-id] [--service service] [--source source] [--tail count] [--since 30m]");
+        _console.WriteLine("  minicloud apps list");
+        _console.WriteLine("  minicloud apps inspect <app>");
+        _console.WriteLine("  minicloud --env");
     }
 
     private void PrintEnvironment()
     {
-        _console.WriteLine("Municloud CLI environment");
+        _console.WriteLine("Minicloud CLI environment");
         _console.WriteLine($"Environment: {CliEnvironment.ApiUrlEnvironmentVariable} defaults to {_environment.ApiBaseUrl}");
         _console.WriteLine($"Registry: {CliEnvironment.RegistryHostEnvironmentVariable} defaults to {_environment.RegistryHost}");
         _console.WriteLine($"Runtime registry owner: {CliEnvironment.RegistryGhcrOwnerEnvironmentVariable} defaults to {_environment.RegistryGhcrOwner}");
@@ -737,7 +737,7 @@ public sealed partial class CliApplication
         while (true)
         {
             var value = PromptRequired(label, defaultValue).Trim().ToLowerInvariant();
-            if (MunicloudConfigLoader.SlugRegex().IsMatch(value))
+            if (MinicloudConfigLoader.SlugRegex().IsMatch(value))
             {
                 return value;
             }
@@ -751,7 +751,7 @@ public sealed partial class CliApplication
         while (true)
         {
             var value = PromptRequired("App name").Trim();
-            if (MunicloudConfigLoader.AppNameRegex().IsMatch(value))
+            if (MinicloudConfigLoader.AppNameRegex().IsMatch(value))
             {
                 return value.ToLowerInvariant();
             }
@@ -883,12 +883,12 @@ public sealed partial class CliApplication
         while (true)
         {
             var value = PromptRequired("Number of services", "3").Trim();
-            if (int.TryParse(value, out var count) && count is >= 1 and <= MunicloudConfigValidator.MaxDeploymentServices)
+            if (int.TryParse(value, out var count) && count is >= 1 and <= MinicloudConfigValidator.MaxDeploymentServices)
             {
                 return count;
             }
 
-            _console.WriteError($"Service count must be between 1 and {MunicloudConfigValidator.MaxDeploymentServices}.");
+            _console.WriteError($"Service count must be between 1 and {MinicloudConfigValidator.MaxDeploymentServices}.");
         }
     }
 
@@ -901,17 +901,17 @@ public sealed partial class CliApplication
             _ => ($"{_environment.RegistryHost}/{app}/{serviceName}:latest", 8080, "/", "/")
         };
 
-    private async Task PublishServiceImagesAsync(MunicloudConfig config, string imageTag, bool verbose, CancellationToken cancellationToken)
+    private async Task PublishServiceImagesAsync(MinicloudConfig config, string imageTag, bool verbose, CancellationToken cancellationToken)
     {
         var publishJobs = new List<ServicePublishJob>();
         foreach (var (serviceName, service) in config.Services)
         {
             var pushImage = PushImageForService(config, serviceName, service, imageTag);
-            if (!_registryImageMapper.UsesMunicloudRegistry(pushImage))
+            if (!_registryImageMapper.UsesMinicloudRegistry(pushImage))
             {
                 throw new CliCommandException(
                     CliExitCodes.ValidationError,
-                    $"Config error: services.{serviceName}.image must start with '{_environment.RegistryHost}/' when publishing. Current value is '{pushImage}'. Remove image to let the CLI derive it, update municloud.yml, or pass --no-publish to deploy an already-published image.");
+                    $"Config error: services.{serviceName}.image must start with '{_environment.RegistryHost}/' when publishing. Current value is '{pushImage}'. Remove image to let the CLI derive it, update minicloud.yml, or pass --no-publish to deploy an already-published image.");
             }
 
             if (string.IsNullOrWhiteSpace(service.SourcePath))
@@ -944,13 +944,13 @@ public sealed partial class CliApplication
             var token = _tokenStore.GetToken();
             if (string.IsNullOrWhiteSpace(token))
             {
-                throw new CliCommandException(CliExitCodes.AuthError, "Auth error: run 'municloud login' before publishing images to the Municloud registry.");
+                throw new CliCommandException(CliExitCodes.AuthError, "Auth error: run 'minicloud login' before publishing images to the Minicloud registry.");
             }
 
             _console.WriteLine($"Logging in to {_environment.RegistryHost}...");
             await RunProcessAsync(
                 "docker",
-                ["login", _environment.RegistryHost, "-u", "municloud", "--password-stdin"],
+                ["login", _environment.RegistryHost, "-u", "minicloud", "--password-stdin"],
                 Environment.CurrentDirectory,
                 cancellationToken,
                 standardInput: token + Environment.NewLine,
@@ -1059,7 +1059,7 @@ public sealed partial class CliApplication
         }
     }
 
-    internal static IReadOnlyList<string> DockerBuildxBuildArgumentsForService(MunicloudServiceConfig service, string pushImage, string? cacheImage = null)
+    internal static IReadOnlyList<string> DockerBuildxBuildArgumentsForService(MinicloudServiceConfig service, string pushImage, string? cacheImage = null)
     {
         var buildArgs = new List<string> { "buildx", "build", "--progress", "plain", "--platform", DeploymentImagePlatform, "--push", "-t", pushImage };
         if (!string.IsNullOrWhiteSpace(cacheImage))
@@ -1080,7 +1080,7 @@ public sealed partial class CliApplication
         return buildArgs;
     }
 
-    internal static IReadOnlyList<ConfigDiagnostic> ValidateDockerfileForService(string serviceName, MunicloudServiceConfig service)
+    internal static IReadOnlyList<ConfigDiagnostic> ValidateDockerfileForService(string serviceName, MinicloudServiceConfig service)
     {
         var diagnostics = new List<ConfigDiagnostic>();
         var dockerfilePath = EffectiveDockerfilePath(service);
@@ -1113,7 +1113,7 @@ public sealed partial class CliApplication
         return diagnostics;
     }
 
-    private static string EffectiveDockerfilePath(MunicloudServiceConfig service) =>
+    private static string EffectiveDockerfilePath(MinicloudServiceConfig service) =>
         string.IsNullOrWhiteSpace(service.Dockerfile)
             ? Path.Combine(service.SourcePath!, "Dockerfile")
             : service.Dockerfile;
@@ -1154,7 +1154,7 @@ public sealed partial class CliApplication
             .Select(argument => argument.Trim());
     }
 
-    private IReadOnlyList<ConfigDiagnostic> ValidateExplicitImagesForNoPublish(MunicloudConfig config)
+    private IReadOnlyList<ConfigDiagnostic> ValidateExplicitImagesForNoPublish(MinicloudConfig config)
     {
         var diagnostics = new List<ConfigDiagnostic>();
         foreach (var (serviceName, service) in config.Services)
@@ -1168,13 +1168,13 @@ public sealed partial class CliApplication
         return diagnostics;
     }
 
-    private string DeploymentImageForService(MunicloudConfig config, string serviceName, MunicloudServiceConfig service, string organizationSlug, bool noPublish, string imageTag)
+    private string DeploymentImageForService(MinicloudConfig config, string serviceName, MinicloudServiceConfig service, string organizationSlug, bool noPublish, string imageTag)
     {
         var image = noPublish ? service.Image! : PushImageForService(config, serviceName, service, imageTag);
         return _registryImageMapper.RuntimeImageForDeployment(image, organizationSlug);
     }
 
-    private string PushImageForService(MunicloudConfig config, string serviceName, MunicloudServiceConfig service, string imageTag) =>
+    private string PushImageForService(MinicloudConfig config, string serviceName, MinicloudServiceConfig service, string imageTag) =>
         string.IsNullOrWhiteSpace(service.Image)
             ? $"{_environment.RegistryHost}/{config.App}/{serviceName}:{RegistryImageMapper.NormalizeImageSegment(imageTag)}"
             : service.Image;
@@ -1191,7 +1191,7 @@ public sealed partial class CliApplication
         return pushImage + ":buildcache";
     }
 
-    internal static string ComputeServiceFingerprint(MunicloudServiceConfig service)
+    internal static string ComputeServiceFingerprint(MinicloudServiceConfig service)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         AppendHash(hash, "platform", DeploymentImagePlatform);
@@ -1216,7 +1216,7 @@ public sealed partial class CliApplication
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 
-    private static IEnumerable<string> EnumerateFingerprintFiles(MunicloudServiceConfig service)
+    private static IEnumerable<string> EnumerateFingerprintFiles(MinicloudServiceConfig service)
     {
         var sourceRoot = Path.GetFullPath(service.SourcePath!);
         var dockerfilePath = Path.GetFullPath(EffectiveDockerfilePath(service));
@@ -1587,7 +1587,7 @@ public sealed partial class CliApplication
             var complete = _services.Values.Count(service => service.IsTerminal);
             var lines = new List<string>
             {
-                "Municloud publish",
+                "Minicloud publish",
                 $"Services: {complete}/{_services.Count} complete"
             };
 
@@ -1746,7 +1746,7 @@ public sealed partial class CliApplication
 
     private sealed record ServicePublishJob(
         string ServiceName,
-        MunicloudServiceConfig Service,
+        MinicloudServiceConfig Service,
         string PushImage,
         string CacheImage,
         string Fingerprint);

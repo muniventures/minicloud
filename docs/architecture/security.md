@@ -15,9 +15,9 @@ Security is part of the product, not a layer added after deployment works.
 
 Bootstrap can connect as `root` or another sudo-capable user.
 
-Runtime deploy operations should use a restricted `municloud` user:
+Runtime deploy operations should use a restricted `minicloud` user:
 
-- owns `/opt/municloud/apps`
+- owns `/opt/minicloud/apps`
 - can run required Docker Compose commands
 - can reload Caddy only through a controlled command path
 - cannot perform arbitrary root operations during normal deploys
@@ -42,14 +42,14 @@ Deployment secrets should not be exposed to pull request workflows from forks.
 Use GitHub-provided tokens where possible for GHCR push. Server-side pulls should use a read-only package token or another minimal credential if needed for private images.
 
 For CLI-first external deployments, prefer `registry-dev.muni.dev` for
-dev/staging and `registry.muni.dev` for production as Municloud upload auth
-boundaries backed by Municloud-owned GHCR. The CLI authenticates to
-Municloud with short-lived push tokens and uploads through the proxy. Runtime
-pulls use Municloud-owned GHCR refs and Municloud-managed pull credentials.
-Municloud's upstream GHCR credential stays server-side only and must never be
+dev/staging and `registry.muni.dev` for production as Minicloud upload auth
+boundaries backed by Minicloud-owned GHCR. The CLI authenticates to
+Minicloud with short-lived push tokens and uploads through the proxy. Runtime
+pulls use Minicloud-owned GHCR refs and Minicloud-managed pull credentials.
+Minicloud's upstream GHCR credential stays server-side only and must never be
 returned to customers, runtime logs, deployment payloads, or dashboard
 responses.
-The internal deployment workflow must use the Municloud registry GHCR
+The internal deployment workflow must use the Minicloud registry GHCR
 credential for manifest validation and runtime `docker login` when deploying
 CLI-published images; the `GHCR_READ_TOKEN` environment secret is required.
 The workflow uses the GitHub actor as the Docker login username.
@@ -58,7 +58,7 @@ The workflow uses the GitHub actor as the Docker login username.
 
 App secrets should be stored in server-side environment files owned by the runtime user with restrictive permissions.
 
-`municloud secrets list` must show names only. `municloud logs` and health-check errors must avoid printing secret values.
+`minicloud secrets list` must show names only. `minicloud logs` and health-check errors must avoid printing secret values.
 
 ## Control-plane security
 
@@ -67,7 +67,7 @@ V1 is a mini-SaaS and needs baseline SaaS security:
 - authenticated user accounts
 - organization or workspace boundary
 - GitHub App installation ownership checks
-- provider account API credentials isolated to Municloud infrastructure
+- provider account API credentials isolated to Minicloud infrastructure
 - server provisioning authorization checks
 - server registration tokens
 - deploy audit events
@@ -83,7 +83,7 @@ Prefer an outbound runtime agent or short-lived server registration token over s
 
 ## Provider and abuse controls
 
-Because Municloud provisions VPSs in Municloud-owned provider accounts, V1 must include basic abuse controls:
+Because Minicloud provisions VPSs in Minicloud-owned provider accounts, V1 must include basic abuse controls:
 
 - payment or private-beta approval before provisioning
 - plan limits for servers, regions, bandwidth assumptions, and app count

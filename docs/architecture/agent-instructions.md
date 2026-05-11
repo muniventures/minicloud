@@ -1,12 +1,12 @@
 # Shared agent instructions
 
-This document is the shared instruction source for repository-aware coding agents, including GitHub Copilot, Claude Code, Codex, and future Municloud-specific agents.
+This document is the shared instruction source for repository-aware coding agents, including GitHub Copilot, Claude Code, Codex, and future Minicloud-specific agents.
 
 Read this after [README.md](README.md), then use [agent-lookup.md](agent-lookup.md) and [domain-map.md](domain-map.md) when you need faster retrieval from task wording to architecture or implementation entrypoints. Continue with [backend.md](backend.md), [frontend.md](frontend.md), and [data-integrations.md](data-integrations.md) based on the area you are changing.
 
 ## Product state
 
-Municloud has a working V0 GitHub Actions deployment path and is beginning the hosted control-plane implementation. The current source of product truth is:
+Minicloud has a working V0 GitHub Actions deployment path and is beginning the hosted control-plane implementation. The current source of product truth is:
 
 - `docs/product-spec.md`
 - `docs/product-plan.md`
@@ -19,9 +19,9 @@ Current baseline module layout:
 - `modules/dashboard` -> React Router + shadcn dashboard for onboarding, apps, deploys, API keys, domains, and settings
 - `modules/tests` -> xUnit tests for the control-plane API and service layer
 
-V0 is the product for the project owner's own consumption: a personal deployment system for one or more apps on a Municloud-managed cheap VPS. GitHub Actions is the V0 operator surface for provider provisioning, deploy, logs, and rollback. It should be solid and pleasant for internal use, but it does not need a CLI, public sign-up, billing, multi-user account management, or a hosted SaaS dashboard.
+V0 is the product for the project owner's own consumption: a personal deployment system for one or more apps on a Minicloud-managed cheap VPS. GitHub Actions is the V0 operator surface for provider provisioning, deploy, logs, and rollback. It should be solid and pleasant for internal use, but it does not need a CLI, public sign-up, billing, multi-user account management, or a hosted SaaS dashboard.
 
-V1 is the productized version exposed to other developers as a mini-SaaS. Municloud manages VPS provisioning under the hood in Municloud-owned provider accounts, chooses the provider/SKU from product plans, and charges customers the VPS cost plus markup. V1 should include a hosted control plane, GitHub integration, onboarding, accounts, app/server lifecycle, deploy history, logs/status visibility, domains, secrets guidance, rollback, and billing foundation.
+V1 is the productized version exposed to other developers as a mini-SaaS. Minicloud manages VPS provisioning under the hood in Minicloud-owned provider accounts, chooses the provider/SKU from product plans, and charges customers the VPS cost plus markup. V1 should include a hosted control plane, GitHub integration, onboarding, accounts, app/server lifecycle, deploy history, logs/status visibility, domains, secrets guidance, rollback, and billing foundation.
 
 ## Product principles
 
@@ -96,7 +96,7 @@ V1 should extract the repeated V0 steps into a public product: managed VPS provi
 Prefer a hybrid architecture:
 
 - GitHub Actions builds images and pushes to GHCR.
-- The Municloud control plane owns onboarding, GitHub App installation state, provider provisioning, app/server metadata, deploy history, billing, and user-facing status.
+- The Minicloud control plane owns onboarding, GitHub App installation state, provider provisioning, app/server metadata, deploy history, billing, and user-facing status.
 - The VPS runtime performs deployments and reports status.
 - Any CLI is an escape hatch, not the primary V1 onboarding path.
 
@@ -138,11 +138,11 @@ The server runtime should own:
 
 ## Naming and vocabulary
 
-- Product name: Municloud.
-- Config file: `municloud.yml`.
-- Server runtime user: `municloud` unless a spec chooses `deploy`.
-- App root: `/opt/municloud/apps/<app-name>`.
-- Shared runtime root: `/opt/municloud`.
+- Product name: Minicloud.
+- Config file: `minicloud.yml`.
+- Server runtime user: `minicloud` unless a spec chooses `deploy`.
+- App root: `/opt/minicloud/apps/<app-name>`.
+- Shared runtime root: `/opt/minicloud`.
 - Default reverse proxy: Caddy.
 - Default registry: GitHub Container Registry.
 - Default build orchestrator: GitHub Actions.
@@ -159,7 +159,7 @@ The server runtime should own:
 
 See [backend.md](backend.md) for the complete structure and boundaries. The highest-priority implementation rules are:
 
-- `modules/api` is the hosted Municloud control-plane API.
+- `modules/api` is the hosted Minicloud control-plane API.
 - Controllers should stay thin and delegate business logic to services.
 - Controller inputs must use DTOs, not EF entities.
 - Services are the main business-logic, orchestration, and data-access boundary.
@@ -192,7 +192,7 @@ await executionStrategy.ExecuteAsync(async () =>
 
 See [frontend.md](frontend.md) for dashboard structure and routing. The highest-priority implementation rules are:
 
-- `modules/dashboard` is the hosted Municloud customer dashboard.
+- `modules/dashboard` is the hosted Minicloud customer dashboard.
 - Route components belong in `app/core/routes`.
 - Feature logic belongs in `app/modules/<Module>/<Module>Module.tsx`.
 - Presentational components belong in `app/modules/<Module>/components`.

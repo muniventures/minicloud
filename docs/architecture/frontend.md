@@ -1,8 +1,8 @@
 # Frontend architecture (React)
 
-This document describes the Municloud dashboard architecture and target frontend conventions. It follows the same documentation pattern as TeamCore, adapted for Municloud's hosted control-plane dashboard.
+This document describes the Minicloud dashboard architecture and target frontend conventions. It follows the same documentation pattern as TeamCore, adapted for Minicloud's hosted control-plane dashboard.
 
-Municloud dashboard is built with:
+Minicloud dashboard is built with:
 
 - React
 - React Router
@@ -17,7 +17,7 @@ Municloud dashboard is built with:
 
 **Project:** `modules/dashboard`
 
-**Purpose:** primary Municloud customer dashboard for sign-up, organization setup, API keys, apps, deployments, servers, domains, deployment status, runtime diagnostics, and future billing.
+**Purpose:** primary Minicloud customer dashboard for sign-up, organization setup, API keys, apps, deployments, servers, domains, deployment status, runtime diagnostics, and future billing.
 
 **Expected entrypoints:**
 
@@ -92,7 +92,7 @@ Feature-specific endpoint modules should live in `app/api/<feature>Api.ts` and r
 Firebase is the user authentication provider. The frontend should keep these concepts separate:
 
 - Firebase user session
-- Municloud user profile
+- Minicloud user profile
 - selected organization
 - organization membership/role
 - API key credentials, which are created in the dashboard but used by external automation
@@ -171,7 +171,7 @@ Avoid duplicating polling loops across modules. Deployment status polling should
 
 ## Localization
 
-Municloud can start English-only. If localization is introduced, use namespaced messages per feature and avoid hard-coded UI strings in module code.
+Minicloud can start English-only. If localization is introduced, use namespaced messages per feature and avoid hard-coded UI strings in module code.
 
 ## Where to look when changing frontend architecture
 
@@ -181,4 +181,4 @@ Municloud can start English-only. If localization is introduced, use namespaced 
 - Auth: `modules/dashboard/app/core/auth/*`
 - API client: `modules/dashboard/app/api/apiClient.ts`
 - Feature modules: `modules/dashboard/app/modules/*`
-- Control-plane specs: `features/product/municloud-control-plane`
+- Control-plane specs: `features/product/minicloud-control-plane`

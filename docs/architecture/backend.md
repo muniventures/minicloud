@@ -1,12 +1,12 @@
 # Backend architecture (.NET)
 
-This document describes the Municloud backend architecture and target service vocabulary. It follows the same documentation pattern as TeamCore, adapted for Municloud's control-plane, deployment, and hosting domains.
+This document describes the Minicloud backend architecture and target service vocabulary. It follows the same documentation pattern as TeamCore, adapted for Minicloud's control-plane, deployment, and hosting domains.
 
 ## Projects and responsibilities
 
 ### `modules/api` (ASP.NET Core Web API)
 
-**Purpose:** hosted Municloud control-plane API for customer onboarding, Firebase-authenticated accounts, API keys, app registration, deployments, VPS/server registry, deploy history, DNS/HTTPS status, runtime communication, and future billing foundation.
+**Purpose:** hosted Minicloud control-plane API for customer onboarding, Firebase-authenticated accounts, API keys, app registration, deployments, VPS/server registry, deploy history, DNS/HTTPS status, runtime communication, and future billing foundation.
 
 **Entry point:** `modules/api/Program.cs`.
 
@@ -15,7 +15,7 @@ This document describes the Municloud backend architecture and target service vo
 - .NET 10 ASP.NET Core Web API
 - EF Core + PostgreSQL
 - Firebase JWT bearer authentication for dashboard users
-- Municloud API keys for customer CI/CLI access
+- Minicloud API keys for customer CI/CLI access
 - OpenAPI for local development and agent discoverability
 - Structured logging and health checks
 
@@ -48,7 +48,7 @@ Controllers should not directly call cloud providers, mutate Caddy/Compose conte
 
 ### Accounts and organizations
 
-Municloud uses a simple SaaS account hierarchy:
+Minicloud uses a simple SaaS account hierarchy:
 
 - `User` represents a Firebase-authenticated human user.
 - `Organization` represents a customer account boundary.
@@ -94,7 +94,7 @@ Do not overwrite historical deployment rows to represent new deployments. Create
 
 ### Servers and runtime registration
 
-Servers are Municloud-owned VPS instances. The control plane owns the server registry and provider metadata:
+Servers are Minicloud-owned VPS instances. The control plane owns the server registry and provider metadata:
 
 - provider (`hetzner`, future `digitalocean`)
 - provider server ID
@@ -229,7 +229,7 @@ External telemetry should be optional. Missing telemetry configuration must not 
 
 - API entrypoint: `modules/api/Program.cs`
 - Backend tests: `modules/tests`
-- Feature specs: `features/product/municloud-control-plane`
+- Feature specs: `features/product/minicloud-control-plane`
 - Runtime/deployment docs: `docs/architecture/runtime.md`
 - Provider/billing docs: `docs/architecture/provisioning-and-billing.md`
 - Data/integration docs: `docs/architecture/data-integrations.md`

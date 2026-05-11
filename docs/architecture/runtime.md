@@ -1,6 +1,6 @@
 # VPS runtime architecture
 
-This document describes the planned Municloud server runtime and V0 GitHub Actions behavior.
+This document describes the planned Minicloud server runtime and V0 GitHub Actions behavior.
 
 ## Runtime goal
 
@@ -12,15 +12,15 @@ The runtime turns a fresh Ubuntu LTS VPS into a predictable host for Docker-base
 - Docker Engine and Docker Compose plugin
 - Caddy for reverse proxy and automatic HTTPS
 - UFW firewall with SSH, HTTP, and HTTPS allowed
-- `municloud` Linux user for deployment operations
-- app directories under `/opt/municloud/apps`
+- `minicloud` Linux user for deployment operations
+- app directories under `/opt/minicloud/apps`
 - release metadata stored as JSON
 - app environment files stored on the VPS, outside git
 
 ## Filesystem layout
 
 ```text
-/opt/municloud/
+/opt/minicloud/
   bin/
   caddy/
     Caddyfile
@@ -47,10 +47,10 @@ For Docker image deployments, `current/` may contain metadata rather than a full
 
 V0 uses GitHub Actions as the operator surface:
 
-- `.github/workflows/municloud-provision.yml`
-- `.github/workflows/municloud-deploy.yml`
-- `.github/workflows/municloud-logs.yml`
-- `.github/workflows/municloud-rollback.yml`
+- `.github/workflows/minicloud-provision.yml`
+- `.github/workflows/minicloud-deploy.yml`
+- `.github/workflows/minicloud-logs.yml`
+- `.github/workflows/minicloud-rollback.yml`
 
 Workflow steps and remote commands must be idempotent where practical. Re-running provisioning/bootstrap should repair missing packages or config, not duplicate users, firewall rules, or Caddy entries.
 
@@ -69,7 +69,7 @@ Failed health checks should mark the deploy as failed and restore the previous r
 
 ## Compose conventions
 
-- One Compose project per Municloud app.
+- One Compose project per Minicloud app.
 - Compose project name should be stable and derived from the app name.
 - Services should be connected to a shared Caddy network when Caddy needs to reach them.
 - Host ports should be avoided for app containers unless required.
@@ -79,8 +79,8 @@ Failed health checks should mark the deploy as failed and restore the previous r
 
 V0 supports app-selected database mode on the same VPS:
 
-- `sqlite` mounts `/opt/municloud/apps/<app>/data/sqlite` into the app container and sets `DATABASE_URL=sqlite:////data/sqlite/app.db`.
-- `postgres` adds a `postgres:16-alpine` service to the same Compose project, persists data under `/opt/municloud/apps/<app>/data/postgres`, waits for Postgres health before starting the web service, and sets a Postgres `DATABASE_URL`.
+- `sqlite` mounts `/opt/minicloud/apps/<app>/data/sqlite` into the app container and sets `DATABASE_URL=sqlite:////data/sqlite/app.db`.
+- `postgres` adds a `postgres:16-alpine` service to the same Compose project, persists data under `/opt/minicloud/apps/<app>/data/postgres`, waits for Postgres health before starting the web service, and sets a Postgres `DATABASE_URL`.
 
 The separate database VPS topology is deferred until same-VPS app/database deployment is stable.
 
@@ -106,7 +106,7 @@ Health-check failure messages should include URL, timeout, last status, and last
 
 V0 logs can proxy `docker compose logs` through a manually dispatched GitHub Actions workflow.
 
-V1 `municloud logs` should support:
+V1 `minicloud logs` should support:
 
 - app selection
 - service selection
@@ -122,4 +122,4 @@ Migration rollback is not automatic in V0 or V1. Destructive database migrations
 
 ## Runtime upgrade
 
-Runtime upgrades should be explicit and reversible. V1 can begin with versioned runtime files under `/opt/municloud/bin` and a `municloud runtime upgrade` command that installs a new version after validation.
+Runtime upgrades should be explicit and reversible. V1 can begin with versioned runtime files under `/opt/minicloud/bin` and a `minicloud runtime upgrade` command that installs a new version after validation.

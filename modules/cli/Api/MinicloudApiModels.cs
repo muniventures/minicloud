@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace Municloud.Cli.Api;
+namespace Minicloud.Cli.Api;
 
 public sealed record MeResponse(
     string UserId,

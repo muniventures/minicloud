@@ -1,14 +1,14 @@
-using Municloud.Cli.Config;
-using Municloud.Cli.Commands;
+using Minicloud.Cli.Config;
+using Minicloud.Cli.Commands;
 
-namespace Municloud.Tests;
+namespace Minicloud.Tests;
 
 public sealed class CliConfigTests
 {
     [Fact]
     public void Parse_accepts_multi_service_config()
     {
-        var result = MunicloudConfigLoader.Parse(
+        var result = MinicloudConfigLoader.Parse(
         [
             "app: teamcore",
             "appId: app_123",
@@ -40,7 +40,7 @@ public sealed class CliConfigTests
     [Fact]
     public void Parse_accepts_service_environment_variables()
     {
-        var result = MunicloudConfigLoader.Parse(
+        var result = MinicloudConfigLoader.Parse(
         [
             "app: teamcore",
             "appId: app_123",
@@ -64,7 +64,7 @@ public sealed class CliConfigTests
     [Fact]
     public void Parse_accepts_underscores_in_slugs()
     {
-        var result = MunicloudConfigLoader.Parse(
+        var result = MinicloudConfigLoader.Parse(
         [
             "app: vet_core",
             "appId: app_123",
@@ -87,7 +87,7 @@ public sealed class CliConfigTests
     [InlineData("vet.core")]
     public void Parse_rejects_invalid_app_slugs(string app)
     {
-        var result = MunicloudConfigLoader.Parse(
+        var result = MinicloudConfigLoader.Parse(
         [
             $"app: {app}",
             "appId: app_123",
@@ -106,7 +106,7 @@ public sealed class CliConfigTests
     [Fact]
     public void Parse_rejects_missing_app_id()
     {
-        var result = MunicloudConfigLoader.Parse(
+        var result = MinicloudConfigLoader.Parse(
         [
             "app: teamcore",
             "services:",
@@ -124,7 +124,7 @@ public sealed class CliConfigTests
     [Fact]
     public void Parse_preserves_quoted_yaml_scalars()
     {
-        var result = MunicloudConfigLoader.Parse(
+        var result = MinicloudConfigLoader.Parse(
         [
             "app: teamcore",
             "appId: app_123",
@@ -148,7 +148,7 @@ public sealed class CliConfigTests
     [Fact]
     public void Parse_reports_yaml_syntax_errors()
     {
-        var result = MunicloudConfigLoader.Parse(
+        var result = MinicloudConfigLoader.Parse(
         [
             "app: teamcore",
             "appId: app_123",
@@ -164,7 +164,7 @@ public sealed class CliConfigTests
     [Fact]
     public void Parse_rejects_nested_environment_values()
     {
-        var result = MunicloudConfigLoader.Parse(
+        var result = MinicloudConfigLoader.Parse(
         [
             "app: teamcore",
             "appId: app_123",
@@ -187,7 +187,7 @@ public sealed class CliConfigTests
     [Fact]
     public void Parse_rejects_invalid_environment_variable_names()
     {
-        var result = MunicloudConfigLoader.Parse(
+        var result = MinicloudConfigLoader.Parse(
         [
             "app: teamcore",
             "appId: app_123",
@@ -209,7 +209,7 @@ public sealed class CliConfigTests
     [Fact]
     public void Parse_rejects_invalid_port_and_path()
     {
-        var result = MunicloudConfigLoader.Parse(
+        var result = MinicloudConfigLoader.Parse(
         [
             "app: teamcore",
             "services:",
@@ -229,7 +229,7 @@ public sealed class CliConfigTests
     [Fact]
     public void Parse_accepts_config_without_images_for_cli_publish_path()
     {
-        var result = MunicloudConfigLoader.Parse(
+        var result = MinicloudConfigLoader.Parse(
         [
             "app: teamcore",
             "appId: app_123",
@@ -257,11 +257,11 @@ public sealed class CliConfigTests
     [Fact]
     public void Write_round_trips_init_style_config()
     {
-        var config = new MunicloudConfig(
+        var config = new MinicloudConfig(
             "teamcore",
             "sqlite",
             null,
-            new Dictionary<string, MunicloudServiceConfig>
+            new Dictionary<string, MinicloudServiceConfig>
             {
                 ["backend"] = new("modules/api", null, "ghcr.io/customer/teamcore-backend:latest", 8080, true, "/", "/health")
             })
@@ -269,8 +269,8 @@ public sealed class CliConfigTests
             AppId = "app_123"
         };
 
-        var yaml = MunicloudConfigWriter.Write(config);
-        var result = MunicloudConfigLoader.Parse(yaml.Split(Environment.NewLine));
+        var yaml = MinicloudConfigWriter.Write(config);
+        var result = MinicloudConfigLoader.Parse(yaml.Split(Environment.NewLine));
 
         Assert.True(result.IsValid);
         Assert.NotNull(result.Config);
@@ -282,29 +282,29 @@ public sealed class CliConfigTests
     [Fact]
     public void Parse_accepts_custom_config_with_three_services()
     {
-        var result = MunicloudConfigLoader.Parse(
+        var result = MinicloudConfigLoader.Parse(
         [
-            "app: municloud",
+            "app: minicloud",
             "appId: app_123",
             "database: postgres",
             "services:",
             "  api:",
             "    sourcePath: modules/api",
-            "    image: ghcr.io/municloud/api:latest",
+            "    image: ghcr.io/minicloud/api:latest",
             "    port: 8080",
             "    public: true",
             "    path: /api",
             "    healthPath: /health",
             "  dashboard:",
             "    sourcePath: modules/dashboard",
-            "    image: ghcr.io/municloud/dashboard:latest",
+            "    image: ghcr.io/minicloud/dashboard:latest",
             "    port: 3000",
             "    public: true",
             "    path: /",
             "    healthPath: /",
             "  registry:",
             "    sourcePath: modules/registry",
-            "    image: ghcr.io/municloud/registry:latest",
+            "    image: ghcr.io/minicloud/registry:latest",
             "    port: 5000",
             "    public: false",
             "    path: /registry",
@@ -316,9 +316,9 @@ public sealed class CliConfigTests
     }
 
     [Fact]
-    public void Docker_buildx_arguments_target_municloud_host_platform_and_push_manifest()
+    public void Docker_buildx_arguments_target_minicloud_host_platform_and_push_manifest()
     {
-        var service = new MunicloudServiceConfig("modules/frontend", "modules/frontend/Dockerfile", null, 3000, true, "/", "/health");
+        var service = new MinicloudServiceConfig("modules/frontend", "modules/frontend/Dockerfile", null, 3000, true, "/", "/health");
 
         var args = CliApplication.DockerBuildxBuildArgumentsForService(service, "ghcr.io/customer/teamcore-frontend:latest");
 
@@ -343,7 +343,7 @@ public sealed class CliConfigTests
     [Fact]
     public void Docker_buildx_arguments_include_registry_cache_when_available()
     {
-        var service = new MunicloudServiceConfig("modules/frontend", null, null, 3000, true, "/", "/health");
+        var service = new MinicloudServiceConfig("modules/frontend", null, null, 3000, true, "/", "/health");
 
         var args = CliApplication.DockerBuildxBuildArgumentsForService(
             service,
@@ -359,7 +359,7 @@ public sealed class CliConfigTests
     [Fact]
     public void Dockerfile_validation_rejects_missing_exposed_service_port()
     {
-        var tempDirectory = Directory.CreateTempSubdirectory("municloud-dockerfile-test-");
+        var tempDirectory = Directory.CreateTempSubdirectory("minicloud-dockerfile-test-");
         try
         {
             var dockerfilePath = Path.Combine(tempDirectory.FullName, "Dockerfile");
@@ -368,7 +368,7 @@ public sealed class CliConfigTests
                 "FROM node:20-alpine",
                 "CMD [\"npm\", \"run\", \"start\"]"
             ]);
-            var service = new MunicloudServiceConfig(tempDirectory.FullName, null, null, 3000, true, "/", "/health");
+            var service = new MinicloudServiceConfig(tempDirectory.FullName, null, null, 3000, true, "/", "/health");
 
             var diagnostics = CliApplication.ValidateDockerfileForService("frontend", service);
 
@@ -383,7 +383,7 @@ public sealed class CliConfigTests
     [Fact]
     public void Dockerfile_validation_accepts_start_command_and_matching_exposed_port()
     {
-        var tempDirectory = Directory.CreateTempSubdirectory("municloud-dockerfile-test-");
+        var tempDirectory = Directory.CreateTempSubdirectory("minicloud-dockerfile-test-");
         try
         {
             var dockerfilePath = Path.Combine(tempDirectory.FullName, "Service.Dockerfile");
@@ -393,7 +393,7 @@ public sealed class CliConfigTests
                 "EXPOSE 8080/tcp",
                 "ENTRYPOINT [\"dotnet\", \"TeamCore.Api.dll\"]"
             ]);
-            var service = new MunicloudServiceConfig(tempDirectory.FullName, dockerfilePath, null, 8080, true, "/api", "/health");
+            var service = new MinicloudServiceConfig(tempDirectory.FullName, dockerfilePath, null, 8080, true, "/api", "/health");
 
             var diagnostics = CliApplication.ValidateDockerfileForService("backend", service);
 
@@ -423,7 +423,7 @@ public sealed class CliConfigTests
             lines.Add("    healthPath: /health");
         }
 
-        var result = MunicloudConfigLoader.Parse(lines);
+        var result = MinicloudConfigLoader.Parse(lines);
 
         Assert.False(result.IsValid);
         Assert.Contains(result.Diagnostics, x => x.Field == "services" && x.Message.Contains("At most 5", StringComparison.Ordinal));

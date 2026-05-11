@@ -1,6 +1,6 @@
 # CLI Documentation
 
-The current command is `municloud`.
+The current command is `minicloud`.
 
 ## Authenticate
 
@@ -14,45 +14,45 @@ Create an API key in the Minicloud console with these scopes:
 Then log in:
 
 ```bash
-municloud login --token <MUNICLOUD_API_KEY>
+minicloud login --token <MINICLOUD_API_KEY>
 ```
 
 Or store the token directly:
 
 ```bash
-municloud token set <MUNICLOUD_API_KEY>
+minicloud token set <MINICLOUD_API_KEY>
 ```
 
 For CI or temporary shell use:
 
 ```bash
-export MUNICLOUD_TOKEN=<MUNICLOUD_API_KEY>
+export MINICLOUD_TOKEN=<MINICLOUD_API_KEY>
 ```
 
-## Create `municloud.yml`
+## Create `minicloud.yml`
 
 From your app repository:
 
 ```bash
-municloud init
+minicloud init
 ```
 
-The wizard lists existing apps in your organization and includes `Create new app`. The generated `municloud.yml` always includes the selected or newly created `appId`.
+The wizard lists existing apps in your organization and includes `Create new app`. The generated `minicloud.yml` always includes the selected or newly created `appId`.
 
 For more prompts:
 
 ```bash
-municloud init --advanced
+minicloud init --advanced
 ```
 
 Use another config path:
 
 ```bash
-municloud init --config path/to/municloud.yml
-municloud deploy --config path/to/municloud.yml
+minicloud init --config path/to/minicloud.yml
+minicloud deploy --config path/to/minicloud.yml
 ```
 
-## `municloud.yml` Reference
+## `minicloud.yml` Reference
 
 Minimal backend app:
 
@@ -137,7 +137,7 @@ services:
 Deploy prebuilt images with:
 
 ```bash
-municloud deploy --no-publish
+minicloud deploy --no-publish
 ```
 
 ## Root Fields
@@ -145,7 +145,7 @@ municloud deploy --no-publish
 | Field | Required | Description |
 | --- | --- | --- |
 | `app` | Yes | Stable app slug. Use lowercase letters, numbers, dashes, or underscores. |
-| `appId` | Yes | Stable Municloud app ID. `municloud deploy` requires this value and sends it with the deployment. |
+| `appId` | Yes | Stable Minicloud app ID. `minicloud deploy` requires this value and sends it with the deployment. |
 | `database` | No | `sqlite` or `postgres`. |
 | `commitSha` | No | Optional source revision to attach to the deployment. |
 | `services` | Yes | Map of service definitions. One to five services. |
@@ -157,7 +157,7 @@ municloud deploy --no-publish
 `postgres` adds a managed Postgres service next to your app. Pass a password on first deploy:
 
 ```bash
-municloud deploy --pgpassword '<strong-password>'
+minicloud deploy --pgpassword '<strong-password>'
 ```
 
 ## Service Fields
@@ -186,39 +186,39 @@ Environment variable names must match:
 Build, publish, create deployment, and wait:
 
 ```bash
-municloud deploy
+minicloud deploy
 ```
 
-On deploy, the CLI requires `appId` in `municloud.yml`. App selection or app creation happens in `municloud init`, not during deploy.
+On deploy, the CLI requires `appId` in `minicloud.yml`. App selection or app creation happens in `minicloud init`, not during deploy.
 
 Common overrides:
 
 ```bash
-municloud deploy --database postgres
-municloud deploy --tag $(git rev-parse --short HEAD)
-municloud deploy --verbose
+minicloud deploy --database postgres
+minicloud deploy --tag $(git rev-parse --short HEAD)
+minicloud deploy --verbose
 ```
 
 Publish images without creating a deployment:
 
 ```bash
-municloud deploy --publish-only
+minicloud deploy --publish-only
 ```
 
 Deploy already-published images:
 
 ```bash
-municloud deploy --no-publish
+minicloud deploy --no-publish
 ```
 
 ## Status, Logs, And Apps
 
 ```bash
-municloud status
-municloud status <deployment-id>
-municloud logs <app-or-deployment-id>
-municloud apps list
-municloud apps inspect <app>
+minicloud status
+minicloud status <deployment-id>
+minicloud logs <app-or-deployment-id>
+minicloud apps list
+minicloud apps inspect <app>
 ```
 
 ## Environment Defaults
@@ -226,15 +226,15 @@ municloud apps inspect <app>
 Show CLI environment defaults:
 
 ```bash
-municloud --env
+minicloud --env
 ```
 
 Supported environment variables:
 
 | Variable | Description |
 | --- | --- |
-| `MUNICLOUD_TOKEN` | API key used by CLI commands. |
-| `MUNICLOUD_API_URL` | API base URL. Defaults to `https://cloud.muni.dev/api`. |
-| `MUNICLOUD_REGISTRY_HOST` | Registry host used for CLI image publishing. |
-| `MUNICLOUD_REGISTRY_GHCR_OWNER` | Runtime GHCR owner. |
-| `MUNICLOUD_RUNTIME_REGISTRY_PREFIX` | Runtime image prefix. |
+| `MINICLOUD_TOKEN` | API key used by CLI commands. |
+| `MINICLOUD_API_URL` | API base URL. Defaults to `https://cloud.muni.dev/api`. |
+| `MINICLOUD_REGISTRY_HOST` | Registry host used for CLI image publishing. |
+| `MINICLOUD_REGISTRY_GHCR_OWNER` | Runtime GHCR owner. |
+| `MINICLOUD_RUNTIME_REGISTRY_PREFIX` | Runtime image prefix. |

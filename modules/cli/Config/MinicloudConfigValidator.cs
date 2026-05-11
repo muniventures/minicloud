@@ -1,6 +1,6 @@
-namespace Municloud.Cli.Config;
+namespace Minicloud.Cli.Config;
 
-public static class MunicloudConfigValidator
+public static class MinicloudConfigValidator
 {
     public const int MaxDeploymentServices = 5;
 
@@ -10,14 +10,14 @@ public static class MunicloudConfigValidator
         "postgres"
     };
 
-    public static IReadOnlyList<ConfigDiagnostic> Validate(MunicloudConfig config)
+    public static IReadOnlyList<ConfigDiagnostic> Validate(MinicloudConfig config)
     {
         var diagnostics = new List<ConfigDiagnostic>();
         ValidateSlug(diagnostics, config.App, "app", "App is required and must use lowercase letters, numbers, dashes, and underscores.");
 
         if (string.IsNullOrWhiteSpace(config.AppId))
         {
-            diagnostics.Add(new ConfigDiagnostic("appId", "App ID is required. Run 'municloud init' to select or create an app."));
+            diagnostics.Add(new ConfigDiagnostic("appId", "App ID is required. Run 'minicloud init' to select or create an app."));
         }
 
         if (!string.IsNullOrWhiteSpace(config.Database) && !Databases.Contains(config.Database))
@@ -96,7 +96,7 @@ public static class MunicloudConfigValidator
 
     private static void ValidateSlug(List<ConfigDiagnostic> diagnostics, string? value, string field, string message)
     {
-        if (string.IsNullOrWhiteSpace(value) || !MunicloudConfigLoader.SlugRegex().IsMatch(value))
+        if (string.IsNullOrWhiteSpace(value) || !MinicloudConfigLoader.SlugRegex().IsMatch(value))
         {
             diagnostics.Add(new ConfigDiagnostic(field, message));
         }

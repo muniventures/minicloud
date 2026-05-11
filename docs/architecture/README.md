@@ -1,8 +1,8 @@
 # Architecture (AI-optimized)
 
-This folder is the source of truth for Municloud architecture. It exists to help coding agents and humans understand the project quickly without scanning everything.
+This folder is the source of truth for Minicloud architecture. It exists to help coding agents and humans understand the project quickly without scanning everything.
 
-Municloud is a lightweight deployment system for developers who want managed-platform ergonomics and boring bills without thinking about VPS operations. V0 is the product for the project owner's own use. V1 is the first externally exposed mini-SaaS where Municloud provisions and manages the VPS under the hood, bills the customer for VPS cost plus markup, and exposes a simple GitHub-to-deploy product experience.
+Minicloud is a lightweight deployment system for developers who want managed-platform ergonomics and boring bills without thinking about VPS operations. V0 is the product for the project owner's own use. V1 is the first externally exposed mini-SaaS where Minicloud provisions and manages the VPS under the hood, bills the customer for VPS cost plus markup, and exposes a simple GitHub-to-deploy product experience.
 
 ## Always read these first
 
@@ -34,19 +34,19 @@ If a change affects architecture, command contracts, config schema, deployment f
 
 V0 begins with GitHub Actions workflows and provider API calls:
 
-- `.github/workflows/municloud-provision.yml` -> create a VPS through a chosen provider API and bootstrap it with cloud-init
-- `.github/workflows/municloud-deploy.yml` -> deploy a tagged image to the managed VPS
-- `.github/workflows/municloud-logs.yml` -> read Docker Compose logs through a manual workflow
-- `.github/workflows/municloud-rollback.yml` -> restore a previous image tag through a manual workflow
+- `.github/workflows/minicloud-provision.yml` -> create a VPS through a chosen provider API and bootstrap it with cloud-init
+- `.github/workflows/minicloud-deploy.yml` -> deploy a tagged image to the managed VPS
+- `.github/workflows/minicloud-logs.yml` -> read Docker Compose logs through a manual workflow
+- `.github/workflows/minicloud-rollback.yml` -> restore a previous image tag through a manual workflow
 - `templates/runtime/` -> Caddy, Compose, systemd, and app directory templates
 
 V1 should introduce productized packages and services:
 
-- `modules/api` -> hosted Municloud control-plane API, Firebase auth, API keys, app/server/deployment registry, provider orchestration, deploy history, and billing foundation
+- `modules/api` -> hosted Minicloud control-plane API, Firebase auth, API keys, app/server/deployment registry, provider orchestration, deploy history, and billing foundation
 - `docs/architecture/local-registry-testing.md` -> local CLI-to-registry proxy smoke path without GHCR credentials
 - `modules/dashboard` -> user-facing React dashboard for onboarding, apps, deploys, API keys, domains, server status, and settings
 - `modules/tests` -> backend tests for the control-plane API and service layer
-- `modules/cli` -> Municloud CLI
+- `modules/cli` -> Minicloud CLI
 - `modules/runtime` -> server-side runtime scripts or small service
 - `modules/shared` -> config schema, release metadata, validation, and shared contracts
 

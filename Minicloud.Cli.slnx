@@ -1,10 +1,10 @@
 <Solution>
   <Folder Name="/modules/" />
   <Folder Name="/modules/cli/">
-    <Project Path="modules/cli/Municloud.Cli.csproj" />
+    <Project Path="modules/cli/Minicloud.Cli.csproj" />
   </Folder>
   <Folder Name="/modules/tests/">
-    <Project Path="modules/tests/Municloud.Cli.Tests/Municloud.Cli.Tests.csproj" />
+    <Project Path="modules/tests/Minicloud.Cli.Tests/Minicloud.Cli.Tests.csproj" />
   </Folder>
 </Solution>
 

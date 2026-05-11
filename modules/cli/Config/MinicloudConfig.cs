@@ -1,15 +1,15 @@
-namespace Municloud.Cli.Config;
+namespace Minicloud.Cli.Config;
 
-public sealed record MunicloudConfig(
+public sealed record MinicloudConfig(
     string App,
     string? Database,
     string? CommitSha,
-    IReadOnlyDictionary<string, MunicloudServiceConfig> Services)
+    IReadOnlyDictionary<string, MinicloudServiceConfig> Services)
 {
     public string? AppId { get; init; }
 }
 
-public sealed record MunicloudServiceConfig(
+public sealed record MinicloudServiceConfig(
     string? SourcePath,
     string? Dockerfile,
     string? Image,
@@ -21,7 +21,7 @@ public sealed record MunicloudServiceConfig(
 
 public sealed record ConfigDiagnostic(string Field, string Message);
 
-public sealed record ConfigLoadResult(MunicloudConfig? Config, IReadOnlyList<ConfigDiagnostic> Diagnostics)
+public sealed record ConfigLoadResult(MinicloudConfig? Config, IReadOnlyList<ConfigDiagnostic> Diagnostics)
 {
     public bool IsValid => Diagnostics.Count == 0 && Config is not null;
 }

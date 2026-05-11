@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Municloud.Cli.Auth;
+namespace Minicloud.Cli.Auth;
 
 public sealed class TokenStore
 {

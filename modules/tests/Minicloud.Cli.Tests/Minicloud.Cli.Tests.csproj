@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\cli\Municloud.Cli.csproj" />
+    <ProjectReference Include="..\..\cli\Minicloud.Cli.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,6 +1,6 @@
-using Municloud.Cli;
+using Minicloud.Cli;
 
-namespace Municloud.Tests;
+namespace Minicloud.Tests;
 
 public sealed class RegistryImageMapperTests
 {
@@ -20,7 +20,7 @@ public sealed class RegistryImageMapperTests
             Environment.SetEnvironmentVariable(CliEnvironment.RegistryHostEnvironmentVariable, null);
             Environment.SetEnvironmentVariable(CliEnvironment.RegistryGhcrOwnerEnvironmentVariable, null);
             Environment.SetEnvironmentVariable(CliEnvironment.RuntimeRegistryPrefixEnvironmentVariable, null);
-            Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", "/tmp/municloud-tests");
+            Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", "/tmp/minicloud-tests");
 
             var environment = CliEnvironment.FromEnvironment();
 
@@ -39,25 +39,25 @@ public sealed class RegistryImageMapperTests
     }
 
     [Fact]
-    public void RuntimeImageForDeployment_maps_municloud_registry_ref_to_runtime_registry()
+    public void RuntimeImageForDeployment_maps_minicloud_registry_ref_to_runtime_registry()
     {
         var environment = CliEnvironment.ForTests(
             "https://cloud.muni.dev/api",
-            "/tmp/municloud-tests",
+            "/tmp/minicloud-tests",
             "localhost:5050",
-            "localhost:5051/municloud-local",
+            "localhost:5051/minicloud-local",
             "local");
         var mapper = new RegistryImageMapper(environment);
 
         var image = mapper.RuntimeImageForDeployment("localhost:5050/teamcore/backend:latest", "Acme-Corp");
 
-        Assert.Equal("localhost:5051/municloud-local/acme-corp-teamcore-backend:latest", image);
+        Assert.Equal("localhost:5051/minicloud-local/acme-corp-teamcore-backend:latest", image);
     }
 
     [Fact]
     public void RuntimeImageForDeployment_leaves_external_refs_unchanged()
     {
-        var mapper = new RegistryImageMapper(CliEnvironment.ForTests("https://cloud.muni.dev/api", "/tmp/municloud-tests"));
+        var mapper = new RegistryImageMapper(CliEnvironment.ForTests("https://cloud.muni.dev/api", "/tmp/minicloud-tests"));
 
         var image = mapper.RuntimeImageForDeployment("ghcr.io/customer/teamcore/backend:abc123", "acme");
 
@@ -69,16 +69,16 @@ public sealed class RegistryImageMapperTests
     [InlineData("registry.muni.dev/teamcore/backend:latest", false)]
     [InlineData("ghcr.io/customer/teamcore/backend:latest", false)]
     [InlineData("", false)]
-    public void UsesMunicloudRegistry_matches_configured_host(string image, bool expected)
+    public void UsesMinicloudRegistry_matches_configured_host(string image, bool expected)
     {
         var environment = CliEnvironment.ForTests(
             "https://cloud.muni.dev/api",
-            "/tmp/municloud-tests",
+            "/tmp/minicloud-tests",
             "localhost:5050",
-            "localhost:5051/municloud-local",
+            "localhost:5051/minicloud-local",
             "local");
         var mapper = new RegistryImageMapper(environment);
 
-        Assert.Equal(expected, mapper.UsesMunicloudRegistry(image));
+        Assert.Equal(expected, mapper.UsesMinicloudRegistry(image));
     }
 }

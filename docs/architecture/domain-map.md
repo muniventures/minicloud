@@ -1,6 +1,6 @@
 # Domain map
 
-This file maps Municloud product domains to planned docs, features, and code areas.
+This file maps Minicloud product domains to planned docs, features, and code areas.
 
 ## Deployment runtime
 
@@ -13,10 +13,10 @@ Docs:
 
 Planned code:
 
-- `.github/workflows/municloud-provision.yml`
-- `.github/workflows/municloud-deploy.yml`
-- `.github/workflows/municloud-logs.yml`
-- `.github/workflows/municloud-rollback.yml`
+- `.github/workflows/minicloud-provision.yml`
+- `.github/workflows/minicloud-deploy.yml`
+- `.github/workflows/minicloud-logs.yml`
+- `.github/workflows/minicloud-rollback.yml`
 - `templates/github-actions/`
 - `modules/runtime`
 
@@ -31,11 +31,11 @@ Docs:
 - `docs/architecture/security.md`
 - `features/platform/v0-personal-deployment/`
 - `features/product/v1-productized-mvp/`
-- `features/product/municloud-control-plane/`
+- `features/product/minicloud-control-plane/`
 
 Planned code:
 
-- `.github/workflows/municloud-provision.yml` for V0
+- `.github/workflows/minicloud-provision.yml` for V0
 - `modules/api`
 - `modules/shared`
 
@@ -64,9 +64,9 @@ Docs:
 
 Planned code:
 
-- `.github/workflows/municloud-deploy.yml`
-- `.github/workflows/municloud-logs.yml`
-- `.github/workflows/municloud-rollback.yml`
+- `.github/workflows/minicloud-deploy.yml`
+- `.github/workflows/minicloud-logs.yml`
+- `.github/workflows/minicloud-rollback.yml`
 - CLI workflow generator
 
 ## Domains and HTTPS
@@ -104,7 +104,7 @@ Docs:
 - `docs/architecture/data-integrations.md`
 - `docs/architecture/provisioning-and-billing.md`
 - `docs/architecture/security.md`
-- `features/product/municloud-control-plane/`
+- `features/product/minicloud-control-plane/`
 
 Planned code:
 

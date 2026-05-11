@@ -1,13 +1,13 @@
-namespace Municloud.Cli;
+namespace Minicloud.Cli;
 
 public sealed class CliEnvironment
 {
-    public const string TokenEnvironmentVariable = "MUNICLOUD_TOKEN";
-    public const string ApiUrlEnvironmentVariable = "MUNICLOUD_API_URL";
-    public const string RegistryHostEnvironmentVariable = "MUNICLOUD_REGISTRY_HOST";
-    public const string RegistryGhcrOwnerEnvironmentVariable = "MUNICLOUD_REGISTRY_GHCR_OWNER";
-    public const string RuntimeRegistryPrefixEnvironmentVariable = "MUNICLOUD_RUNTIME_REGISTRY_PREFIX";
-    public const string LocalOrganizationSlugEnvironmentVariable = "MUNICLOUD_LOCAL_ORGANIZATION_SLUG";
+    public const string TokenEnvironmentVariable = "MINICLOUD_TOKEN";
+    public const string ApiUrlEnvironmentVariable = "MINICLOUD_API_URL";
+    public const string RegistryHostEnvironmentVariable = "MINICLOUD_REGISTRY_HOST";
+    public const string RegistryGhcrOwnerEnvironmentVariable = "MINICLOUD_REGISTRY_GHCR_OWNER";
+    public const string RuntimeRegistryPrefixEnvironmentVariable = "MINICLOUD_RUNTIME_REGISTRY_PREFIX";
+    public const string LocalOrganizationSlugEnvironmentVariable = "MINICLOUD_LOCAL_ORGANIZATION_SLUG";
 
     private CliEnvironment(string apiBaseUrl, string registryHost, string registryGhcrOwner, string runtimeRegistryPrefix, string localOrganizationSlug, string configHome)
     {
@@ -67,10 +67,10 @@ public sealed class CliEnvironment
                 ".config");
         }
 
-        return new CliEnvironment(apiBaseUrl, registryHost, registryGhcrOwner, runtimeRegistryPrefix, localOrganizationSlug, Path.Combine(configHome, "municloud"));
+        return new CliEnvironment(apiBaseUrl, registryHost, registryGhcrOwner, runtimeRegistryPrefix, localOrganizationSlug, Path.Combine(configHome, "minicloud"));
     }
 
-    public static CliEnvironment ForTests(string apiBaseUrl, string configHome) => new(apiBaseUrl, "registry.muni.dev", "municloud", "ghcr.io/municloud", "local", configHome);
+    public static CliEnvironment ForTests(string apiBaseUrl, string configHome) => new(apiBaseUrl, "registry.muni.dev", "minicloud", "ghcr.io/minicloud", "local", configHome);
 
     public static CliEnvironment ForTests(
         string apiBaseUrl,
@@ -78,7 +78,7 @@ public sealed class CliEnvironment
         string registryHost,
         string runtimeRegistryPrefix,
         string localOrganizationSlug) =>
-        new(apiBaseUrl, registryHost, "municloud", runtimeRegistryPrefix, localOrganizationSlug, configHome);
+        new(apiBaseUrl, registryHost, "minicloud", runtimeRegistryPrefix, localOrganizationSlug, configHome);
 
     private static string DefaultRegistryHostForApiBaseUrl(string apiBaseUrl)
     {

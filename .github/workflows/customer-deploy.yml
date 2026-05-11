@@ -1,4 +1,4 @@
-name: Municloud Customer Deploy
+name: Minicloud Customer Deploy
 
 on:
   workflow_call:
@@ -22,7 +22,7 @@ on:
         type: string
         default: ""
     secrets:
-      municloud_api_key:
+      minicloud_api_key:
         required: true
       postgres_password:
         required: false
@@ -155,11 +155,11 @@ jobs:
             published="$(jq -cn --argjson services "${published}" --argjson service "${service}" '$services + [$service]')"
           done
 
-          printf '%s' "${published}" > municloud-services.json
+          printf '%s' "${published}" > minicloud-services.json
 
           {
             echo "services_json<<EOF"
-            cat municloud-services.json
+            cat minicloud-services.json
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
 
@@ -168,10 +168,10 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     steps:
-      - name: Request Municloud deploy
+      - name: Request Minicloud deploy
         id: deploy
         env:
-          MUNICLOUD_API_KEY: ${{ secrets.municloud_api_key }}
+          MINICLOUD_API_KEY: ${{ secrets.minicloud_api_key }}
           POSTGRES_PASSWORD: ${{ secrets.postgres_password }}
           SERVICES_JSON: ${{ needs.publish.outputs.services_json }}
           MINICLOUD_ENVIRONMENT: ${{ inputs.minicloud_environment }}
@@ -181,14 +181,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "${MUNICLOUD_API_KEY}" ]; then
-            echo "municloud_api_key is missing or unavailable in this repository."
+          if [ -z "${MINICLOUD_API_KEY}" ]; then
+            echo "minicloud_api_key is missing or unavailable in this repository."
             exit 1
           fi
-          echo "::add-mask::${MUNICLOUD_API_KEY}"
+          echo "::add-mask::${MINICLOUD_API_KEY}"
 
           if [ -z "${APP_ID}" ]; then
-            echo "app_id is required. Use the app id from the Municloud console URL, for example app_52kqllu8k1nq4kg352kqllu8."
+            echo "app_id is required. Use the app id from the Minicloud console URL, for example app_52kqllu8k1nq4kg352kqllu8."
             exit 1
           fi
 
@@ -204,10 +204,10 @@ jobs:
 
           case "${MINICLOUD_ENVIRONMENT}" in
             prod)
-              MUNICLOUD_API_URL="https://cloud.muni.dev/api"
+              MINICLOUD_API_URL="https://cloud.muni.dev/api"
               ;;
             staging)
-              MUNICLOUD_API_URL="https://municloud-dev.muni.dev/api"
+              MINICLOUD_API_URL="https://minicloud-dev.muni.dev/api"
               ;;
             *)
               echo "minicloud_environment must be prod or staging."
@@ -218,7 +218,7 @@ jobs:
           api_post() {
             curl --fail-with-body -sS \
               -X POST \
-              -H "Authorization: Bearer ${MUNICLOUD_API_KEY}" \
+              -H "Authorization: Bearer ${MINICLOUD_API_KEY}" \
               -H "Accept: application/json" \
               -H "Content-Type: application/json" \
               --data-binary "$2" \
@@ -253,16 +253,16 @@ jobs:
               }'
           )"
 
-          CREATED_JSON="$(api_post "${MUNICLOUD_API_URL}/v1/deployments" "${DEPLOYMENT_JSON}")"
+          CREATED_JSON="$(api_post "${MINICLOUD_API_URL}/v1/deployments" "${DEPLOYMENT_JSON}")"
           DEPLOYMENT_ID="$(printf '%s' "${CREATED_JSON}" | jq -r '.id')"
           STATUS="$(printf '%s' "${CREATED_JSON}" | jq -r '.status')"
           WEBSITE_URL="$(printf '%s' "${CREATED_JSON}" | jq -r '.websiteUrl // ""')"
-          echo "Municloud deployment: ${DEPLOYMENT_ID}"
+          echo "Minicloud deployment: ${DEPLOYMENT_ID}"
           echo "Status: ${STATUS}"
 
           LAST_STATUS="${STATUS}"
           for attempt in $(seq 1 240); do
-            DEPLOYMENT_JSON="$(api_post "${MUNICLOUD_API_URL}/v1/deployments/${DEPLOYMENT_ID}/refresh" "{}")"
+            DEPLOYMENT_JSON="$(api_post "${MINICLOUD_API_URL}/v1/deployments/${DEPLOYMENT_ID}/refresh" "{}")"
             STATUS="$(printf '%s' "${DEPLOYMENT_JSON}" | jq -r '.status')"
             WEBSITE_URL="$(printf '%s' "${DEPLOYMENT_JSON}" | jq -r '.websiteUrl // ""')"
             CONSOLE_URL="$(printf '%s' "${DEPLOYMENT_JSON}" | jq -r '.consoleUrl // ""')"
@@ -276,7 +276,7 @@ jobs:
               succeeded)
                 echo "Website URL: ${WEBSITE_URL}"
                 {
-                  echo "## Municloud deployment"
+                  echo "## Minicloud deployment"
                   echo ""
                   echo "- Deployment: ${DEPLOYMENT_ID}"
                   echo "- Website URL: ${WEBSITE_URL}"
@@ -287,7 +287,7 @@ jobs:
               failed|canceled)
                 FAILURE_CODE="$(printf '%s' "${DEPLOYMENT_JSON}" | jq -r '.failureCode // .status')"
                 FAILURE_MESSAGE="$(printf '%s' "${DEPLOYMENT_JSON}" | jq -r '.failureMessage // ""')"
-                echo "Municloud deployment ${STATUS}: ${FAILURE_CODE}"
+                echo "Minicloud deployment ${STATUS}: ${FAILURE_CODE}"
                 if [ -n "${FAILURE_MESSAGE}" ]; then
                   echo "Message: ${FAILURE_MESSAGE}"
                 fi
@@ -298,6 +298,6 @@ jobs:
             sleep 2
           done
 
-          echo "Timed out waiting for Municloud deployment to complete."
+          echo "Timed out waiting for Minicloud deployment to complete."
           echo "Deployment: ${DEPLOYMENT_ID}"
           exit 1

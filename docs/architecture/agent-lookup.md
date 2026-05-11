@@ -13,7 +13,7 @@ Read:
 
 Likely files:
 
-- `.github/workflows/municloud-provision.yml`
+- `.github/workflows/minicloud-provision.yml`
 - `templates/runtime/`
 
 ## Provision VPS or billing
@@ -27,7 +27,7 @@ Read:
 
 Likely files:
 
-- `.github/workflows/municloud-provision.yml`
+- `.github/workflows/minicloud-provision.yml`
 - `modules/api`
 - provider adapter code
 
@@ -41,11 +41,11 @@ Read:
 
 Likely files:
 
-- `.github/workflows/municloud-deploy.yml`
+- `.github/workflows/minicloud-deploy.yml`
 - `modules/api`
-- `templates/github-actions/municloud-deploy.yml`
+- `templates/github-actions/minicloud-deploy.yml`
 - `templates/github-actions/deploy.yml`
-- `municloud.yml`
+- `minicloud.yml`
 
 ## Logs or status
 
@@ -58,8 +58,8 @@ Read:
 
 Likely files:
 
-- `.github/workflows/municloud-logs.yml`
-- `templates/github-actions/municloud-logs.yml`
+- `.github/workflows/minicloud-logs.yml`
+- `templates/github-actions/minicloud-logs.yml`
 - `modules/api`
 - `modules/dashboard`
 - `modules/cli`
@@ -72,7 +72,7 @@ Read:
 - `docs/architecture/backend.md`
 - `docs/architecture/security.md`
 - `docs/architecture/data-integrations.md`
-- `features/product/municloud-control-plane/`
+- `features/product/minicloud-control-plane/`
 
 Likely files:
 
@@ -85,7 +85,7 @@ Read:
 
 - `docs/architecture/frontend.md`
 - `docs/architecture/backend.md` if changing API contracts
-- `features/product/municloud-control-plane/`
+- `features/product/minicloud-control-plane/`
 
 Likely files:
 
@@ -101,8 +101,8 @@ Read:
 
 Likely files:
 
-- `.github/workflows/municloud-rollback.yml`
-- `templates/github-actions/municloud-rollback.yml`
+- `.github/workflows/minicloud-rollback.yml`
+- `templates/github-actions/minicloud-rollback.yml`
 - runtime release metadata code
 
 ## CLI command or config

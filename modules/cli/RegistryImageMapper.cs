@@ -1,4 +1,4 @@
-namespace Municloud.Cli;
+namespace Minicloud.Cli;
 
 public sealed class RegistryImageMapper
 {
@@ -11,7 +11,7 @@ public sealed class RegistryImageMapper
 
     public string RuntimeImageForDeployment(string image, string organizationSlug)
     {
-        if (!UsesMunicloudRegistry(image))
+        if (!UsesMinicloudRegistry(image))
         {
             return image;
         }
@@ -29,7 +29,7 @@ public sealed class RegistryImageMapper
         return $"{_environment.RuntimeRegistryPrefix}/{NormalizeImageSegment(organizationSlug)}-{upstreamRepository}{tag}";
     }
 
-    public bool UsesMunicloudRegistry(string? image) =>
+    public bool UsesMinicloudRegistry(string? image) =>
         !string.IsNullOrWhiteSpace(image) &&
         image.StartsWith(_environment.RegistryHost + "/", StringComparison.OrdinalIgnoreCase);
 

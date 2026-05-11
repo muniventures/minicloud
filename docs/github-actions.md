@@ -13,14 +13,14 @@ Add these secrets to your app repository. Repository or organization secrets wor
 
 | Secret | Required | Description |
 | --- | --- | --- |
-| `MUNICLOUD_API_KEY` | Yes | Minicloud API key from the console. |
-| `MUNICLOUD_POSTGRES_PASSWORD` | Only for `database: postgres` | Postgres password used by the deployment. |
+| `MINICLOUD_API_KEY` | Yes | Minicloud API key from the console. |
+| `MINICLOUD_POSTGRES_PASSWORD` | Only for `database: postgres` | Postgres password used by the deployment. |
 
 Add this repository or organization variable:
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `MUNICLOUD_APP_ID` | Yes | App id from the Municloud console URL, for example `app_52kqllu8k1nq4kg352kqllu8`. |
+| `MINICLOUD_APP_ID` | Yes | App id from the Minicloud console URL, for example `app_52kqllu8k1nq4kg352kqllu8`. |
 
 Set workflow permissions:
 
@@ -51,7 +51,7 @@ jobs:
   minicloud:
     uses: muniventures/minicloud/.github/workflows/customer-deploy.yml@main
     with:
-      app_id: ${{ vars.MUNICLOUD_APP_ID }}
+      app_id: ${{ vars.MINICLOUD_APP_ID }}
       database: postgres
       services: |
         - name: backend
@@ -62,8 +62,8 @@ jobs:
           path: /
           healthPath: /health
     secrets:
-      municloud_api_key: ${{ secrets.MUNICLOUD_API_KEY }}
-      postgres_password: ${{ secrets.MUNICLOUD_POSTGRES_PASSWORD }}
+      minicloud_api_key: ${{ secrets.MINICLOUD_API_KEY }}
+      postgres_password: ${{ secrets.MINICLOUD_POSTGRES_PASSWORD }}
 ```
 
 ## Frontend And Backend App
@@ -85,7 +85,7 @@ jobs:
   minicloud:
     uses: muniventures/minicloud/.github/workflows/customer-deploy.yml@main
     with:
-      app_id: ${{ vars.MUNICLOUD_APP_ID }}
+      app_id: ${{ vars.MINICLOUD_APP_ID }}
       database: postgres
       services: |
         - name: frontend
@@ -104,18 +104,18 @@ jobs:
           env:
             ASPNETCORE_ENVIRONMENT: Staging
     secrets:
-      municloud_api_key: ${{ secrets.MUNICLOUD_API_KEY }}
-      postgres_password: ${{ secrets.MUNICLOUD_POSTGRES_PASSWORD }}
+      minicloud_api_key: ${{ secrets.MINICLOUD_API_KEY }}
+      postgres_password: ${{ secrets.MINICLOUD_POSTGRES_PASSWORD }}
 ```
 
 ## Inputs
 
 | Input | Required | Default | Description |
 | --- | --- | --- | --- |
-| `app_id` | Yes | | App id from the Municloud console URL. Pass `${{ vars.MUNICLOUD_APP_ID }}` from the caller workflow. |
+| `app_id` | Yes | | App id from the Minicloud console URL. Pass `${{ vars.MINICLOUD_APP_ID }}` from the caller workflow. |
 | `database` | No | `sqlite` | `sqlite` or `postgres`. |
-| `minicloud_environment` | No | `prod` | `prod` or `staging`. `prod` uses the production Minicloud API. `staging` uses `https://municloud-dev.muni.dev/api`. |
-| `services` | Yes | | YAML service array. Uses the same service fields as `municloud.yml`, with `name` added because a workflow input cannot receive the keyed `services` map directly. |
+| `minicloud_environment` | No | `prod` | `prod` or `staging`. `prod` uses the production Minicloud API. `staging` uses `https://minicloud-dev.muni.dev/api`. |
+| `services` | Yes | | YAML service array. Uses the same service fields as `minicloud.yml`, with `name` added because a workflow input cannot receive the keyed `services` map directly. |
 | `image_tag` | No | commit SHA | Docker image tag. |
 
 ## Services
@@ -168,7 +168,7 @@ When `database: postgres`, pass:
 
 ```yaml
 secrets:
-  postgres_password: ${{ secrets.MUNICLOUD_POSTGRES_PASSWORD }}
+  postgres_password: ${{ secrets.MINICLOUD_POSTGRES_PASSWORD }}
 ```
 
 For SQLite, omit `postgres_password`.
