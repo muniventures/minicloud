@@ -1,0 +1,46 @@
+# Ignore build outputs
+bin/
+obj/
+local/
+
+# User-specific files
+*.user
+*.userosscache
+*.suo
+*.swp
+*.sln.docstates
+
+# Logs
+*.log
+*.tlog
+
+# Visual Studio Code
+.vscode/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+
+# Rider
+.idea/
+*.iml
+
+# Local secrets
+appsettings.Development.json
+minicloud-dev.db
+minicloud-dev.db-*
+
+# Generated files
+*.GeneratedMSBuildEditorConfig.editorconfig
+*.AssemblyAttributes.cs
+*.GlobalUsings.g.cs
+
+# Backup files
+*.bak
+*.old
+*.orig
+
+# Other
+*.DS_Store
+*.lock.json
