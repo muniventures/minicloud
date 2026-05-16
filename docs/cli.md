@@ -29,7 +29,7 @@ For CI or temporary shell use:
 export MINICLOUD_TOKEN=<MINICLOUD_API_KEY>
 ```
 
-## Create `minicloud.yml`
+## Create A Deployment Config
 
 From your app repository:
 
@@ -37,7 +37,9 @@ From your app repository:
 minicloud init
 ```
 
-The wizard lists existing apps in your organization and includes `Create new app`. The generated `minicloud.yml` always includes the selected or newly created `appId`.
+The wizard lists existing apps in your organization and includes `Create new app`. The generated config always includes the selected or newly created `appId`.
+
+`minicloud init` generates one service definition by default. If `minicloud.yml` already exists, the CLI writes a service-specific file such as `minicloud.backend.yml`.
 
 For more prompts:
 
@@ -51,6 +53,22 @@ Use another config path:
 minicloud init --config path/to/minicloud.yml
 minicloud deploy --config path/to/minicloud.yml
 ```
+
+## Managed VPS Plans
+
+The CLI deploys to the app identified by `appId` in `minicloud.yml`. The app's managed VPS plan is selected in the Minicloud control plane.
+
+Current plan codes:
+
+| Plan | Provider | Region | Provider SKU | Provider cost basis |
+| --- | --- | --- | --- | --- |
+| `P0-H-0` | Hetzner | `nbg1` | `cx23` | Original Hetzner plan |
+| `P0-V-0` | Vultr | `ewr` | `vc2-1c-0.5gb-v6` | $2.50/month, IPv6-only |
+| `P0-V-1` | Vultr | `ewr` | `vc2-1c-0.5gb` | $3.50/month |
+| `P0-V-2` | Vultr | `ewr` | `vc2-1c-1gb` | $5.00/month |
+| `P0-D-0` | DigitalOcean | `nyc1` | `s-1vcpu-512mb-10gb` | $4.00/month |
+| `P0-D-1` | DigitalOcean | `nyc1` | `s-1vcpu-1gb` | $6.00/month |
+| `P0-D-2` | DigitalOcean | `nyc1` | `s-1vcpu-2gb` | $12.00/month |
 
 ## `minicloud.yml` Reference
 
@@ -70,10 +88,12 @@ services:
     healthPath: /health
 ```
 
-Frontend and backend app:
+Independent frontend and backend configs can point at the same app:
 
 ```yaml
+# minicloud.frontend.yml
 app: teamcore
+appId: app_123
 database: postgres
 services:
   frontend:
@@ -82,6 +102,14 @@ services:
     public: true
     path: /
     healthPath: /
+```
+
+```yaml
+# minicloud.backend.yml
+app: teamcore
+appId: app_123
+database: postgres
+services:
   backend:
     sourcePath: modules/api
     dockerfile: modules/api/Dockerfile
@@ -93,7 +121,15 @@ services:
       ASPNETCORE_ENVIRONMENT: Staging
 ```
 
-Custom multi-service app:
+Deploy each service independently:
+
+```bash
+minicloud deploy backend --config minicloud.yml
+minicloud deploy --config minicloud.backend.yml
+minicloud deploy --config minicloud.frontend.yml
+```
+
+Custom multi-service deployment file:
 
 ```yaml
 app: my-platform
@@ -150,6 +186,8 @@ minicloud deploy --no-publish
 | `commitSha` | No | Optional source revision to attach to the deployment. |
 | `services` | Yes | Map of service definitions. One to five services. |
 
+One config file targets one app. Multiple config files can share the same `appId`.
+
 ## Database Modes
 
 `sqlite` stores data on the managed runtime disk. Use it for simple apps and low operational overhead.
@@ -168,7 +206,7 @@ minicloud deploy --pgpassword '<strong-password>'
 | `dockerfile` | No | Dockerfile path. Defaults to Docker's normal lookup in `sourcePath`. |
 | `image` | Required with `--no-publish`; optional otherwise | Full image reference. When CLI publishes, omit this or use the configured Minicloud registry host. |
 | `port` | Yes | Internal container port, `1` to `65535`. |
-| `public` | Yes | Whether the service receives public HTTP traffic. At least one service must be public. |
+| `public` | Yes | Whether the service receives public HTTP traffic. The merged active app must have at least one public service. |
 | `path` | Yes | Public route path. Must start with `/`. For private services, still set a stable path value. |
 | `healthPath` | Yes | HTTP health check path. Must start with `/`. |
 | `env` | No | String key/value environment variables for the service. |
@@ -189,7 +227,19 @@ Build, publish, create deployment, and wait:
 minicloud deploy
 ```
 
-On deploy, the CLI requires `appId` in `minicloud.yml`. App selection or app creation happens in `minicloud init`, not during deploy.
+On deploy, the CLI requires `appId` in the selected config. App selection or app creation happens in `minicloud init`, not during deploy.
+
+Deploy is service-scoped. The CLI publishes and sends only the selected services. Existing services for the same app that are omitted from the selected deployment remain active. Omission does not delete a service.
+
+For a config with multiple services:
+
+```bash
+minicloud deploy backend
+minicloud deploy frontend backend
+minicloud deploy --all
+```
+
+If a config has multiple services and no service name or `--all` is provided, the CLI asks which services to deploy. Use Up/Down to move, Space to toggle a service, or toggle `all` to select every service.
 
 Common overrides:
 

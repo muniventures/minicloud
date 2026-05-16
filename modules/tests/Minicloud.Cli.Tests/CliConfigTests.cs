@@ -255,6 +255,26 @@ public sealed class CliConfigTests
     }
 
     [Fact]
+    public void Parse_accepts_private_service_config_for_service_scoped_deploy()
+    {
+        var result = MinicloudConfigLoader.Parse(
+        [
+            "app: teamcore",
+            "appId: app_123",
+            "services:",
+            "  worker:",
+            "    sourcePath: modules/worker",
+            "    port: 8080",
+            "    public: false",
+            "    path: /worker",
+            "    healthPath: /health"
+        ]);
+
+        Assert.True(result.IsValid);
+        Assert.False(result.Config?.Services["worker"].Public);
+    }
+
+    [Fact]
     public void Write_round_trips_init_style_config()
     {
         var config = new MinicloudConfig(
@@ -277,6 +297,71 @@ public sealed class CliConfigTests
         Assert.Equal("app_123", result.Config.AppId);
         Assert.Equal("modules/api", result.Config.Services["backend"].SourcePath);
         Assert.Equal("ghcr.io/customer/teamcore-backend:latest", result.Config.Services["backend"].Image);
+    }
+
+    [Fact]
+    public void Init_suggests_default_config_when_minicloud_yml_is_absent()
+    {
+        var path = CliApplication.SuggestedInitConfigPath("backend", fileExists: _ => false);
+
+        Assert.Equal("minicloud.yml", path);
+    }
+
+    [Fact]
+    public void Init_suggests_service_config_when_minicloud_yml_exists()
+    {
+        var path = CliApplication.SuggestedInitConfigPath("backend", fileExists: candidate => candidate == "minicloud.yml");
+
+        Assert.Equal("minicloud.backend.yml", path);
+    }
+
+    [Fact]
+    public void DeployServiceNamesFromArgs_reads_positional_service_names()
+    {
+        var services = CliApplication.DeployServiceNamesFromArgs(
+        [
+            "backend",
+            "frontend",
+            "--config",
+            "minicloud.yml",
+            "--tag=abc123",
+            "--verbose"
+        ]);
+
+        Assert.Equal(["backend", "frontend"], services);
+    }
+
+    [Fact]
+    public void DeployServiceNamesFromArgs_ignores_all_flag()
+    {
+        var services = CliApplication.DeployServiceNamesFromArgs(["--all", "--config", "minicloud.yml"]);
+
+        Assert.Empty(services);
+    }
+
+    [Fact]
+    public void FilterConfigServices_returns_only_selected_services()
+    {
+        var config = new MinicloudConfig(
+            "teamcore",
+            "postgres",
+            "abc123",
+            new Dictionary<string, MinicloudServiceConfig>
+            {
+                ["frontend"] = new("modules/ui", null, null, 3000, true, "/", "/"),
+                ["backend"] = new("modules/api", null, null, 8080, true, "/api", "/health")
+            })
+        {
+            AppId = "app_123"
+        };
+
+        var filtered = CliApplication.FilterConfigServices(config, ["backend"]);
+
+        Assert.Equal("teamcore", filtered.App);
+        Assert.Equal("app_123", filtered.AppId);
+        Assert.Equal("abc123", filtered.CommitSha);
+        Assert.Single(filtered.Services);
+        Assert.Contains("backend", filtered.Services.Keys);
     }
 
     [Fact]

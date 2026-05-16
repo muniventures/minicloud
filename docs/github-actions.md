@@ -15,12 +15,29 @@ Add these secrets to your app repository. Repository or organization secrets wor
 | --- | --- | --- |
 | `MINICLOUD_API_KEY` | Yes | Minicloud API key from the console. |
 | `MINICLOUD_POSTGRES_PASSWORD` | Only for `database: postgres` | Postgres password used by the deployment. |
+| `MINICLOUD_SERVICE_ENV_SECRETS` | Only when using `secretEnv` | JSON object of runtime environment secret values, for example `{"MAPBOX_ACCESS_TOKEN":"..."}`. |
 
 Add this repository or organization variable:
 
 | Variable | Required | Description |
 | --- | --- | --- |
 | `MINICLOUD_APP_ID` | Yes | App id from the Minicloud console URL, for example `app_52kqllu8k1nq4kg352kqllu8`. |
+
+## Managed VPS Plans
+
+The workflow deploys to the app selected by `MINICLOUD_APP_ID`. The app's managed VPS plan is selected in the Minicloud control plane, not in the customer workflow.
+
+Current plan codes:
+
+| Plan | Provider | Region | Provider SKU | Provider cost basis |
+| --- | --- | --- | --- | --- |
+| `P0-H-0` | Hetzner | `nbg1` | `cx23` | Original Hetzner plan |
+| `P0-V-0` | Vultr | `ewr` | `vc2-1c-0.5gb-v6` | $2.50/month, IPv6-only |
+| `P0-V-1` | Vultr | `ewr` | `vc2-1c-0.5gb` | $3.50/month |
+| `P0-V-2` | Vultr | `ewr` | `vc2-1c-1gb` | $5.00/month |
+| `P0-D-0` | DigitalOcean | `nyc1` | `s-1vcpu-512mb-10gb` | $4.00/month |
+| `P0-D-1` | DigitalOcean | `nyc1` | `s-1vcpu-1gb` | $6.00/month |
+| `P0-D-2` | DigitalOcean | `nyc1` | `s-1vcpu-2gb` | $12.00/month |
 
 Set workflow permissions:
 
@@ -103,9 +120,12 @@ jobs:
           healthPath: /health
           env:
             ASPNETCORE_ENVIRONMENT: Staging
+          secretEnv:
+            MAPBOX_ACCESS_TOKEN: MAPBOX_ACCESS_TOKEN
     secrets:
       minicloud_api_key: ${{ secrets.MINICLOUD_API_KEY }}
       postgres_password: ${{ secrets.MINICLOUD_POSTGRES_PASSWORD }}
+      service_env_secrets: ${{ secrets.MINICLOUD_SERVICE_ENV_SECRETS }}
 ```
 
 ## Inputs
@@ -144,6 +164,38 @@ services: |
 | `path` | Yes | Public route path. Must start with `/`. |
 | `healthPath` | Yes | HTTP health check path. Must start with `/`. |
 | `env` | No | String key/value environment variables for the service. |
+| `secretEnv` | No | String key/value references to keys in `service_env_secrets`. Use this for sensitive runtime environment variables. |
+
+## Runtime Secrets
+
+Do not put `${{ secrets.MY_SECRET }}` inside the `services` input. GitHub does not expose the `secrets` context inside reusable workflow `with` inputs, and secret values could be copied into publish-job outputs.
+
+For sensitive runtime environment variables, put references in `secretEnv`:
+
+```yaml
+services: |
+  - name: backend
+    sourcePath: .
+    dockerfile: Dockerfile
+    port: 8080
+    public: true
+    path: /
+    healthPath: /health
+    secretEnv:
+      MAPBOX_ACCESS_TOKEN: MAPBOX_ACCESS_TOKEN
+secrets:
+  service_env_secrets: ${{ secrets.MINICLOUD_SERVICE_ENV_SECRETS }}
+```
+
+Store `MINICLOUD_SERVICE_ENV_SECRETS` as one GitHub repository or organization secret containing JSON:
+
+```json
+{
+  "MAPBOX_ACCESS_TOKEN": "actual-token-value"
+}
+```
+
+The publish job keeps only `secretEnv` references. The deploy job merges those references with `service_env_secrets` immediately before it calls the Minicloud API.
 
 ## What The Workflow Does
 

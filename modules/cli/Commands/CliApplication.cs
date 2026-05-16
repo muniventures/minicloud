@@ -152,16 +152,8 @@ public sealed partial class CliApplication
 
     private async Task<int> RunInitAsync(string[] args, CancellationToken cancellationToken)
     {
-        var outputPath = GetOption(args, "--config") ?? "minicloud.yml";
+        var configuredOutputPath = GetOption(args, "--config");
         var advanced = args.Contains("--advanced", StringComparer.Ordinal);
-        if (File.Exists(outputPath) && !args.Contains("--force", StringComparer.Ordinal))
-        {
-            if (!Confirm($"'{outputPath}' already exists. Overwrite it?", defaultValue: false))
-            {
-                _console.WriteLine("Init canceled.");
-                return CliExitCodes.Success;
-            }
-        }
 
         _console.WriteLine("Minicloud init");
         _console.WriteLine();
@@ -178,19 +170,17 @@ public sealed partial class CliApplication
         var database = app.Database;
 
         var services = new Dictionary<string, MinicloudServiceConfig>(StringComparer.Ordinal);
-        foreach (var serviceName in PromptServiceNames())
-        {
-            _console.WriteLine();
-            _console.WriteLine($"{ToTitle(serviceName)} service");
-            var sourcePath = PromptDirectory($"{ToTitle(serviceName)} source folder");
-            var defaults = DefaultServiceOptions(app.Slug, serviceName);
-            var image = advanced ? PromptOptional($"{ToTitle(serviceName)} push image", defaults.Image) : null;
-            var port = advanced ? PromptPort($"{ToTitle(serviceName)} port", defaults.Port) : defaults.Port;
-            var routePath = advanced ? PromptPath($"{ToTitle(serviceName)} public path", defaults.Path) : defaults.Path;
-            var healthPath = advanced ? PromptPath($"{ToTitle(serviceName)} health path", defaults.HealthPath) : defaults.HealthPath;
+        var serviceName = PromptServiceName();
+        _console.WriteLine();
+        _console.WriteLine($"{ToTitle(serviceName)} service");
+        var sourcePath = PromptDirectory($"{ToTitle(serviceName)} source folder");
+        var defaults = DefaultServiceOptions(app.Slug, serviceName);
+        var image = advanced ? PromptOptional($"{ToTitle(serviceName)} push image", defaults.Image) : null;
+        var port = advanced ? PromptPort($"{ToTitle(serviceName)} port", defaults.Port) : defaults.Port;
+        var routePath = advanced ? PromptPath($"{ToTitle(serviceName)} public path", defaults.Path) : defaults.Path;
+        var healthPath = advanced ? PromptPath($"{ToTitle(serviceName)} health path", defaults.HealthPath) : defaults.HealthPath;
 
-            services[serviceName] = new MinicloudServiceConfig(sourcePath, null, image, port, true, routePath, healthPath);
-        }
+        services[serviceName] = new MinicloudServiceConfig(sourcePath, null, image, port, true, routePath, healthPath);
 
         var config = new MinicloudConfig(app.Slug, database, null, services)
         {
@@ -203,9 +193,21 @@ public sealed partial class CliApplication
             return CliExitCodes.ValidationError;
         }
 
+        var outputPath = configuredOutputPath ?? SuggestedInitConfigPath(serviceName, File.Exists);
+        if (File.Exists(outputPath) && !args.Contains("--force", StringComparer.Ordinal))
+        {
+            if (!Confirm($"'{outputPath}' already exists. Overwrite it?", defaultValue: false))
+            {
+                _console.WriteLine("Init canceled.");
+                return CliExitCodes.Success;
+            }
+        }
+
         File.WriteAllText(outputPath, MinicloudConfigWriter.Write(config));
         _console.WriteLine();
         _console.WriteLine($"Created {outputPath}");
+        _console.WriteLine($"App: {app.Name} ({app.Slug}, {app.Id})");
+        _console.WriteLine($"Service: {serviceName}");
         if (!advanced)
         {
             _console.WriteLine("Used defaults for registry image refs, ports, routes, and health checks.");
@@ -224,6 +226,14 @@ public sealed partial class CliApplication
         var noPublish = args.Contains("--no-publish", StringComparer.Ordinal);
         var publishOnly = args.Contains("--publish-only", StringComparer.Ordinal);
         var verbose = args.Contains("--verbose", StringComparer.Ordinal);
+        var deployAll = args.Contains("--all", StringComparer.Ordinal);
+        var requestedServiceNames = DeployServiceNamesFromArgs(args);
+        if (deployAll && requestedServiceNames.Count > 0)
+        {
+            _console.WriteError("Usage error: --all cannot be combined with service names.");
+            return CliExitCodes.ValidationError;
+        }
+
         var configResult = MinicloudConfigLoader.Load(configPath);
         if (!configResult.IsValid || configResult.Config is null)
         {
@@ -232,6 +242,14 @@ public sealed partial class CliApplication
         }
 
         var config = configResult.Config;
+        var selectedServiceNames = ResolveDeployServiceNames(config, requestedServiceNames, deployAll);
+        if (selectedServiceNames.Count == 0)
+        {
+            _console.WriteError("Usage error: select at least one service to deploy.");
+            return CliExitCodes.ValidationError;
+        }
+
+        config = FilterConfigServices(config, selectedServiceNames);
         if (publishOnly)
         {
             if (noPublish)
@@ -650,7 +668,7 @@ public sealed partial class CliApplication
         _console.WriteLine("  minicloud login --token <token>");
         _console.WriteLine("  minicloud init [--advanced] [--config minicloud.yml] [--force]");
         _console.WriteLine("  minicloud token set <token>");
-        _console.WriteLine("  minicloud deploy [--config minicloud.yml] [--database db] [--pgpassword password] [--tag tag] [--no-publish] [--publish-only] [--verbose]");
+        _console.WriteLine("  minicloud deploy [service ...] [--all] [--config minicloud.yml] [--database db] [--pgpassword password] [--tag tag] [--no-publish] [--publish-only] [--verbose]");
         _console.WriteLine("  minicloud status [deployment-id]");
         _console.WriteLine("  minicloud logs [app|deployment-id] [--service service] [--source source] [--tail count] [--since 30m]");
         _console.WriteLine("  minicloud apps list");
@@ -685,6 +703,83 @@ public sealed partial class CliApplication
         return null;
     }
 
+    internal static IReadOnlyList<string> DeployServiceNamesFromArgs(IReadOnlyList<string> args)
+    {
+        var names = new List<string>();
+        var optionsWithValues = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "--config",
+            "--database",
+            "--pgpassword",
+            "--tag"
+        };
+
+        for (var i = 0; i < args.Count; i++)
+        {
+            var arg = args[i];
+            if (optionsWithValues.Contains(arg))
+            {
+                i++;
+                continue;
+            }
+
+            if (optionsWithValues.Any(option => arg.StartsWith(option + "=", StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            if (arg.StartsWith("-", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            names.Add(arg);
+        }
+
+        return names;
+    }
+
+    private IReadOnlyList<string> ResolveDeployServiceNames(
+        MinicloudConfig config,
+        IReadOnlyList<string> requestedServiceNames,
+        bool deployAll)
+    {
+        if (deployAll || config.Services.Count == 1)
+        {
+            return config.Services.Keys.ToArray();
+        }
+
+        if (requestedServiceNames.Count > 0)
+        {
+            var missing = requestedServiceNames
+                .Where(name => !config.Services.ContainsKey(name))
+                .ToArray();
+            if (missing.Length > 0)
+            {
+                throw new CliCommandException(
+                    CliExitCodes.ValidationError,
+                    $"Config error: service '{missing[0]}' was not found in the selected config.");
+            }
+
+            return requestedServiceNames.Distinct(StringComparer.Ordinal).ToArray();
+        }
+
+        return PromptServiceMultiSelect(config.Services.Keys.OrderBy(x => x, StringComparer.Ordinal).ToArray());
+    }
+
+    internal static MinicloudConfig FilterConfigServices(MinicloudConfig config, IReadOnlyList<string> selectedServiceNames)
+    {
+        var selected = selectedServiceNames.ToHashSet(StringComparer.Ordinal);
+        return new MinicloudConfig(
+            config.App,
+            config.Database,
+            config.CommitSha,
+            config.Services.Where(x => selected.Contains(x.Key)).ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal))
+        {
+            AppId = config.AppId
+        };
+    }
+
     private string PromptSingleSelect(string label, IReadOnlyList<(string Value, string Label)> choices, string defaultValue)
     {
         var selectedIndex = Math.Max(0, choices.ToList().FindIndex(x => x.Value == defaultValue));
@@ -709,6 +804,85 @@ public sealed partial class CliApplication
                     _console.WriteLine();
                     return choices[selectedIndex].Value;
             }
+        }
+    }
+
+    private IReadOnlyList<string> PromptServiceMultiSelect(IReadOnlyList<string> services)
+    {
+        var selectedIndex = 0;
+        var selected = new HashSet<string>(services, StringComparer.Ordinal);
+        const int StaticLineCount = 2;
+        var rendered = false;
+
+        while (true)
+        {
+            RenderServiceMultiSelect(services, selected, selectedIndex, rendered ? StaticLineCount + services.Count + 1 : 0);
+            rendered = true;
+
+            var key = _console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = selectedIndex == 0 ? services.Count : selectedIndex - 1;
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = selectedIndex == services.Count ? 0 : selectedIndex + 1;
+                    break;
+                case ConsoleKey.Spacebar:
+                    if (selectedIndex == 0)
+                    {
+                        if (selected.Count == services.Count)
+                        {
+                            selected.Clear();
+                        }
+                        else
+                        {
+                            selected = new HashSet<string>(services, StringComparer.Ordinal);
+                        }
+                    }
+                    else
+                    {
+                        var service = services[selectedIndex - 1];
+                        if (!selected.Add(service))
+                        {
+                            selected.Remove(service);
+                        }
+                    }
+                    break;
+                case ConsoleKey.Enter:
+                    if (selected.Count == 0)
+                    {
+                        _console.WriteError("Select at least one service.");
+                        break;
+                    }
+
+                    _console.WriteLine();
+                    return services.Where(selected.Contains).ToArray();
+            }
+        }
+    }
+
+    private void RenderServiceMultiSelect(IReadOnlyList<string> services, ISet<string> selected, int selectedIndex, int previousLineCount)
+    {
+        if (_console.SupportsAnsi && previousLineCount > 0)
+        {
+            _console.Write($"\u001b[{previousLineCount}F\u001b[J");
+        }
+        else if (previousLineCount > 0)
+        {
+            _console.WriteLine();
+        }
+
+        _console.WriteLine("Services:");
+        _console.WriteLine("Use Up/Down, Space to toggle, Enter to deploy.");
+        var allMarker = selectedIndex == 0 ? ">" : " ";
+        var allChecked = selected.Count == services.Count ? "x" : " ";
+        _console.WriteLine($"{allMarker} [{allChecked}] all");
+        for (var i = 0; i < services.Count; i++)
+        {
+            var marker = selectedIndex == i + 1 ? ">" : " ";
+            var checkedValue = selected.Contains(services[i]) ? "x" : " ";
+            _console.WriteLine($"{marker} [{checkedValue}] {services[i]}");
         }
     }
 
@@ -853,44 +1027,10 @@ public sealed partial class CliApplication
             value.Trim().Equals("yes", StringComparison.OrdinalIgnoreCase);
     }
 
-    private IReadOnlyList<string> PromptServiceNames()
-    {
-        var count = PromptServiceCount();
-        var names = new List<string>();
-        while (names.Count < count)
-        {
-            var defaultName = names.Count switch
-            {
-                0 => "frontend",
-                1 => "backend",
-                _ => $"service-{names.Count + 1}"
-            };
-            var serviceName = PromptSlug($"Service {names.Count + 1} name", defaultName);
-            if (names.Contains(serviceName, StringComparer.Ordinal))
-            {
-                _console.WriteError("Service names must be unique.");
-                continue;
-            }
+    private string PromptServiceName() => PromptSlug("Service name", "backend");
 
-            names.Add(serviceName);
-        }
-
-        return names;
-    }
-
-    private int PromptServiceCount()
-    {
-        while (true)
-        {
-            var value = PromptRequired("Number of services", "3").Trim();
-            if (int.TryParse(value, out var count) && count is >= 1 and <= MinicloudConfigValidator.MaxDeploymentServices)
-            {
-                return count;
-            }
-
-            _console.WriteError($"Service count must be between 1 and {MinicloudConfigValidator.MaxDeploymentServices}.");
-        }
-    }
+    internal static string SuggestedInitConfigPath(string serviceName, Func<string, bool> fileExists) =>
+        fileExists("minicloud.yml") ? $"minicloud.{serviceName}.yml" : "minicloud.yml";
 
     private (string Image, int Port, string Path, string HealthPath) DefaultServiceOptions(string app, string serviceName) =>
         serviceName switch

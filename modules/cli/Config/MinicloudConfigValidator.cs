@@ -36,7 +36,6 @@ public static class MinicloudConfigValidator
             diagnostics.Add(new ConfigDiagnostic("services", $"At most {MaxDeploymentServices} services are supported."));
         }
 
-        var publicServices = 0;
         foreach (var (name, service) in config.Services)
         {
             ValidateSlug(diagnostics, name, $"services.{name}", "Service name must use lowercase letters, numbers, dashes, and underscores.");
@@ -53,10 +52,6 @@ public static class MinicloudConfigValidator
             if (service.Public is null)
             {
                 diagnostics.Add(new ConfigDiagnostic($"services.{name}.public", "Public is required."));
-            }
-            else if (service.Public.Value)
-            {
-                publicServices++;
             }
 
             if (string.IsNullOrWhiteSpace(service.Path) || !service.Path.StartsWith("/", StringComparison.Ordinal))
@@ -84,11 +79,6 @@ public static class MinicloudConfigValidator
                     }
                 }
             }
-        }
-
-        if (publicServices == 0)
-        {
-            diagnostics.Add(new ConfigDiagnostic("services", "At least one public service is required."));
         }
 
         return diagnostics;

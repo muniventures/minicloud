@@ -26,6 +26,8 @@ on:
         required: true
       postgres_password:
         required: false
+      service_env_secrets:
+        required: false
 
 permissions:
   contents: read
@@ -79,7 +81,7 @@ jobs:
           printf '%s' "${services}" | jq -e '
             def valid_name: test("^[a-z0-9_-]+$");
             def valid_env_key: test("^[A-Za-z_][A-Za-z0-9_]*$");
-            def known_service_keys: ["name", "sourcePath", "dockerfile", "image", "port", "public", "path", "healthPath", "env"];
+            def known_service_keys: ["name", "sourcePath", "dockerfile", "image", "port", "public", "path", "healthPath", "env", "secretEnv"];
 
             if length < 1 then
               error("services must include at least one service")
@@ -107,6 +109,12 @@ jobs:
               error("service env must be an object")
             elif any(.[]; (.env? // {}) | to_entries | any(.[]; (.key | valid_env_key | not) or ((.value | type) != "string"))) then
               error("service env keys must be valid environment variable names and values must be strings")
+            elif any(.[]; (.secretEnv? != null) and ((.secretEnv | type) != "object")) then
+              error("service secretEnv must be an object")
+            elif any(.[]; (.secretEnv? // {}) | to_entries | any(.[]; (.key | valid_env_key | not) or ((.value | type) != "string") or (.value | valid_env_key | not))) then
+              error("service secretEnv keys and referenced secret names must be valid environment variable names")
+            elif any(.[]; ((.env // {}) | keys_unsorted) as $env_keys | (.secretEnv // {}) | keys_unsorted | any(. as $key | $env_keys | index($key))) then
+              error("service env and secretEnv must not define the same environment variable")
             else
               true
             end
@@ -129,14 +137,13 @@ jobs:
                 image="${REGISTRY}/${IMAGE_NAMESPACE}/${name}:${IMAGE_TAG}"
               fi
 
-              args=(docker buildx build --platform linux/amd64 --load -t "${image}")
+              args=(docker buildx build --platform linux/amd64 --push -t "${image}")
               if [ -n "${dockerfile}" ]; then
                 args+=(-f "${dockerfile}")
               fi
               args+=("${source_path}")
 
               "${args[@]}"
-              docker push "${image}"
             fi
 
             service="$(
@@ -149,7 +156,8 @@ jobs:
                   public,
                   path,
                   health_path: .healthPath,
-                  env: (.env // null)
+                  env: (.env // null),
+                  secret_env: (.secretEnv // null)
                 }'
             )"
             published="$(jq -cn --argjson services "${published}" --argjson service "${service}" '$services + [$service]')"
@@ -168,6 +176,7 @@ jobs:
         env:
           MINICLOUD_API_KEY: ${{ secrets.minicloud_api_key }}
           POSTGRES_PASSWORD: ${{ secrets.postgres_password }}
+          SERVICE_ENV_SECRETS: ${{ secrets.service_env_secrets }}
           SERVICES_JSON: ${{ needs.publish.outputs.services_json }}
           MINICLOUD_ENVIRONMENT: ${{ inputs.minicloud_environment }}
           APP_ID: ${{ inputs.app_id }}
@@ -220,16 +229,52 @@ jobs:
               "$1"
           }
 
+          SERVICE_ENV_SECRETS_JSON="$(
+            if [ -z "${SERVICE_ENV_SECRETS}" ]; then
+              printf '{}'
+            else
+              printf '%s' "${SERVICE_ENV_SECRETS}" | jq -ce '
+                def valid_env_key: test("^[A-Za-z_][A-Za-z0-9_]*$");
+
+                if type != "object" then
+                  error("service_env_secrets must be a JSON object")
+                elif to_entries | any(.[]; (.key | valid_env_key | not) or ((.value | type) != "string")) then
+                  error("service_env_secrets keys must be valid environment variable names and values must be strings")
+                else
+                  .
+                end
+              '
+            fi
+          )"
+
+          printf '%s' "${SERVICE_ENV_SECRETS_JSON}" | jq -r 'to_entries[].value' | while IFS= read -r secret_value; do
+            if [ -n "${secret_value}" ]; then
+              echo "::add-mask::${secret_value}"
+            fi
+          done
+
           SERVICES_FOR_API="$(
-            printf '%s' "${SERVICES_JSON}" | jq -c '[.[] | {
-              name,
-              image,
-              port,
-              public,
-              path,
-              healthPath: .health_path,
-              env: (.env // null)
-            }]'
+            printf '%s' "${SERVICES_JSON}" | jq -c --argjson service_env_secrets "${SERVICE_ENV_SECRETS_JSON}" '
+              def resolved_env($secrets):
+                . as $service
+                | ($service.env // {}) as $plain_env
+                | reduce (($service.secret_env // {}) | to_entries[]) as $secret_ref ($plain_env;
+                    if ($secrets | has($secret_ref.value)) then
+                      . + {($secret_ref.key): $secrets[$secret_ref.value]}
+                    else
+                      error("service " + $service.name + " secretEnv." + $secret_ref.key + " references missing service_env_secrets key " + $secret_ref.value)
+                    end
+                  );
+
+              [.[] | {
+                name,
+                image,
+                port,
+                public,
+                path,
+                healthPath: .health_path,
+                env: (resolved_env($service_env_secrets) | if length == 0 then null else . end)
+              }]'
           )"
 
           DEPLOYMENT_JSON="$(
