@@ -39,12 +39,30 @@ minicloud init
 
 The wizard lists existing apps in your organization and includes `Create new app`. The generated config always includes the selected or newly created `appId`.
 
-`minicloud init` generates one service definition by default. If `minicloud.yml` already exists, the CLI writes a service-specific file such as `minicloud.backend.yml`.
+`minicloud init` asks for one service name and service folder, then generates one service definition by default. More services can be added later by running `minicloud init` again. If `minicloud.yml` already exists, the CLI writes a service-specific file such as `minicloud.backend.yml`.
+
+If the selected service folder does not contain `Dockerfile`, init prints a warning and still creates the config. `minicloud deploy` requires a Dockerfile and fails until one exists or `services.<name>.dockerfile` points to one.
+
+To add another service to an existing app:
+
+```bash
+minicloud add-service
+```
+
+Pass the app slug or ID to skip the app picker:
+
+```bash
+minicloud add-service teamcore-dev
+minicloud add-service --app teamcore-dev --config minicloud.api.yml
+```
+
+`add-service` asks for the new service name and folder, writes a service-specific config, and uses the selected app's existing `appId`.
 
 For more prompts:
 
 ```bash
 minicloud init --advanced
+minicloud add-service --advanced
 ```
 
 Use another config path:
@@ -115,7 +133,7 @@ services:
     dockerfile: modules/api/Dockerfile
     port: 8080
     public: true
-    path: /api
+    path: /
     healthPath: /health
     env:
       ASPNETCORE_ENVIRONMENT: Staging
@@ -146,13 +164,13 @@ services:
     dockerfile: api/Dockerfile
     port: 8080
     public: true
-    path: /api
+    path: /
     healthPath: /health
   worker:
     sourcePath: worker
     port: 8080
     public: false
-    path: /worker
+    path: /
     healthPath: /health
 ```
 
@@ -207,7 +225,7 @@ minicloud deploy --pgpassword '<strong-password>'
 | `image` | Required with `--no-publish`; optional otherwise | Full image reference. When CLI publishes, omit this or use the configured Minicloud registry host. |
 | `port` | Yes | Internal container port, `1` to `65535`. |
 | `public` | Yes | Whether the service receives public HTTP traffic. The merged active app must have at least one public service. |
-| `path` | Yes | Public route path. Must start with `/`. For private services, still set a stable path value. |
+| `path` | Yes | Public route path. First-pass service subdomains require `/`. For private services, still set `/`. |
 | `healthPath` | Yes | HTTP health check path. Must start with `/`. |
 | `env` | No | String key/value environment variables for the service. |
 
@@ -271,6 +289,17 @@ minicloud apps list
 minicloud apps inspect <app>
 ```
 
+## Service Subdomains
+
+Public services get Minicloud subdomains under `app.muni.dev`.
+
+```bash
+minicloud domains list --app <app>
+minicloud domains add-subdomain --app <app> --service <service> --label <label>
+minicloud domains disable --app <app> --hostname <host>
+minicloud domains delete --app <app> --hostname <host>
+```
+
 ## Environment Defaults
 
 Show CLI environment defaults:
@@ -284,7 +313,7 @@ Supported environment variables:
 | Variable | Description |
 | --- | --- |
 | `MINICLOUD_TOKEN` | API key used by CLI commands. |
-| `MINICLOUD_API_URL` | API base URL. Defaults to `https://cloud.muni.dev/api`. |
+| `MINICLOUD_API_URL` | API base URL. Defaults to `https://api.cloud.muni.dev`. |
 | `MINICLOUD_REGISTRY_HOST` | Registry host used for CLI image publishing. |
 | `MINICLOUD_REGISTRY_GHCR_OWNER` | Runtime GHCR owner. |
 | `MINICLOUD_RUNTIME_REGISTRY_PREFIX` | Runtime image prefix. |

@@ -40,6 +40,18 @@ public sealed class MinicloudApiClient
     public Task<AppResponse> CreateAppAsync(CreateAppRequest request, CancellationToken cancellationToken) =>
         SendAsync<AppResponse>(HttpMethod.Post, "/v1/apps", request, cancellationToken);
 
+    public Task<IReadOnlyList<DomainBindingResponse>> GetDomainsAsync(string appId, CancellationToken cancellationToken) =>
+        SendAsync<IReadOnlyList<DomainBindingResponse>>(HttpMethod.Get, $"/v1/apps/{Uri.EscapeDataString(appId)}/domains", null, cancellationToken);
+
+    public Task<DomainBindingResponse> CreateDomainAsync(string appId, CreateDomainBindingRequest request, CancellationToken cancellationToken) =>
+        SendAsync<DomainBindingResponse>(HttpMethod.Post, $"/v1/apps/{Uri.EscapeDataString(appId)}/domains", request, cancellationToken);
+
+    public Task<DomainBindingResponse> UpdateDomainAsync(string appId, string domainId, UpdateDomainBindingRequest request, CancellationToken cancellationToken) =>
+        SendAsync<DomainBindingResponse>(HttpMethod.Patch, $"/v1/apps/{Uri.EscapeDataString(appId)}/domains/{Uri.EscapeDataString(domainId)}", request, cancellationToken);
+
+    public Task DeleteDomainAsync(string appId, string domainId, CancellationToken cancellationToken) =>
+        SendNoContentAsync(HttpMethod.Delete, $"/v1/apps/{Uri.EscapeDataString(appId)}/domains/{Uri.EscapeDataString(domainId)}", cancellationToken);
+
     public Task<DeploymentCreateResponse> CreateDeploymentAsync(CreateDeploymentRequest request, CancellationToken cancellationToken) =>
         SendAsync<DeploymentCreateResponse>(HttpMethod.Post, "/v1/deployments", request, cancellationToken);
 
@@ -123,6 +135,23 @@ public sealed class MinicloudApiClient
 
         var result = await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken);
         return result ?? throw new ApiException((int)response.StatusCode, "empty_response", "Minicloud API returned an empty response.");
+    }
+
+    private async Task SendNoContentAsync(HttpMethod method, string pathAndQuery, CancellationToken cancellationToken)
+    {
+        var token = _tokenStore.GetToken();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new ApiException((int)HttpStatusCode.Unauthorized, "missing_token", "Set MINICLOUD_TOKEN or run 'minicloud token set <token>'.");
+        }
+
+        using var request = new HttpRequestMessage(method, _environment.ApiBaseUrl + pathAndQuery);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            await ThrowApiExceptionAsync(response, cancellationToken);
+        }
     }
 
     private async Task<T> SendUnauthenticatedAsync<T>(HttpMethod method, string pathAndQuery, object? body, CancellationToken cancellationToken)

@@ -32,7 +32,7 @@ public sealed class CliEnvironment
         var apiBaseUrl = Environment.GetEnvironmentVariable(ApiUrlEnvironmentVariable);
         if (string.IsNullOrWhiteSpace(apiBaseUrl))
         {
-            apiBaseUrl = "https://cloud.muni.dev/api";
+            apiBaseUrl = "https://api.cloud.muni.dev";
         }
 
         var registryHost = Environment.GetEnvironmentVariable(RegistryHostEnvironmentVariable);
@@ -83,7 +83,7 @@ public sealed class CliEnvironment
     private static string DefaultRegistryHostForApiBaseUrl(string apiBaseUrl)
     {
         return Uri.TryCreate(apiBaseUrl, UriKind.Absolute, out var uri) &&
-            uri.Host.Equals("cloud-dev.muni.dev", StringComparison.OrdinalIgnoreCase)
+            uri.Host.Equals("api.cloud-dev.muni.dev", StringComparison.OrdinalIgnoreCase)
             ? "registry-dev.muni.dev"
             : "registry.muni.dev";
     }

@@ -23,6 +23,29 @@ public sealed record AppResponse(
     string Database,
     LatestDeploymentResponse? LatestDeployment);
 
+public sealed record DomainBindingResponse(
+    string Id,
+    string AppId,
+    string ServiceName,
+    string Hostname,
+    string Kind,
+    string PathPrefix,
+    string DnsStatus,
+    string ApplyStatus,
+    string SslStatus,
+    string Status,
+    string? FailureCode,
+    string? FailureMessage,
+    DateTimeOffset? LastAppliedAt,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record CreateDomainBindingRequest(
+    string ServiceName,
+    string? Label);
+
+public sealed record UpdateDomainBindingRequest(bool? Disabled);
+
 public sealed record CreateAppRequest(
     string OrganizationId,
     string Name,

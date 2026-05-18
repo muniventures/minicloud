@@ -116,7 +116,7 @@ jobs:
           dockerfile: modules/api/Dockerfile
           port: 8080
           public: true
-          path: /api
+          path: /
           healthPath: /health
           env:
             ASPNETCORE_ENVIRONMENT: Staging
@@ -134,7 +134,7 @@ jobs:
 | --- | --- | --- | --- |
 | `app_id` | Yes | | App id from the Minicloud console URL. Pass `${{ vars.MINICLOUD_APP_ID }}` from the caller workflow. |
 | `database` | No | `sqlite` | `sqlite` or `postgres`. |
-| `minicloud_environment` | No | `prod` | `prod` or `staging`. `prod` uses the production Minicloud API. `staging` uses `https://minicloud-dev.muni.dev/api`. |
+| `minicloud_environment` | No | `prod` | `prod` or `staging`. `prod` uses the production Minicloud API. `staging` uses `https://api.cloud-dev.muni.dev`. |
 | `services` | Yes | | YAML service array. Uses the same service fields as `minicloud.yml`, with `name` added because a workflow input cannot receive the keyed `services` map directly. |
 | `image_tag` | No | commit SHA | Docker image tag. |
 

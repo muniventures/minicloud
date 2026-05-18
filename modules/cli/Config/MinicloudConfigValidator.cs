@@ -54,9 +54,9 @@ public static class MinicloudConfigValidator
                 diagnostics.Add(new ConfigDiagnostic($"services.{name}.public", "Public is required."));
             }
 
-            if (string.IsNullOrWhiteSpace(service.Path) || !service.Path.StartsWith("/", StringComparison.Ordinal))
+            if (service.Path != "/")
             {
-                diagnostics.Add(new ConfigDiagnostic($"services.{name}.path", "Path is required and must start with '/'."));
+                diagnostics.Add(new ConfigDiagnostic($"services.{name}.path", "Path must be '/'."));
             }
 
             if (string.IsNullOrWhiteSpace(service.HealthPath) || !service.HealthPath.StartsWith("/", StringComparison.Ordinal))

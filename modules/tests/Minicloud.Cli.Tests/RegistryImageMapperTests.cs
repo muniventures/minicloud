@@ -5,8 +5,8 @@ namespace Minicloud.Tests;
 public sealed class RegistryImageMapperTests
 {
     [Theory]
-    [InlineData("https://cloud-dev.muni.dev/api", "registry-dev.muni.dev")]
-    [InlineData("https://cloud.muni.dev/api", "registry.muni.dev")]
+    [InlineData("https://api.cloud-dev.muni.dev", "registry-dev.muni.dev")]
+    [InlineData("https://api.cloud.muni.dev", "registry.muni.dev")]
     public void FromEnvironment_defaults_registry_host_from_api_environment(string apiBaseUrl, string expectedRegistryHost)
     {
         var originalApiUrl = Environment.GetEnvironmentVariable(CliEnvironment.ApiUrlEnvironmentVariable);
@@ -42,7 +42,7 @@ public sealed class RegistryImageMapperTests
     public void RuntimeImageForDeployment_maps_minicloud_registry_ref_to_runtime_registry()
     {
         var environment = CliEnvironment.ForTests(
-            "https://cloud.muni.dev/api",
+            "https://api.cloud.muni.dev",
             "/tmp/minicloud-tests",
             "localhost:5050",
             "localhost:5051/minicloud-local",
@@ -57,7 +57,7 @@ public sealed class RegistryImageMapperTests
     [Fact]
     public void RuntimeImageForDeployment_leaves_external_refs_unchanged()
     {
-        var mapper = new RegistryImageMapper(CliEnvironment.ForTests("https://cloud.muni.dev/api", "/tmp/minicloud-tests"));
+        var mapper = new RegistryImageMapper(CliEnvironment.ForTests("https://api.cloud.muni.dev", "/tmp/minicloud-tests"));
 
         var image = mapper.RuntimeImageForDeployment("ghcr.io/customer/teamcore/backend:abc123", "acme");
 
@@ -72,7 +72,7 @@ public sealed class RegistryImageMapperTests
     public void UsesMinicloudRegistry_matches_configured_host(string image, bool expected)
     {
         var environment = CliEnvironment.ForTests(
-            "https://cloud.muni.dev/api",
+            "https://api.cloud.muni.dev",
             "/tmp/minicloud-tests",
             "localhost:5050",
             "localhost:5051/minicloud-local",

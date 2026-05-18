@@ -99,8 +99,8 @@ jobs:
               error("service port must be between 1 and 65535")
             elif any(.[]; (.public | type) != "boolean") then
               error("service public must be true or false")
-            elif any(.[]; (.path | type) != "string" or (.path | startswith("/") | not)) then
-              error("service path must start with /")
+            elif any(.[]; (.path | type) != "string" or .path != "/") then
+              error("service path must be /")
             elif any(.[]; (.healthPath | type) != "string" or (.healthPath | startswith("/") | not)) then
               error("service healthPath must start with /")
             elif ([.[] | select(.public)] | length) == 0 then
@@ -208,10 +208,10 @@ jobs:
 
           case "${MINICLOUD_ENVIRONMENT}" in
             prod)
-              MINICLOUD_API_URL="https://cloud.muni.dev/api"
+              MINICLOUD_API_URL="https://api.cloud.muni.dev"
               ;;
             staging)
-              MINICLOUD_API_URL="https://minicloud-dev.muni.dev/api"
+              MINICLOUD_API_URL="https://api.cloud-dev.muni.dev"
               ;;
             *)
               echo "minicloud_environment must be prod or staging."

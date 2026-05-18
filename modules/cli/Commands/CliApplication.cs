@@ -57,11 +57,13 @@ public sealed partial class CliApplication
             {
                 "token" => await RunTokenAsync(args.Skip(1).ToArray(), cancellationToken),
                 "init" => await RunInitAsync(args.Skip(1).ToArray(), cancellationToken),
+                "add-service" => await RunAddServiceAsync(args.Skip(1).ToArray(), cancellationToken),
                 "login" => await RunLoginAsync(args.Skip(1).ToArray(), cancellationToken),
                 "deploy" => await RunDeployAsync(args.Skip(1).ToArray(), cancellationToken),
                 "status" => await RunStatusAsync(args.Skip(1).ToArray(), cancellationToken),
                 "logs" => await RunLogsAsync(args.Skip(1).ToArray(), cancellationToken),
                 "apps" => await RunAppsAsync(args.Skip(1).ToArray(), cancellationToken),
+                "domains" => await RunDomainsAsync(args.Skip(1).ToArray(), cancellationToken),
                 _ => UnknownCommand(args[0])
             };
         }
@@ -152,11 +154,37 @@ public sealed partial class CliApplication
 
     private async Task<int> RunInitAsync(string[] args, CancellationToken cancellationToken)
     {
-        var configuredOutputPath = GetOption(args, "--config");
-        var advanced = args.Contains("--advanced", StringComparer.Ordinal);
-
         _console.WriteLine("Minicloud init");
         _console.WriteLine();
+
+        return await RunServiceConfigWizardAsync(
+            args,
+            allowCreateApp: true,
+            createdVerb: "Created",
+            cancellationToken);
+    }
+
+    private async Task<int> RunAddServiceAsync(string[] args, CancellationToken cancellationToken)
+    {
+        _console.WriteLine("Minicloud add-service");
+        _console.WriteLine();
+
+        return await RunServiceConfigWizardAsync(
+            args,
+            allowCreateApp: false,
+            createdVerb: "Created service config",
+            cancellationToken);
+    }
+
+    private async Task<int> RunServiceConfigWizardAsync(
+        string[] args,
+        bool allowCreateApp,
+        string createdVerb,
+        CancellationToken cancellationToken)
+    {
+        var configuredOutputPath = GetOption(args, "--config");
+        var advanced = args.Contains("--advanced", StringComparer.Ordinal);
+        var requestedApp = GetOption(args, "--app") ?? FirstPositionalArg(args);
 
         var me = await _apiClient.GetMeAsync(cancellationToken);
         var organization = me.Organizations.FirstOrDefault();
@@ -166,14 +194,19 @@ public sealed partial class CliApplication
             return CliExitCodes.AuthError;
         }
 
-        var app = await PromptAppSelectionAsync(organization, cancellationToken);
+        var app = allowCreateApp
+            ? await PromptAppSelectionAsync(organization, requestedApp, cancellationToken)
+            : await PromptExistingAppSelectionAsync(organization, requestedApp, cancellationToken);
         var database = app.Database;
 
         var services = new Dictionary<string, MinicloudServiceConfig>(StringComparer.Ordinal);
+        _console.WriteLine("Name one service and choose its folder. You can add more services later by running init again.");
+        _console.WriteLine();
         var serviceName = PromptServiceName();
         _console.WriteLine();
         _console.WriteLine($"{ToTitle(serviceName)} service");
-        var sourcePath = PromptDirectory($"{ToTitle(serviceName)} source folder");
+        var sourcePath = PromptDirectory($"{ToTitle(serviceName)} service folder");
+        WriteMissingDefaultDockerfileWarning(serviceName, sourcePath);
         var defaults = DefaultServiceOptions(app.Slug, serviceName);
         var image = advanced ? PromptOptional($"{ToTitle(serviceName)} push image", defaults.Image) : null;
         var port = advanced ? PromptPort($"{ToTitle(serviceName)} port", defaults.Port) : defaults.Port;
@@ -205,7 +238,7 @@ public sealed partial class CliApplication
 
         File.WriteAllText(outputPath, MinicloudConfigWriter.Write(config));
         _console.WriteLine();
-        _console.WriteLine($"Created {outputPath}");
+        _console.WriteLine($"{createdVerb} {outputPath}");
         _console.WriteLine($"App: {app.Name} ({app.Slug}, {app.Id})");
         _console.WriteLine($"Service: {serviceName}");
         if (!advanced)
@@ -509,9 +542,93 @@ public sealed partial class CliApplication
         return CliExitCodes.Success;
     }
 
-    private async Task<AppResponse> PromptAppSelectionAsync(OrganizationSummary organization, CancellationToken cancellationToken)
+    private async Task<int> RunDomainsAsync(string[] args, CancellationToken cancellationToken)
+    {
+        if (args.Length == 0)
+        {
+            _console.WriteError("Usage: minicloud domains <list|add-subdomain|disable|delete>");
+            return CliExitCodes.ValidationError;
+        }
+
+        return args[0] switch
+        {
+            "list" => await RunDomainsListAsync(args.Skip(1).ToArray(), cancellationToken),
+            "add-subdomain" => await RunDomainsAddSubdomainAsync(args.Skip(1).ToArray(), cancellationToken),
+            "disable" => await RunDomainsDisableAsync(args.Skip(1).ToArray(), cancellationToken),
+            "delete" => await RunDomainsDeleteAsync(args.Skip(1).ToArray(), cancellationToken),
+            _ => UnknownCommand($"domains {args[0]}")
+        };
+    }
+
+    private async Task<int> RunDomainsListAsync(string[] args, CancellationToken cancellationToken)
+    {
+        var app = await ResolveAppOptionAsync(args, cancellationToken);
+        var domains = await _apiClient.GetDomainsAsync(app.Id, cancellationToken);
+        if (domains.Count == 0)
+        {
+            _console.WriteLine($"No domains for {app.Name}.");
+            return CliExitCodes.Success;
+        }
+
+        foreach (var domain in domains.OrderBy(x => x.ServiceName, StringComparer.Ordinal).ThenBy(x => x.Hostname, StringComparer.Ordinal))
+        {
+            _console.WriteLine($"{domain.Hostname}  service={domain.ServiceName}  status={domain.Status}  apply={domain.ApplyStatus}  ssl={domain.SslStatus}");
+        }
+
+        return CliExitCodes.Success;
+    }
+
+    private async Task<int> RunDomainsAddSubdomainAsync(string[] args, CancellationToken cancellationToken)
+    {
+        var service = GetOption(args, "--service");
+        if (string.IsNullOrWhiteSpace(service))
+        {
+            _console.WriteError("Usage: minicloud domains add-subdomain --app <app> --service <service> [--label <label>]");
+            return CliExitCodes.ValidationError;
+        }
+
+        var app = await ResolveAppOptionAsync(args, cancellationToken);
+        var label = GetOption(args, "--label");
+        var domain = await _apiClient.CreateDomainAsync(app.Id, new CreateDomainBindingRequest(service, label), cancellationToken);
+        _console.WriteLine($"Created {domain.Hostname}");
+        _console.WriteLine($"Service: {domain.ServiceName}");
+        _console.WriteLine($"Status: {domain.Status}");
+        return CliExitCodes.Success;
+    }
+
+    private async Task<int> RunDomainsDisableAsync(string[] args, CancellationToken cancellationToken)
+    {
+        var app = await ResolveAppOptionAsync(args, cancellationToken);
+        var domain = await ResolveDomainOptionAsync(app.Id, args, cancellationToken);
+        var updated = await _apiClient.UpdateDomainAsync(app.Id, domain.Id, new UpdateDomainBindingRequest(true), cancellationToken);
+        _console.WriteLine($"Disabled {updated.Hostname}");
+        _console.WriteLine($"Status: {updated.Status}");
+        return CliExitCodes.Success;
+    }
+
+    private async Task<int> RunDomainsDeleteAsync(string[] args, CancellationToken cancellationToken)
+    {
+        var app = await ResolveAppOptionAsync(args, cancellationToken);
+        var domain = await ResolveDomainOptionAsync(app.Id, args, cancellationToken);
+        await _apiClient.DeleteDomainAsync(app.Id, domain.Id, cancellationToken);
+        _console.WriteLine($"Deleted {domain.Hostname}");
+        return CliExitCodes.Success;
+    }
+
+    private async Task<AppResponse> PromptAppSelectionAsync(OrganizationSummary organization, string? requestedApp, CancellationToken cancellationToken)
     {
         var apps = await _apiClient.GetAppsAsync(organization.Id, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(requestedApp))
+        {
+            var app = FindApp(apps, requestedApp);
+            if (app is not null)
+            {
+                return app;
+            }
+
+            _console.WriteError($"App '{requestedApp}' was not found in organization '{organization.Name}'.");
+        }
+
         var choices = apps
             .OrderBy(app => app.Name, StringComparer.OrdinalIgnoreCase)
             .Select(app => (Value: app.Id, Label: $"{app.Name} ({app.Slug})"))
@@ -527,6 +644,34 @@ public sealed partial class CliApplication
         var appSlug = PromptAppName();
         var database = PromptSingleSelect("Database", [("postgres", "Postgres"), ("sqlite", "SQLite")], "postgres");
         return await CreateAppAsync(organization, appSlug, database, cancellationToken);
+    }
+
+    private async Task<AppResponse> PromptExistingAppSelectionAsync(OrganizationSummary organization, string? requestedApp, CancellationToken cancellationToken)
+    {
+        var apps = await _apiClient.GetAppsAsync(organization.Id, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(requestedApp))
+        {
+            var app = FindApp(apps, requestedApp);
+            if (app is not null)
+            {
+                return app;
+            }
+
+            throw new CliCommandException(CliExitCodes.ValidationError, $"App '{requestedApp}' was not found in organization '{organization.Name}'.");
+        }
+
+        if (apps.Count == 0)
+        {
+            throw new CliCommandException(CliExitCodes.ValidationError, $"No apps found in organization '{organization.Name}'. Run 'minicloud init' to create an app first.");
+        }
+
+        var choices = apps
+            .OrderBy(app => app.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(app => (Value: app.Id, Label: $"{app.Name} ({app.Slug})"))
+            .ToArray();
+
+        var selected = PromptSingleSelect("App", choices, choices[0].Value);
+        return apps.Single(app => app.Id == selected);
     }
 
     private async Task<AppResponse> CreateAppAsync(
@@ -551,6 +696,39 @@ public sealed partial class CliApplication
         apps.FirstOrDefault(x =>
             string.Equals(x.Slug, appIdOrSlug, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(x.Id, appIdOrSlug, StringComparison.OrdinalIgnoreCase));
+
+    private async Task<AppResponse> ResolveAppOptionAsync(string[] args, CancellationToken cancellationToken)
+    {
+        var appIdOrSlug = GetOption(args, "--app");
+        if (string.IsNullOrWhiteSpace(appIdOrSlug))
+        {
+            throw new CliCommandException(CliExitCodes.ValidationError, "Missing --app <app>.");
+        }
+
+        var me = await _apiClient.GetMeAsync(cancellationToken);
+        var organization = me.Organizations.FirstOrDefault();
+        if (organization is null)
+        {
+            throw new CliCommandException(CliExitCodes.AuthError, "Auth error: your token is not associated with an organization.");
+        }
+
+        var apps = await _apiClient.GetAppsAsync(organization.Id, cancellationToken);
+        return FindApp(apps, appIdOrSlug)
+            ?? throw new CliCommandException(CliExitCodes.ValidationError, $"App '{appIdOrSlug}' was not found.");
+    }
+
+    private async Task<DomainBindingResponse> ResolveDomainOptionAsync(string appId, string[] args, CancellationToken cancellationToken)
+    {
+        var hostname = GetOption(args, "--hostname");
+        if (string.IsNullOrWhiteSpace(hostname))
+        {
+            throw new CliCommandException(CliExitCodes.ValidationError, "Missing --hostname <host>.");
+        }
+
+        var domains = await _apiClient.GetDomainsAsync(appId, cancellationToken);
+        return domains.FirstOrDefault(x => string.Equals(x.Hostname, hostname, StringComparison.OrdinalIgnoreCase) || string.Equals(x.Id, hostname, StringComparison.OrdinalIgnoreCase))
+            ?? throw new CliCommandException(CliExitCodes.ValidationError, $"Domain '{hostname}' was not found.");
+    }
 
     private static string DisplayNameFromSlug(string slug)
     {
@@ -667,12 +845,17 @@ public sealed partial class CliApplication
         _console.WriteLine("Usage:");
         _console.WriteLine("  minicloud login --token <token>");
         _console.WriteLine("  minicloud init [--advanced] [--config minicloud.yml] [--force]");
+        _console.WriteLine("  minicloud add-service [app] [--app app] [--advanced] [--config minicloud.service.yml] [--force]");
         _console.WriteLine("  minicloud token set <token>");
         _console.WriteLine("  minicloud deploy [service ...] [--all] [--config minicloud.yml] [--database db] [--pgpassword password] [--tag tag] [--no-publish] [--publish-only] [--verbose]");
         _console.WriteLine("  minicloud status [deployment-id]");
         _console.WriteLine("  minicloud logs [app|deployment-id] [--service service] [--source source] [--tail count] [--since 30m]");
         _console.WriteLine("  minicloud apps list");
         _console.WriteLine("  minicloud apps inspect <app>");
+        _console.WriteLine("  minicloud domains list --app <app>");
+        _console.WriteLine("  minicloud domains add-subdomain --app <app> --service <service> [--label label]");
+        _console.WriteLine("  minicloud domains disable --app <app> --hostname <host>");
+        _console.WriteLine("  minicloud domains delete --app <app> --hostname <host>");
         _console.WriteLine("  minicloud --env");
     }
 
@@ -698,6 +881,39 @@ public sealed partial class CliApplication
             {
                 return args[i][(name.Length + 1)..];
             }
+        }
+
+        return null;
+    }
+
+    internal static string? FirstPositionalArg(IReadOnlyList<string> args)
+    {
+        var optionsWithValues = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "--app",
+            "--config"
+        };
+
+        for (var i = 0; i < args.Count; i++)
+        {
+            var arg = args[i];
+            if (optionsWithValues.Contains(arg))
+            {
+                i++;
+                continue;
+            }
+
+            if (optionsWithValues.Any(option => arg.StartsWith(option + "=", StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            if (arg.StartsWith("-", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            return arg;
         }
 
         return null;
@@ -1029,6 +1245,21 @@ public sealed partial class CliApplication
 
     private string PromptServiceName() => PromptSlug("Service name", "backend");
 
+    private void WriteMissingDefaultDockerfileWarning(string serviceName, string sourcePath)
+    {
+        if (HasDefaultDockerfile(sourcePath))
+        {
+            return;
+        }
+
+        _console.WriteError($"Warning: {serviceName} does not have a Dockerfile at '{Path.Combine(sourcePath, "Dockerfile")}'.");
+        _console.WriteError("Minicloud needs a Dockerfile in the service folder before it can deploy this service.");
+        _console.WriteError("Init will continue, but deploy will fail until the Dockerfile exists.");
+    }
+
+    internal static bool HasDefaultDockerfile(string sourcePath) =>
+        File.Exists(Path.Combine(sourcePath, "Dockerfile"));
+
     internal static string SuggestedInitConfigPath(string serviceName, Func<string, bool> fileExists) =>
         fileExists("minicloud.yml") ? $"minicloud.{serviceName}.yml" : "minicloud.yml";
 
@@ -1036,7 +1267,7 @@ public sealed partial class CliApplication
         serviceName switch
         {
             "frontend" or "dashboard" => ($"{_environment.RegistryHost}/{app}/{serviceName}:latest", 3000, "/", "/"),
-            "backend" or "api" => ($"{_environment.RegistryHost}/{app}/{serviceName}:latest", 8080, "/api", "/health"),
+            "backend" or "api" => ($"{_environment.RegistryHost}/{app}/{serviceName}:latest", 8080, "/", "/health"),
             "registry" => ($"{_environment.RegistryHost}/{app}/registry:latest", 8080, "/", "/health"),
             _ => ($"{_environment.RegistryHost}/{app}/{serviceName}:latest", 8080, "/", "/")
         };

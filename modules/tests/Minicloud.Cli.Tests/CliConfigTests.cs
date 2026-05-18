@@ -25,7 +25,7 @@ public sealed class CliConfigTests
             "    image: ghcr.io/customer/teamcore/backend:abc123",
             "    port: 8080",
             "    public: true",
-            "    path: /api",
+            "    path: /",
             "    healthPath: /health"
         ]);
 
@@ -133,14 +133,14 @@ public sealed class CliConfigTests
             "    image: \"ghcr.io/customer/teamcore/backend:abc123\"",
             "    port: 8080",
             "    public: true",
-            "    path: \"/api#v1\"",
+            "    path: \"/\"",
             "    healthPath: \"/health#ready\"",
             "    env:",
             "      FEATURE_VALUE: \"enabled # not a comment\""
         ]);
 
         Assert.True(result.IsValid);
-        Assert.Equal("/api#v1", result.Config?.Services["backend"].Path);
+        Assert.Equal("/", result.Config?.Services["backend"].Path);
         Assert.Equal("/health#ready", result.Config?.Services["backend"].HealthPath);
         Assert.Equal("enabled # not a comment", result.Config?.Services["backend"].Env?["FEATURE_VALUE"]);
     }
@@ -245,7 +245,7 @@ public sealed class CliConfigTests
             "    sourcePath: modules/api",
             "    port: 8080",
             "    public: true",
-            "    path: /api",
+            "    path: /",
             "    healthPath: /health"
         ]);
 
@@ -266,7 +266,7 @@ public sealed class CliConfigTests
             "    sourcePath: modules/worker",
             "    port: 8080",
             "    public: false",
-            "    path: /worker",
+            "    path: /",
             "    healthPath: /health"
         ]);
 
@@ -316,6 +316,36 @@ public sealed class CliConfigTests
     }
 
     [Fact]
+    public void Init_detects_default_dockerfile_in_service_folder()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory("minicloud-init-dockerfile-test-");
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDirectory.FullName, "Dockerfile"), "FROM scratch");
+
+            Assert.True(CliApplication.HasDefaultDockerfile(tempDirectory.FullName));
+        }
+        finally
+        {
+            tempDirectory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Init_allows_service_folder_without_default_dockerfile()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory("minicloud-init-dockerfile-test-");
+        try
+        {
+            Assert.False(CliApplication.HasDefaultDockerfile(tempDirectory.FullName));
+        }
+        finally
+        {
+            tempDirectory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void DeployServiceNamesFromArgs_reads_positional_service_names()
     {
         var services = CliApplication.DeployServiceNamesFromArgs(
@@ -340,6 +370,22 @@ public sealed class CliConfigTests
     }
 
     [Fact]
+    public void FirstPositionalArg_reads_add_service_app_argument()
+    {
+        var app = CliApplication.FirstPositionalArg(["teamcore-dev", "--config", "minicloud.api.yml", "--advanced"]);
+
+        Assert.Equal("teamcore-dev", app);
+    }
+
+    [Fact]
+    public void FirstPositionalArg_ignores_options_with_values()
+    {
+        var app = CliApplication.FirstPositionalArg(["--app", "teamcore-dev", "--config=minicloud.api.yml"]);
+
+        Assert.Null(app);
+    }
+
+    [Fact]
     public void FilterConfigServices_returns_only_selected_services()
     {
         var config = new MinicloudConfig(
@@ -349,7 +395,7 @@ public sealed class CliConfigTests
             new Dictionary<string, MinicloudServiceConfig>
             {
                 ["frontend"] = new("modules/ui", null, null, 3000, true, "/", "/"),
-                ["backend"] = new("modules/api", null, null, 8080, true, "/api", "/health")
+                ["backend"] = new("modules/api", null, null, 8080, true, "/", "/health")
             })
         {
             AppId = "app_123"
@@ -378,7 +424,7 @@ public sealed class CliConfigTests
             "    image: ghcr.io/minicloud/api:latest",
             "    port: 8080",
             "    public: true",
-            "    path: /api",
+            "    path: /",
             "    healthPath: /health",
             "  dashboard:",
             "    sourcePath: modules/dashboard",
@@ -392,7 +438,7 @@ public sealed class CliConfigTests
             "    image: ghcr.io/minicloud/registry:latest",
             "    port: 5000",
             "    public: false",
-            "    path: /registry",
+            "    path: /",
             "    healthPath: /health"
         ]);
 
@@ -478,7 +524,7 @@ public sealed class CliConfigTests
                 "EXPOSE 8080/tcp",
                 "ENTRYPOINT [\"dotnet\", \"TeamCore.Api.dll\"]"
             ]);
-            var service = new MinicloudServiceConfig(tempDirectory.FullName, dockerfilePath, null, 8080, true, "/api", "/health");
+            var service = new MinicloudServiceConfig(tempDirectory.FullName, dockerfilePath, null, 8080, true, "/", "/health");
 
             var diagnostics = CliApplication.ValidateDockerfileForService("backend", service);
 
