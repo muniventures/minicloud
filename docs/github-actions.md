@@ -202,7 +202,14 @@ The publish job keeps only `secretEnv` references. The deploy job merges those r
 The workflow runs two jobs:
 
 - `minicloud - publish`: builds configured service images, pushes them to GHCR, and creates the service payload.
-- `minicloud - deploy`: calls the Minicloud API for the configured app id, starts a deployment, and waits for completion.
+- `minicloud - deploy`: writes troubleshooting metadata to the job log and GitHub step summary, calls the Minicloud API for the configured app id, starts a deployment, and waits for completion.
+
+The deploy job summary includes:
+
+- UTC start time
+- App ID
+- Minicloud deployment ID after the deployment is created
+- Customer workflow execution ID and link
 
 ## Image Names
 

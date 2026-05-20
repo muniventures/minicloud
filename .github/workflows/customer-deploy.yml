@@ -185,6 +185,28 @@ jobs:
         run: |
           set -euo pipefail
 
+          DEPLOY_STARTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          WORKFLOW_EXECUTION_ID="${GITHUB_RUN_ID}"
+          WORKFLOW_EXECUTION_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          echo "Minicloud deploy started at: ${DEPLOY_STARTED_AT}"
+          echo "App ID: ${APP_ID}"
+          echo "Customer workflow execution ID: ${WORKFLOW_EXECUTION_ID}"
+          echo "Customer workflow execution URL: ${WORKFLOW_EXECUTION_URL}"
+
+          {
+            echo "## Minicloud deployment"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Started at (UTC) | \`${DEPLOY_STARTED_AT}\` |"
+            echo "| App ID | \`${APP_ID}\` |"
+            echo "| Customer workflow execution ID | \`${WORKFLOW_EXECUTION_ID}\` |"
+            echo "| Customer workflow execution URL | [${WORKFLOW_EXECUTION_ID}](${WORKFLOW_EXECUTION_URL}) |"
+            echo "| Minicloud environment | \`${MINICLOUD_ENVIRONMENT}\` |"
+            echo "| Database | \`${DATABASE}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
           if [ -z "${MINICLOUD_API_KEY}" ]; then
             echo "minicloud_api_key is missing or unavailable in this repository."
             exit 1
@@ -299,6 +321,10 @@ jobs:
           WEBSITE_URL="$(printf '%s' "${CREATED_JSON}" | jq -r '.websiteUrl // ""')"
           echo "Minicloud deployment: ${DEPLOYMENT_ID}"
           echo "Status: ${STATUS}"
+          {
+            echo "| Deployment ID | \`${DEPLOYMENT_ID}\` |"
+            echo "| Initial status | \`${STATUS}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
           LAST_STATUS="${STATUS}"
           for attempt in $(seq 1 240); do
@@ -316,9 +342,10 @@ jobs:
               succeeded)
                 echo "Website URL: ${WEBSITE_URL}"
                 {
-                  echo "## Minicloud deployment"
                   echo ""
-                  echo "- Deployment: ${DEPLOYMENT_ID}"
+                  echo "### Result"
+                  echo ""
+                  echo "- Status: succeeded"
                   echo "- Website URL: ${WEBSITE_URL}"
                   echo "- Console: ${CONSOLE_URL}"
                 } >> "${GITHUB_STEP_SUMMARY}"
@@ -331,6 +358,16 @@ jobs:
                 if [ -n "${FAILURE_MESSAGE}" ]; then
                   echo "Message: ${FAILURE_MESSAGE}"
                 fi
+                {
+                  echo ""
+                  echo "### Result"
+                  echo ""
+                  echo "- Status: ${STATUS}"
+                  echo "- Failure code: ${FAILURE_CODE}"
+                  if [ -n "${FAILURE_MESSAGE}" ]; then
+                    echo "- Message: ${FAILURE_MESSAGE}"
+                  fi
+                } >> "${GITHUB_STEP_SUMMARY}"
                 exit 1
                 ;;
             esac
@@ -340,4 +377,11 @@ jobs:
 
           echo "Timed out waiting for Minicloud deployment to complete."
           echo "Deployment: ${DEPLOYMENT_ID}"
+          {
+            echo ""
+            echo "### Result"
+            echo ""
+            echo "- Status: timed out"
+            echo "- Deployment: ${DEPLOYMENT_ID}"
+          } >> "${GITHUB_STEP_SUMMARY}"
           exit 1
