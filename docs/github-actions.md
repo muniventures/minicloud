@@ -211,6 +211,8 @@ The deploy job summary includes:
 - Minicloud deployment ID after the deployment is created
 - Customer workflow execution ID and link
 
+When a Minicloud API request fails, the deploy job prints the request URL, HTTP status, and response body. Validation failures use the Minicloud error envelope with field-level details.
+
 ## Image Names
 
 Images are published to:
