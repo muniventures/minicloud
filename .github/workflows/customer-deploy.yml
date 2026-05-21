@@ -382,13 +382,33 @@ jobs:
 
             case "${STATUS}" in
               succeeded)
-                echo "Website URL: ${WEBSITE_URL}"
+                SERVICE_URL_LINES="$(
+                  printf '%s' "${DEPLOYMENT_JSON}" | jq -r '
+                    [.services[]? | select(.public) | {name, urls: (.urls // [])} | select((.urls | length) > 0)] as $services
+                    | $services[]
+                    | .name as $name
+                    | .urls[]
+                    | "- \($name): \(.)"
+                  '
+                )"
+                if [ -n "${SERVICE_URL_LINES}" ]; then
+                  echo "Service URLs:"
+                  printf '%s\n' "${SERVICE_URL_LINES}"
+                elif [ -n "${WEBSITE_URL}" ]; then
+                  echo "Website URL: ${WEBSITE_URL}"
+                fi
                 {
                   echo ""
                   echo "### Result"
                   echo ""
                   echo "- Status: succeeded"
-                  echo "- Website URL: ${WEBSITE_URL}"
+                  if [ -n "${SERVICE_URL_LINES}" ]; then
+                    echo ""
+                    echo "#### Service URLs"
+                    printf '%s\n' "${SERVICE_URL_LINES}"
+                  elif [ -n "${WEBSITE_URL}" ]; then
+                    echo "- Website URL: ${WEBSITE_URL}"
+                  fi
                   echo "- Console: ${CONSOLE_URL}"
                 } >> "${GITHUB_STEP_SUMMARY}"
                 exit 0
