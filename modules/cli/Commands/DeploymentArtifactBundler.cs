@@ -96,7 +96,7 @@ internal static class DeploymentArtifactBundler
                 appId,
                 serviceName,
                 service.SourcePath!,
-                string.IsNullOrWhiteSpace(service.Dockerfile) ? "Dockerfile" : service.Dockerfile,
+                dockerfileEntryPath,
                 ".",
                 service.Port!.Value,
                 service.Public!.Value,

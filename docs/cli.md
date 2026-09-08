@@ -474,3 +474,7 @@ Supported environment variables:
 | --- | --- |
 | `MINICLOUD_TOKEN` | API key used by CLI commands. |
 | `MINICLOUD_API_URL` | API base URL. Defaults to `https://api.cloud.muni.dev`. |
+
+### Dockerfile port detection
+
+`init` and `add-service` read each service's Dockerfile independently and use its final stage's literal TCP `EXPOSE` ports instead of framework defaults. Named local base-stage exposures are inherited; unrelated build-stage ports are ignored. Multiple Node services retain their individual Dockerfile ports; the CLI does not renumber container ports. When multiple TCP ports are exposed, the wizard asks which port to route. Advanced and custom service flows also use these values. Without an exposed TCP port, existing framework defaults remain; add a matching `EXPOSE` before deployment. Variable-based or invalid port declarations require an explicit literal port. Deployment validation uses the same final-stage TCP port reader.

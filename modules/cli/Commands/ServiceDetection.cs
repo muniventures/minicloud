@@ -14,6 +14,8 @@ internal sealed record DetectedService(
     string HealthPath,
     bool Public = true)
 {
+    public IReadOnlyList<int> ExposedPorts { get; init; } = [];
+
     public MinicloudServiceConfig ToConfig() =>
         new(SourcePath, Dockerfile, null, Port, Public, "/", HealthPath);
 }
@@ -61,6 +63,8 @@ internal static partial class ServiceDetection
                 continue;
             }
 
+            var dockerfile = FindDockerfile(directory);
+            detected = WithDockerfilePorts(detected, dockerfile);
             services.Add(detected with { Name = UniqueName(detected.Name, serviceNames) });
         }
 
@@ -68,6 +72,13 @@ internal static partial class ServiceDetection
             .OrderBy(service => Depth(root, Path.GetFullPath(service.SourcePath)))
             .ThenBy(service => service.Name, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    internal static DetectedService WithDockerfilePorts(DetectedService service, string? dockerfile)
+    {
+        var ports = dockerfile is not null && File.Exists(dockerfile)
+            ? DockerfilePorts.Read(File.ReadLines(dockerfile)) : [];
+        return service with { Port = ports.Count > 0 ? ports[0] : service.Port, ExposedPorts = ports };
     }
 
     private static DetectedService? DetectDirectory(string root, string directory)

@@ -307,7 +307,7 @@ public sealed partial class CliApplication
         _console.WriteLine($"Services: {string.Join(", ", serviceDrafts.Select(x => x.Name))}");
         if (!advanced)
         {
-            _console.WriteLine("Used defaults for registry image refs, ports, routes, and health checks.");
+            _console.WriteLine("Used Dockerfile ports where available and defaults for remaining service options.");
             _console.WriteLine("Run 'minicloud init --advanced' to customize every option.");
         }
         _console.WriteLine($"Next: minicloud deploy --config {outputPath}");
@@ -1568,6 +1568,16 @@ public sealed partial class CliApplication
             config = PromptAdvancedServiceOptions(appSlug, service.Name, config);
         }
 
+        if (service.ExposedPorts.Count > 1 && !advanced)
+        {
+            _console.WriteLine($"{service.Name} exposes TCP ports: {string.Join(", ", service.ExposedPorts)}.");
+            config = config with { Port = PromptPort($"{ToTitle(service.Name)} routed port", service.Port) };
+        }
+        while (service.ExposedPorts.Count > 0 && !service.ExposedPorts.Contains(config.Port ?? 0))
+        {
+            _console.WriteError($"Choose an exposed TCP port: {string.Join(", ", service.ExposedPorts)}.");
+            config = config with { Port = PromptPort($"{ToTitle(service.Name)} routed port", service.Port) };
+        }
         return new ServiceConfigDraft(service.Name, config);
     }
 
@@ -1586,7 +1596,8 @@ public sealed partial class CliApplication
         var sourcePath = PromptDirectory($"{ToTitle(serviceName)} service folder");
         var dockerfile = PromptDockerfile(sourcePath);
         var defaults = DefaultServiceOptions(serviceName);
-        return new DetectedService(serviceName, sourcePath, dockerfile, "custom", "custom", defaults.Port, defaults.HealthPath);
+        var service = new DetectedService(serviceName, sourcePath, dockerfile, "custom", "custom", defaults.Port, defaults.HealthPath);
+        return ServiceDetection.WithDockerfilePorts(service, EffectiveDockerfilePath(service.ToConfig()));
     }
 
     private MinicloudServiceConfig PromptAdvancedServiceOptions(string appSlug, string serviceName, MinicloudServiceConfig config)
@@ -2015,11 +2026,7 @@ public sealed partial class CliApplication
         dockerfile.Any(line => DockerfileInstruction(line).Equals(instruction, StringComparison.OrdinalIgnoreCase));
 
     private static bool DockerfileExposesPort(IEnumerable<string> dockerfile, int port) =>
-        dockerfile
-            .Where(line => DockerfileInstruction(line).Equals("EXPOSE", StringComparison.OrdinalIgnoreCase))
-            .SelectMany(DockerfileArguments)
-            .Select(argument => argument.Split('/', 2)[0])
-            .Any(exposedPort => exposedPort == port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        DockerfilePorts.Read(dockerfile).Contains(port);
 
     private static string DockerfileInstruction(string line)
     {
