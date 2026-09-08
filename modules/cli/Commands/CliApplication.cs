@@ -1569,7 +1569,10 @@ public sealed partial class CliApplication
 
     private ServiceConfigDraft ToServiceConfigDraft(string appSlug, DetectedService service, bool advanced)
     {
-        var config = service.ToConfig();
+        var config = service.ToConfig() with
+        {
+            Public = Confirm($"Expose {service.Name} publicly with a URL?", defaultValue: service.Public)
+        };
         WriteMissingDockerfileWarning(service.Name, config);
         if (advanced)
         {

@@ -479,4 +479,8 @@ Supported environment variables:
 
 `init` and `add-service` read each service's Dockerfile independently and use its final stage's literal TCP `EXPOSE` ports instead of framework defaults. Named local base-stage exposures are inherited; unrelated build-stage ports are ignored. Multiple Node services retain their individual Dockerfile ports; the CLI does not renumber container ports. When multiple TCP ports are exposed, the wizard asks which port to route. Advanced and custom service flows also use these values. Without an exposed TCP port, existing framework defaults remain; add a matching `EXPOSE` before deployment. Variable-based or invalid port declarations require an explicit literal port. Deployment validation uses the same final-stage TCP port reader.
 
+- Artifact Dockerfile paths are recorded relative to the archive root, including external Dockerfiles copied into `minicloud-artifact/Dockerfile`. This fixes builds whose Dockerfile lives outside the service source context.
+
 Deploy completion and status output list every assigned service URL with its service name. App inspection and branch output also list all assigned URLs; no URL is treated as the main website.
+
+- Private services: init/add-service explicitly ask whether each service should receive a public URL. Set `public: false` for internal APIs and workers; private containers have no host-port mapping and remain accessible to peer containers by service name. Making a service private disables its existing domain bindings and requests routing reconciliation; deployment responses omit private-service URLs. Workers may retain internal health listeners without public URLs. Portless worker processes remain a separate capability.
