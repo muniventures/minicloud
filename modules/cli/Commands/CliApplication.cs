@@ -433,10 +433,7 @@ public sealed partial class CliApplication
         var finalDeployment = await PollDeploymentAsync(created.Id, created.Status, cancellationToken);
         if (finalDeployment.Status == "succeeded")
         {
-            if (!string.IsNullOrWhiteSpace(finalDeployment.WebsiteUrl))
-            {
-                WriteUrlLine("Website URL", finalDeployment.WebsiteUrl);
-            }
+            PrintServiceUrls(finalDeployment.Services);
 
             return CliExitCodes.Success;
         }
@@ -498,7 +495,7 @@ public sealed partial class CliApplication
             var selected = PromptSingleSelect(
                 "Branch deployment",
                 mainApp.Branches.OrderBy(x => x.BranchName, StringComparer.Ordinal)
-                    .Select(x => (x.Id, $"{x.BranchName} ({x.WebsiteUrl ?? "not deployed"})"))
+                    .Select(x => (x.Id, $"{x.BranchName} ({FormatBranchUrls(x)})"))
                     .ToArray(),
                 mainApp.Branches.OrderBy(x => x.BranchName, StringComparer.Ordinal).First().Id);
             branch = mainApp.Branches.Single(x => x.Id == selected);
@@ -680,17 +677,13 @@ public sealed partial class CliApplication
         if (app.LatestDeployment is not null)
         {
             _console.WriteLine($"Latest deployment: {app.LatestDeployment.Id} ({app.LatestDeployment.Status})");
-            if (!string.IsNullOrWhiteSpace(app.LatestDeployment.WebsiteUrl))
-            {
-                WriteUrlLine("Website URL", app.LatestDeployment.WebsiteUrl);
-            }
         }
         if (app.Branches.Count > 0)
         {
             _console.WriteLine("Branches:");
             foreach (var branch in app.Branches.OrderBy(x => x.BranchName, StringComparer.Ordinal))
             {
-                _console.WriteLine($"  {branch.BranchName}\t{branch.Plan}\t{branch.WebsiteUrl ?? "not deployed"}");
+                _console.WriteLine($"  {branch.BranchName}\t{branch.Plan}\t{FormatBranchUrls(branch)}");
             }
         }
 
@@ -708,6 +701,10 @@ public sealed partial class CliApplication
                     ? "domains=-"
                     : $"domains={string.Join(",", service.Domains.OrderBy(x => x.Hostname, StringComparer.Ordinal).Select(FormatDomainSummary))}";
                 _console.WriteLine($"  {service.Name}  {visibility}  port={service.Port}  {runtime}  {domains}");
+                foreach (var domain in service.Domains.Where(x => x.Status != "disabled").OrderBy(x => x.Hostname, StringComparer.Ordinal))
+                {
+                    WriteUrlLine($"Service URL ({service.Name})", $"https://{domain.Hostname}");
+                }
             }
         }
 
@@ -1060,15 +1057,26 @@ public sealed partial class CliApplication
         throw new ApiException(401, "cli_login_session_expired", "CLI login session expired before approval.");
     }
 
+    private static string FormatBranchUrls(AppBranchResponse branch) =>
+        branch.Urls is { Count: > 0 } ? string.Join(", ", branch.Urls) : "no service URLs";
+
+    private void PrintServiceUrls(IReadOnlyList<DeploymentServiceResponse> services)
+    {
+        foreach (var service in services.OrderBy(x => x.Name, StringComparer.Ordinal))
+        {
+            foreach (var url in (service.Urls ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().OrderBy(x => x, StringComparer.Ordinal))
+            {
+                WriteUrlLine($"Service URL ({service.Name})", url);
+            }
+        }
+    }
+
     private void PrintDeployment(DeploymentResponse deployment)
     {
         _console.WriteLine($"Deployment: {deployment.Id}");
         _console.WriteLine($"App: {deployment.AppId}");
         _console.WriteLine($"Status: {deployment.Status}");
-        if (!string.IsNullOrWhiteSpace(deployment.WebsiteUrl))
-        {
-            WriteUrlLine("Website URL", deployment.WebsiteUrl);
-        }
+        PrintServiceUrls(deployment.Services);
         if (!string.IsNullOrWhiteSpace(deployment.ConsoleUrl))
         {
             WriteUrlLine("Console", deployment.ConsoleUrl);

@@ -34,7 +34,8 @@ public sealed record AppBranchResponse(
     string Plan,
     string Database,
     string? WebsiteUrl,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    IReadOnlyList<string>? Urls = null);
 
 public sealed record EnsureAppBranchRequest(string BranchName);
 
@@ -197,7 +198,8 @@ public sealed record DeploymentServiceResponse(
     int Port,
     bool Public,
     string Path,
-    string HealthPath);
+    string HealthPath,
+    IReadOnlyList<string>? Urls = null);
 
 public sealed record DeploymentEventResponse(
     string Id,
