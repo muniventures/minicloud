@@ -228,7 +228,7 @@ minicloud deploy --no-publish
 | `appId` | Yes | Stable Minicloud app ID. `minicloud deploy` requires this value and sends it with the deployment. |
 | `database` | No | `sqlite` or `postgres`. |
 | `commitSha` | No | Optional source revision to attach to the deployment. |
-| `services` | Yes | Map of service definitions. One to five services. |
+| `services` | Yes | Map of service definitions. One to ten services. |
 
 One config file targets one app. Multiple config files can share the same `appId`.
 

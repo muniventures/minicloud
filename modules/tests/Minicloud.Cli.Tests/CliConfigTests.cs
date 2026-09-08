@@ -1093,15 +1093,19 @@ public sealed class CliConfigTests
         }
     }
 
-    [Fact]
-    public void Parse_rejects_more_than_five_services()
+    [Theory]
+    [InlineData(6, true)]
+    [InlineData(10, true)]
+    [InlineData(11, false)]
+    public void Parse_enforces_ten_service_limit(int serviceCount, bool expectedValid)
     {
         var lines = new List<string>
         {
             "app: teamcore",
+            "appId: app_123",
             "services:"
         };
-        for (var index = 1; index <= 6; index++)
+        for (var index = 1; index <= serviceCount; index++)
         {
             lines.Add($"  service-{index}:");
             lines.Add($"    image: ghcr.io/customer/teamcore/service-{index}:latest");
@@ -1113,8 +1117,11 @@ public sealed class CliConfigTests
 
         var result = MinicloudConfigLoader.Parse(lines);
 
-        Assert.False(result.IsValid);
-        Assert.Contains(result.Diagnostics, x => x.Field == "services" && x.Message.Contains("At most 5", StringComparison.Ordinal));
+        Assert.Equal(expectedValid, result.IsValid);
+        if (!expectedValid)
+        {
+            Assert.Contains(result.Diagnostics, x => x.Field == "services" && x.Message.Contains("At most 10", StringComparison.Ordinal));
+        }
     }
 
     private static void RunGit(string workingDirectory, params string[] args)

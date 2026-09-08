@@ -2,7 +2,7 @@ namespace Minicloud.Cli.Config;
 
 public static class MinicloudConfigValidator
 {
-    public const int MaxDeploymentServices = 5;
+    public const int MaxDeploymentServices = 10;
 
     private static readonly ISet<string> Databases = new HashSet<string>(StringComparer.Ordinal)
     {
