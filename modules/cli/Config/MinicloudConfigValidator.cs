@@ -7,7 +7,8 @@ public static class MinicloudConfigValidator
     private static readonly ISet<string> Databases = new HashSet<string>(StringComparer.Ordinal)
     {
         "sqlite",
-        "postgres"
+        "postgres",
+        "none"
     };
 
     public static IReadOnlyList<ConfigDiagnostic> Validate(MinicloudConfig config)
@@ -22,7 +23,7 @@ public static class MinicloudConfigValidator
 
         if (!string.IsNullOrWhiteSpace(config.Database) && !Databases.Contains(config.Database))
         {
-            diagnostics.Add(new ConfigDiagnostic("database", "Database must be sqlite or postgres."));
+            diagnostics.Add(new ConfigDiagnostic("database", "Database must be sqlite, postgres, or none."));
         }
 
         if (config.Services.Count == 0)
@@ -68,15 +69,27 @@ public static class MinicloudConfigValidator
             {
                 foreach (var (envKey, envValue) in service.Env)
                 {
-                    if (!IsEnvironmentVariableKey(envKey))
-                    {
-                        diagnostics.Add(new ConfigDiagnostic($"services.{name}.env.{envKey}", "Environment variable names must match ^[A-Za-z_][A-Za-z0-9_]*$."));
-                    }
+                    ValidateEnvironmentEntry(diagnostics, $"services.{name}.env", envKey, envValue, "Environment variable");
+                }
+            }
 
-                    if (envValue is null)
+            if (service.SecretEnv is not null)
+            {
+                foreach (var (envKey, secretName) in service.SecretEnv)
+                {
+                    ValidateEnvironmentEntry(diagnostics, $"services.{name}.secretEnv", envKey, secretName, "Secret environment variable");
+                    if (!IsEnvironmentVariableKey(secretName))
                     {
-                        diagnostics.Add(new ConfigDiagnostic($"services.{name}.env.{envKey}", "Environment variable values must be strings."));
+                        diagnostics.Add(new ConfigDiagnostic($"services.{name}.secretEnv.{envKey}", "Secret names must match ^[A-Za-z_][A-Za-z0-9_]*$."));
                     }
+                }
+            }
+
+            if (service.Env is not null && service.SecretEnv is not null)
+            {
+                foreach (var duplicate in service.Env.Keys.Intersect(service.SecretEnv.Keys, StringComparer.Ordinal))
+                {
+                    diagnostics.Add(new ConfigDiagnostic($"services.{name}.secretEnv.{duplicate}", "Environment variables cannot be defined in both env and secretEnv."));
                 }
             }
         }
@@ -92,7 +105,7 @@ public static class MinicloudConfigValidator
         }
     }
 
-    private static bool IsEnvironmentVariableKey(string key)
+    internal static bool IsEnvironmentVariableKey(string key)
     {
         if (string.IsNullOrWhiteSpace(key))
         {
@@ -114,5 +127,23 @@ public static class MinicloudConfigValidator
         }
 
         return true;
+    }
+
+    private static void ValidateEnvironmentEntry(
+        List<ConfigDiagnostic> diagnostics,
+        string fieldPrefix,
+        string envKey,
+        string? value,
+        string label)
+    {
+        if (!IsEnvironmentVariableKey(envKey))
+        {
+            diagnostics.Add(new ConfigDiagnostic($"{fieldPrefix}.{envKey}", $"{label} names must match ^[A-Za-z_][A-Za-z0-9_]*$."));
+        }
+
+        if (value is null)
+        {
+            diagnostics.Add(new ConfigDiagnostic($"{fieldPrefix}.{envKey}", $"{label} values must be strings."));
+        }
     }
 }

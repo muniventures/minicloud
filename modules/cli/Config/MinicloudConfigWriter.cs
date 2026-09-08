@@ -55,6 +55,15 @@ public static class MinicloudConfigWriter
                     builder.AppendLine($"      {Escape(key)}: {Escape(value)}");
                 }
             }
+
+            if (service.SecretEnv is { Count: > 0 })
+            {
+                builder.AppendLine("    secretEnv:");
+                foreach (var (key, value) in service.SecretEnv)
+                {
+                    builder.AppendLine($"      {Escape(key)}: {Escape(value)}");
+                }
+            }
         }
 
         return builder.ToString();

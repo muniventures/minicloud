@@ -1,6 +1,6 @@
 # GitHub Actions Workflow
 
-Use the reusable Minicloud workflow when you want GitHub Actions to build images, push them to GHCR, and ask the Minicloud API to start a deployment.
+Use the reusable Minicloud workflow when you want GitHub Actions to deploy source artifacts through the Minicloud API.
 
 ## Prerequisites
 
@@ -15,7 +15,6 @@ Add these secrets to your app repository. Repository or organization secrets wor
 | --- | --- | --- |
 | `MINICLOUD_API_KEY` | Yes | Minicloud API key from the console. |
 | `MINICLOUD_POSTGRES_PASSWORD` | Only for `database: postgres` | Postgres password used by the deployment. |
-| `MINICLOUD_SERVICE_ENV_SECRETS` | Only when using `secretEnv` | JSON object of runtime environment secret values, for example `{"MAPBOX_ACCESS_TOKEN":"..."}`. |
 
 Add this repository or organization variable:
 
@@ -44,7 +43,6 @@ Set workflow permissions:
 ```yaml
 permissions:
   contents: read
-  packages: write
 ```
 
 ## Backend App
@@ -62,7 +60,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   minicloud:
@@ -96,7 +93,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   minicloud:
@@ -125,7 +121,6 @@ jobs:
     secrets:
       minicloud_api_key: ${{ secrets.MINICLOUD_API_KEY }}
       postgres_password: ${{ secrets.MINICLOUD_POSTGRES_PASSWORD }}
-      service_env_secrets: ${{ secrets.MINICLOUD_SERVICE_ENV_SECRETS }}
 ```
 
 ## Inputs
@@ -136,7 +131,7 @@ jobs:
 | `database` | No | `sqlite` | `sqlite` or `postgres`. |
 | `minicloud_environment` | No | `prod` | `prod` or `staging`. `prod` uses the production Minicloud API. `staging` uses `https://api.cloud-dev.muni.dev`. |
 | `services` | Yes | | YAML service array. Uses the same service fields as `minicloud.yml`, with `name` added because a workflow input cannot receive the keyed `services` map directly. |
-| `image_tag` | No | commit SHA | Docker image tag. |
+| `minicloud_version` | No | `latest` | Minicloud CLI release version to install. |
 
 ## Services
 
@@ -156,21 +151,29 @@ services: |
 | Field | Required | Description |
 | --- | --- | --- |
 | `name` | Yes | Service name. Must use lowercase letters, numbers, dashes, and underscores. |
-| `sourcePath` | Required when the workflow builds the image | Docker build context. |
+| `sourcePath` | Required for artifact-backed services | Directory bundled into the deployment artifact and used as the internal workflow Docker build context. |
 | `dockerfile` | No | Dockerfile path. Defaults to Docker's normal lookup in `sourcePath`. |
-| `image` | Required for prebuilt image services; optional when `sourcePath` is set | Full image reference. If omitted for a built service, the workflow publishes `ghcr.io/<owner>/<repo>/<service>:<sha>`. |
+| `image` | Required for prebuilt image services; optional when `sourcePath` is set | Full image reference for prebuilt-image deployments. Source-backed services should normally omit this. |
 | `port` | Yes | Internal container port, `1` to `65535`. |
 | `public` | Yes | Whether the service receives public HTTP traffic. At least one service must be public. |
 | `path` | Yes | Public route path. Must start with `/`. |
 | `healthPath` | Yes | HTTP health check path. Must start with `/`. |
 | `env` | No | String key/value environment variables for the service. |
-| `secretEnv` | No | String key/value references to keys in `service_env_secrets`. Use this for sensitive runtime environment variables. |
+| `secretEnv` | No | String key/value references to Minicloud app secrets. Values must be created through the CLI or portal before deployment. |
 
 ## Runtime Secrets
 
 Do not put `${{ secrets.MY_SECRET }}` inside the `services` input. GitHub does not expose the `secrets` context inside reusable workflow `with` inputs, and secret values could be copied into publish-job outputs.
 
-For sensitive runtime environment variables, put references in `secretEnv`:
+Runtime secret values are not passed through this GitHub workflow. Add them through the Minicloud CLI or the app portal before deploying:
+
+```bash
+minicloud secrets set --app my-api MAPBOX_ACCESS_TOKEN
+```
+
+In the portal, open the app, go to **Secrets**, and create the app secret there.
+
+Use `secretEnv` only for non-sensitive references from container environment variable names to stored Minicloud secret names:
 
 ```yaml
 services: |
@@ -183,45 +186,29 @@ services: |
     healthPath: /health
     secretEnv:
       MAPBOX_ACCESS_TOKEN: MAPBOX_ACCESS_TOKEN
-secrets:
-  service_env_secrets: ${{ secrets.MINICLOUD_SERVICE_ENV_SECRETS }}
 ```
 
-Store `MINICLOUD_SERVICE_ENV_SECRETS` as one GitHub repository or organization secret containing JSON:
-
-```json
-{
-  "MAPBOX_ACCESS_TOKEN": "actual-token-value"
-}
-```
-
-The publish job keeps only `secretEnv` references. The deploy job merges those references with `service_env_secrets` immediately before it calls the Minicloud API.
+The workflow sends `secretEnv` references to the Minicloud API. Minicloud resolves the values server-side from its OpenBao-backed secret store during deployment. Any service can reference an app secret by name. If a referenced secret does not exist, deployment validation fails.
 
 ## What The Workflow Does
 
-The workflow runs two jobs:
+The workflow runs one deploy job:
 
-- `minicloud - publish`: builds configured service images, pushes them to GHCR, and creates the service payload.
-- `minicloud - deploy`: writes troubleshooting metadata to the job log and GitHub step summary, calls the Minicloud API for the configured app id, starts a deployment, and waits for completion.
+- checks out the repository
+- installs the public Minicloud CLI from `muniventures/minicloud`
+- converts the `services` YAML input into a temporary `minicloud.yml`
+- runs `minicloud deploy --all --config minicloud.yml`
+
+The CLI uploads zip source artifacts to the Minicloud API. The internal
+Minicloud deploy workflow downloads, verifies, builds, and publishes those
+artifacts before running the same image-based runtime deploy.
 
 The deploy job summary includes:
 
-- UTC start time
 - App ID
-- Minicloud deployment ID after the deployment is created
 - Customer workflow execution ID and link
 
-When a Minicloud API request fails, the deploy job prints the request URL, HTTP status, and response body. Validation failures use the Minicloud error envelope with field-level details.
-
-## Image Names
-
-Images are published to:
-
-```text
-ghcr.io/<owner>/<repo>/<service>:<sha>
-```
-
-Use `image_tag` to override the tag.
+When a Minicloud API request fails, the CLI prints the Minicloud error message. Validation failures include field-level details where available.
 
 ## Postgres
 

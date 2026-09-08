@@ -1,9 +1,7 @@
 using System.Diagnostics;
 using System.Net.Http;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
-using System.Text.Json;
-using System.Text.RegularExpressions;
+using System.Text;
 using Minicloud.Cli.Api;
 using Minicloud.Cli.Auth;
 using Minicloud.Cli.Config;
@@ -12,9 +10,6 @@ namespace Minicloud.Cli.Commands;
 
 public sealed partial class CliApplication
 {
-    internal const string DeploymentImagePlatform = "linux/amd64";
-    private const int PublishConcurrency = 2;
-
     private static readonly ISet<string> TerminalStatuses = new HashSet<string>(StringComparer.Ordinal)
     {
         "succeeded",
@@ -60,10 +55,12 @@ public sealed partial class CliApplication
                 "add-service" => await RunAddServiceAsync(args.Skip(1).ToArray(), cancellationToken),
                 "login" => await RunLoginAsync(args.Skip(1).ToArray(), cancellationToken),
                 "deploy" => await RunDeployAsync(args.Skip(1).ToArray(), cancellationToken),
+                "branch" => await RunBranchAsync(args.Skip(1).ToArray(), cancellationToken),
                 "status" => await RunStatusAsync(args.Skip(1).ToArray(), cancellationToken),
                 "logs" => await RunLogsAsync(args.Skip(1).ToArray(), cancellationToken),
                 "apps" => await RunAppsAsync(args.Skip(1).ToArray(), cancellationToken),
                 "domains" => await RunDomainsAsync(args.Skip(1).ToArray(), cancellationToken),
+                "secrets" => await RunSecretsAsync(args.Skip(1).ToArray(), cancellationToken),
                 _ => UnknownCommand(args[0])
             };
         }
@@ -157,10 +154,82 @@ public sealed partial class CliApplication
         _console.WriteLine("Minicloud init");
         _console.WriteLine();
 
+        var outputPath = GetOption(args, "--config") ?? SuggestedInitConfigPath();
+        if (File.Exists(outputPath) && !args.Contains("--force", StringComparer.Ordinal))
+        {
+            var existingResult = MinicloudConfigLoader.Load(outputPath);
+            if (!existingResult.IsValid)
+            {
+                _console.WriteError($"Config file '{outputPath}' already exists but is not valid.");
+                PrintDiagnostics(existingResult.Diagnostics);
+                if (!Confirm("Replace it now?", defaultValue: false))
+                {
+                    _console.WriteLine("Init canceled.");
+                    return CliExitCodes.Success;
+                }
+
+                return await RunServiceConfigWizardAsync(
+                    args,
+                    allowCreateApp: true,
+                    createdVerb: "Updated",
+                    skipExistingFileConfirm: true,
+                    cancellationToken);
+            }
+            else
+            {
+                var existingConfig = existingResult.Config!;
+                try
+                {
+                    var app = await _apiClient.GetAppAsync(existingConfig.AppId!, cancellationToken);
+                    if (!string.Equals(app.Slug, existingConfig.App, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _console.WriteError($"Config file '{outputPath}' points to appId '{existingConfig.AppId}' ({app.Slug}), but app is '{existingConfig.App}'.");
+                        if (!Confirm($"Update '{outputPath}' now?", defaultValue: false))
+                        {
+                            _console.WriteLine("Init canceled.");
+                            return CliExitCodes.Success;
+                        }
+
+                        return await RunServiceConfigWizardAsync(
+                            args,
+                            allowCreateApp: true,
+                            createdVerb: "Updated",
+                            skipExistingFileConfirm: true,
+                            cancellationToken);
+                    }
+                    else
+                    {
+                        _console.WriteLine($"Using existing {outputPath}");
+                        _console.WriteLine($"App: {app.Name} ({app.Slug}, {app.Id})");
+                        _console.WriteLine($"Services: {string.Join(", ", existingConfig.Services.Keys)}");
+                        _console.WriteLine($"Next: minicloud deploy --config {outputPath}");
+                        return CliExitCodes.Success;
+                    }
+                }
+                catch (ApiException ex) when (ex.StatusCode is 403 or 404)
+                {
+                    _console.WriteError($"Config file '{outputPath}' points to appId '{existingConfig.AppId}', but this token cannot access that app.");
+                    if (!Confirm($"Update '{outputPath}' now?", defaultValue: false))
+                    {
+                        _console.WriteLine("Init canceled.");
+                        return CliExitCodes.Success;
+                    }
+
+                    return await RunServiceConfigWizardAsync(
+                        args,
+                        allowCreateApp: true,
+                        createdVerb: "Updated",
+                        skipExistingFileConfirm: true,
+                        cancellationToken);
+                }
+            }
+        }
+
         return await RunServiceConfigWizardAsync(
             args,
             allowCreateApp: true,
             createdVerb: "Created",
+            skipExistingFileConfirm: false,
             cancellationToken);
     }
 
@@ -173,6 +242,7 @@ public sealed partial class CliApplication
             args,
             allowCreateApp: false,
             createdVerb: "Created service config",
+            skipExistingFileConfirm: false,
             cancellationToken);
     }
 
@@ -180,6 +250,7 @@ public sealed partial class CliApplication
         string[] args,
         bool allowCreateApp,
         string createdVerb,
+        bool skipExistingFileConfirm,
         CancellationToken cancellationToken)
     {
         var configuredOutputPath = GetOption(args, "--config");
@@ -199,21 +270,14 @@ public sealed partial class CliApplication
             : await PromptExistingAppSelectionAsync(organization, requestedApp, cancellationToken);
         var database = app.Database;
 
-        var services = new Dictionary<string, MinicloudServiceConfig>(StringComparer.Ordinal);
-        _console.WriteLine("Name one service and choose its folder. You can add more services later by running init again.");
-        _console.WriteLine();
-        var serviceName = PromptServiceName();
-        _console.WriteLine();
-        _console.WriteLine($"{ToTitle(serviceName)} service");
-        var sourcePath = PromptDirectory($"{ToTitle(serviceName)} service folder");
-        WriteMissingDefaultDockerfileWarning(serviceName, sourcePath);
-        var defaults = DefaultServiceOptions(app.Slug, serviceName);
-        var image = advanced ? PromptOptional($"{ToTitle(serviceName)} push image", defaults.Image) : null;
-        var port = advanced ? PromptPort($"{ToTitle(serviceName)} port", defaults.Port) : defaults.Port;
-        var routePath = advanced ? PromptPath($"{ToTitle(serviceName)} public path", defaults.Path) : defaults.Path;
-        var healthPath = advanced ? PromptPath($"{ToTitle(serviceName)} health path", defaults.HealthPath) : defaults.HealthPath;
+        var serviceDrafts = PromptServiceDefinitions(app.Slug, advanced);
+        if (serviceDrafts.Count == 0)
+        {
+            _console.WriteError("Usage error: select at least one service.");
+            return CliExitCodes.ValidationError;
+        }
 
-        services[serviceName] = new MinicloudServiceConfig(sourcePath, null, image, port, true, routePath, healthPath);
+        var services = serviceDrafts.ToDictionary(x => x.Name, x => x.Config, StringComparer.Ordinal);
 
         var config = new MinicloudConfig(app.Slug, database, null, services)
         {
@@ -226,8 +290,8 @@ public sealed partial class CliApplication
             return CliExitCodes.ValidationError;
         }
 
-        var outputPath = configuredOutputPath ?? SuggestedInitConfigPath(serviceName, File.Exists);
-        if (File.Exists(outputPath) && !args.Contains("--force", StringComparer.Ordinal))
+        var outputPath = configuredOutputPath ?? SuggestedInitConfigPath();
+        if (File.Exists(outputPath) && !skipExistingFileConfirm && !args.Contains("--force", StringComparer.Ordinal))
         {
             if (!Confirm($"'{outputPath}' already exists. Overwrite it?", defaultValue: false))
             {
@@ -240,7 +304,7 @@ public sealed partial class CliApplication
         _console.WriteLine();
         _console.WriteLine($"{createdVerb} {outputPath}");
         _console.WriteLine($"App: {app.Name} ({app.Slug}, {app.Id})");
-        _console.WriteLine($"Service: {serviceName}");
+        _console.WriteLine($"Services: {string.Join(", ", serviceDrafts.Select(x => x.Name))}");
         if (!advanced)
         {
             _console.WriteLine("Used defaults for registry image refs, ports, routes, and health checks.");
@@ -252,15 +316,24 @@ public sealed partial class CliApplication
 
     private async Task<int> RunDeployAsync(string[] args, CancellationToken cancellationToken)
     {
+        var branchDeploy = args.FirstOrDefault() == "branch";
+        if (branchDeploy)
+        {
+            args = args.Skip(1).ToArray();
+        }
+
         var configPath = GetOption(args, "--config") ?? MinicloudConfigLoader.ResolveDefaultPath();
         var databaseOverride = GetOption(args, "--database");
         var postgresPassword = GetOption(args, "--pgpassword");
-        var imageTag = GetOption(args, "--tag") ?? "latest";
         var noPublish = args.Contains("--no-publish", StringComparer.Ordinal);
-        var publishOnly = args.Contains("--publish-only", StringComparer.Ordinal);
-        var verbose = args.Contains("--verbose", StringComparer.Ordinal);
-        var deployAll = args.Contains("--all", StringComparer.Ordinal);
+        var deployAll = branchDeploy || args.Contains("--all", StringComparer.Ordinal);
         var requestedServiceNames = DeployServiceNamesFromArgs(args);
+        if (args.Contains("--publish-only", StringComparer.Ordinal))
+        {
+            _console.WriteError("Usage error: --publish-only has been removed.");
+            return CliExitCodes.ValidationError;
+        }
+
         if (deployAll && requestedServiceNames.Count > 0)
         {
             _console.WriteError("Usage error: --all cannot be combined with service names.");
@@ -275,6 +348,11 @@ public sealed partial class CliApplication
         }
 
         var config = configResult.Config;
+        if (branchDeploy && requestedServiceNames.Count > 0)
+        {
+            _console.WriteError("Usage error: minicloud deploy branch deploys all configured services and does not accept service names.");
+            return CliExitCodes.ValidationError;
+        }
         var selectedServiceNames = ResolveDeployServiceNames(config, requestedServiceNames, deployAll);
         if (selectedServiceNames.Count == 0)
         {
@@ -283,24 +361,6 @@ public sealed partial class CliApplication
         }
 
         config = FilterConfigServices(config, selectedServiceNames);
-        if (publishOnly)
-        {
-            if (noPublish)
-            {
-                _console.WriteError("Usage error: --publish-only cannot be combined with --no-publish.");
-                return CliExitCodes.ValidationError;
-            }
-
-            await PublishServiceImagesAsync(config, imageTag, verbose, cancellationToken);
-            _console.WriteLine("Published images:");
-            foreach (var (serviceName, service) in config.Services)
-            {
-                var pushImage = PushImageForService(config, serviceName, service, imageTag);
-                _console.WriteLine($"  {serviceName}: {_registryImageMapper.RuntimeImageForDeployment(pushImage, _environment.LocalOrganizationSlug)}");
-            }
-
-            return CliExitCodes.Success;
-        }
 
         var me = await _apiClient.GetMeAsync(cancellationToken);
         var app = await _apiClient.GetAppAsync(config.AppId!, cancellationToken);
@@ -311,9 +371,28 @@ public sealed partial class CliApplication
             return CliExitCodes.AuthError;
         }
 
+        if (branchDeploy)
+        {
+            var gitBranch = CurrentGitBranch(Environment.CurrentDirectory);
+            _console.WriteLine($"Branch: {gitBranch}");
+            app = await _apiClient.EnsureBranchAsync(app.Id, new EnsureAppBranchRequest(gitBranch), cancellationToken);
+            config = config with { AppId = app.Id };
+            _console.WriteLine($"Branch app: {app.Name} ({app.Slug})");
+        }
+
+        await SyncLocalSecretsAsync(app, config, cancellationToken);
+
+        IReadOnlyDictionary<string, string> serviceArtifactIds = new Dictionary<string, string>(StringComparer.Ordinal);
         if (!noPublish)
         {
-            await PublishServiceImagesAsync(config, imageTag, verbose, cancellationToken);
+            var deploymentModeDiagnostics = ValidateDeploymentSources(config);
+            if (deploymentModeDiagnostics.Count > 0)
+            {
+                PrintDiagnostics(deploymentModeDiagnostics);
+                return CliExitCodes.ValidationError;
+            }
+
+            serviceArtifactIds = await BundleAndUploadDeploymentArtifactsAsync(config, organization.Slug, app.Slug, cancellationToken);
         }
         else
         {
@@ -327,16 +406,20 @@ public sealed partial class CliApplication
 
         var request = new CreateDeploymentRequest(
             app.Id,
-            databaseOverride ?? config.Database ?? app.Database,
+            ResolveDeploymentDatabase(databaseOverride, config),
             config.CommitSha,
             config.Services.Select(x => new DeploymentServiceRequest(
                 x.Key,
-                DeploymentImageForService(config, x.Key, x.Value, organization.Slug, noPublish, imageTag),
+                noPublish || !serviceArtifactIds.ContainsKey(x.Key)
+                    ? DeploymentImageForService(x.Value, organization.Slug)
+                    : null,
                 x.Value.Port!.Value,
                 x.Value.Public!.Value,
                 x.Value.Path!,
                 x.Value.HealthPath!,
-                x.Value.Env)).ToArray(),
+                x.Value.Env,
+                x.Value.SecretEnv,
+                serviceArtifactIds.TryGetValue(x.Key, out var artifactId) ? artifactId : null)).ToArray(),
             postgresPassword);
 
         var created = await _apiClient.CreateDeploymentAsync(request, cancellationToken);
@@ -366,6 +449,70 @@ public sealed partial class CliApplication
 
         _console.WriteLine($"Logs: minicloud logs {finalDeployment.Id}");
         return CliExitCodes.DeploymentFailed;
+    }
+
+    private async Task<int> RunBranchAsync(string[] args, CancellationToken cancellationToken)
+    {
+        if (args.FirstOrDefault() != "destroy")
+        {
+            _console.WriteError("Usage: minicloud branch destroy [branch] [--config minicloud.yml]");
+            return CliExitCodes.ValidationError;
+        }
+
+        var configPath = GetOption(args, "--config") ?? MinicloudConfigLoader.ResolveDefaultPath();
+        var configResult = MinicloudConfigLoader.Load(configPath);
+        if (!configResult.IsValid || string.IsNullOrWhiteSpace(configResult.Config?.AppId))
+        {
+            PrintDiagnostics(configResult.Diagnostics);
+            return CliExitCodes.ValidationError;
+        }
+
+        var mainApp = await _apiClient.GetAppAsync(configResult.Config.AppId, cancellationToken);
+        if (mainApp.ParentAppId is not null)
+        {
+            _console.WriteError("Config error: branch destroy must use the main app's minicloud.yml.");
+            return CliExitCodes.ValidationError;
+        }
+
+        if (mainApp.Branches.Count == 0)
+        {
+            _console.WriteError($"App '{mainApp.Name}' has no branch deployments.");
+            return CliExitCodes.ValidationError;
+        }
+
+        var requestedBranch = FirstPositionalArg(args.Skip(1).ToArray());
+        AppBranchResponse branch;
+        if (!string.IsNullOrWhiteSpace(requestedBranch))
+        {
+            branch = mainApp.Branches.FirstOrDefault(x =>
+                    string.Equals(x.BranchName, requestedBranch, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(x.Id, requestedBranch, StringComparison.OrdinalIgnoreCase))
+                ?? throw new CliCommandException(CliExitCodes.ValidationError, $"Branch deployment '{requestedBranch}' was not found.");
+        }
+        else if (mainApp.Branches.Count == 1)
+        {
+            branch = mainApp.Branches[0];
+        }
+        else
+        {
+            var selected = PromptSingleSelect(
+                "Branch deployment",
+                mainApp.Branches.OrderBy(x => x.BranchName, StringComparer.Ordinal)
+                    .Select(x => (x.Id, $"{x.BranchName} ({x.WebsiteUrl ?? "not deployed"})"))
+                    .ToArray(),
+                mainApp.Branches.OrderBy(x => x.BranchName, StringComparer.Ordinal).First().Id);
+            branch = mainApp.Branches.Single(x => x.Id == selected);
+        }
+
+        if (!Confirm($"Destroy branch '{branch.BranchName}' and its Vultr VPS?", defaultValue: false))
+        {
+            _console.WriteLine("Branch destroy canceled.");
+            return CliExitCodes.Success;
+        }
+
+        await _apiClient.DestroyBranchAsync(mainApp.Id, branch.Id, cancellationToken);
+        _console.WriteLine($"Branch destroy queued: {branch.BranchName}");
+        return CliExitCodes.Success;
     }
 
     private async Task<int> RunStatusAsync(string[] args, CancellationToken cancellationToken)
@@ -538,6 +685,31 @@ public sealed partial class CliApplication
                 WriteUrlLine("Website URL", app.LatestDeployment.WebsiteUrl);
             }
         }
+        if (app.Branches.Count > 0)
+        {
+            _console.WriteLine("Branches:");
+            foreach (var branch in app.Branches.OrderBy(x => x.BranchName, StringComparer.Ordinal))
+            {
+                _console.WriteLine($"  {branch.BranchName}\t{branch.Plan}\t{branch.WebsiteUrl ?? "not deployed"}");
+            }
+        }
+
+        var services = await _apiClient.GetAppServicesAsync(app.Id, cancellationToken);
+        if (services.Count > 0)
+        {
+            _console.WriteLine("Services:");
+            foreach (var service in services.OrderBy(x => x.Name, StringComparer.Ordinal))
+            {
+                var visibility = service.Public ? "public" : "private";
+                var runtime = service.Runtime is null
+                    ? "runtime=unknown"
+                    : $"runtime={service.Runtime.State}{(string.IsNullOrWhiteSpace(service.Runtime.Health) ? string.Empty : $"/{service.Runtime.Health}")}";
+                var domains = service.Domains.Count == 0
+                    ? "domains=-"
+                    : $"domains={string.Join(",", service.Domains.OrderBy(x => x.Hostname, StringComparer.Ordinal).Select(FormatDomainSummary))}";
+                _console.WriteLine($"  {service.Name}  {visibility}  port={service.Port}  {runtime}  {domains}");
+            }
+        }
 
         return CliExitCodes.Success;
     }
@@ -572,7 +744,8 @@ public sealed partial class CliApplication
 
         foreach (var domain in domains.OrderBy(x => x.ServiceName, StringComparer.Ordinal).ThenBy(x => x.Hostname, StringComparer.Ordinal))
         {
-            _console.WriteLine($"{domain.Hostname}  service={domain.ServiceName}  status={domain.Status}  apply={domain.ApplyStatus}  ssl={domain.SslStatus}");
+            var lastApplied = domain.LastAppliedAt is null ? "-" : domain.LastAppliedAt.Value.ToString("O");
+            _console.WriteLine($"{domain.Hostname}  service={domain.ServiceName}  status={domain.Status}  apply={domain.ApplyStatus}  ssl={domain.SslStatus}  lastApplied={lastApplied}  updated={domain.UpdatedAt:O}");
         }
 
         return CliExitCodes.Success;
@@ -615,6 +788,92 @@ public sealed partial class CliApplication
         return CliExitCodes.Success;
     }
 
+    private async Task<int> RunSecretsAsync(string[] args, CancellationToken cancellationToken)
+    {
+        if (args.Length == 0)
+        {
+            _console.WriteError("Usage: minicloud secrets <list|set|remove>");
+            return CliExitCodes.ValidationError;
+        }
+
+        return args[0] switch
+        {
+            "list" => await RunSecretsListAsync(args.Skip(1).ToArray(), cancellationToken),
+            "set" => await RunSecretsSetAsync(args.Skip(1).ToArray(), cancellationToken),
+            "remove" or "delete" => await RunSecretsRemoveAsync(args.Skip(1).ToArray(), cancellationToken),
+            _ => UnknownCommand($"secrets {args[0]}")
+        };
+    }
+
+    private async Task<int> RunSecretsListAsync(string[] args, CancellationToken cancellationToken)
+    {
+        var app = await ResolveAppOptionAsync(args, cancellationToken);
+        var service = GetOption(args, "--service");
+        var secrets = await _apiClient.GetSecretsAsync(app.Id, service, cancellationToken);
+        if (secrets.Count == 0)
+        {
+            _console.WriteLine($"No secrets for {app.Name}.");
+            return CliExitCodes.Success;
+        }
+
+        foreach (var secret in secrets.OrderBy(x => x.ServiceName, StringComparer.Ordinal).ThenBy(x => x.Name, StringComparer.Ordinal))
+        {
+            var scope = string.IsNullOrWhiteSpace(secret.ServiceName) ? "app" : secret.ServiceName;
+            _console.WriteLine($"{scope}  {secret.Name}  status={secret.Status}  updated={secret.UpdatedAt:O}");
+        }
+
+        return CliExitCodes.Success;
+    }
+
+    private async Task<int> RunSecretsSetAsync(string[] args, CancellationToken cancellationToken)
+    {
+        var app = await ResolveAppOptionAsync(args, cancellationToken);
+        var service = GetOption(args, "--service");
+        var name = FirstPositional(args);
+        var value = GetOption(args, "--value");
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            _console.WriteError("Usage: minicloud secrets set [--app <app>] <NAME> [--value value]");
+            return CliExitCodes.ValidationError;
+        }
+
+        if (value is null)
+        {
+            value = ReadSecretValue($"Value for {app.Slug}/{name}: ");
+        }
+
+        var secret = await _apiClient.SetSecretAsync(app.Id, new SetAppServiceSecretRequest(service, name, value), cancellationToken);
+        _console.WriteLine($"Secret saved: {secret.Name}");
+        return CliExitCodes.Success;
+    }
+
+    private async Task<int> RunSecretsRemoveAsync(string[] args, CancellationToken cancellationToken)
+    {
+        var app = await ResolveAppOptionAsync(args, cancellationToken);
+        var service = GetOption(args, "--service");
+        var name = FirstPositional(args);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            _console.WriteError("Usage: minicloud secrets remove [--app <app>] <NAME>");
+            return CliExitCodes.ValidationError;
+        }
+
+        var secrets = await _apiClient.GetSecretsAsync(app.Id, service, cancellationToken);
+        var matches = secrets
+            .Where(x => string.Equals(x.Name, name, StringComparison.Ordinal) || string.Equals(x.Id, name, StringComparison.Ordinal))
+            .ToArray();
+        var secret = matches.Length switch
+        {
+            0 => throw new CliCommandException(CliExitCodes.ValidationError, $"Secret '{name}' was not found."),
+            1 => matches[0],
+            _ => matches.FirstOrDefault(x => string.IsNullOrWhiteSpace(x.ServiceName))
+                ?? throw new CliCommandException(CliExitCodes.ValidationError, $"Secret '{name}' exists in multiple service scopes. Pass --service <service> to remove a service-scoped secret.")
+        };
+        await _apiClient.DeleteSecretAsync(app.Id, secret.Id, cancellationToken);
+        _console.WriteLine($"Secret removed: {secret.Name}");
+        return CliExitCodes.Success;
+    }
+
     private async Task<AppResponse> PromptAppSelectionAsync(OrganizationSummary organization, string? requestedApp, CancellationToken cancellationToken)
     {
         var apps = await _apiClient.GetAppsAsync(organization.Id, cancellationToken);
@@ -642,7 +901,7 @@ public sealed partial class CliApplication
         }
 
         var appSlug = PromptAppName();
-        var database = PromptSingleSelect("Database", [("postgres", "Postgres"), ("sqlite", "SQLite")], "postgres");
+        var database = PromptSingleSelect("Database", DatabaseChoices(), "sqlite");
         return await CreateAppAsync(organization, appSlug, database, cancellationToken);
     }
 
@@ -697,12 +956,29 @@ public sealed partial class CliApplication
             string.Equals(x.Slug, appIdOrSlug, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(x.Id, appIdOrSlug, StringComparison.OrdinalIgnoreCase));
 
+    internal static IReadOnlyList<(string Value, string Label)> DatabaseChoices() =>
+    [
+        ("sqlite", "SQLite - instance inside the VPS. Not backed up"),
+        ("postgres", "Postgres - instance inside the VPS. Not backed up"),
+        ("none", "None/Manual - no database or manual set up - pick this if you want to use Firebase for example")
+    ];
+
+    internal static string ResolveDeploymentDatabase(string? databaseOverride, MinicloudConfig config) =>
+        databaseOverride ?? config.Database ?? "none";
+
     private async Task<AppResponse> ResolveAppOptionAsync(string[] args, CancellationToken cancellationToken)
     {
         var appIdOrSlug = GetOption(args, "--app");
         if (string.IsNullOrWhiteSpace(appIdOrSlug))
         {
-            throw new CliCommandException(CliExitCodes.ValidationError, "Missing --app <app>.");
+            var configPath = GetOption(args, "--config") ?? MinicloudConfigLoader.ResolveDefaultPath();
+            var configResult = MinicloudConfigLoader.Load(configPath);
+            if (configResult.IsValid && !string.IsNullOrWhiteSpace(configResult.Config?.AppId))
+            {
+                return await _apiClient.GetAppAsync(configResult.Config.AppId, cancellationToken);
+            }
+
+            throw new CliCommandException(CliExitCodes.ValidationError, "Missing --app <app> and no valid appId was found in minicloud.yml.");
         }
 
         var me = await _apiClient.GetMeAsync(cancellationToken);
@@ -813,6 +1089,12 @@ public sealed partial class CliApplication
         }
     }
 
+    private static string FormatDomainSummary(DomainBindingResponse domain)
+    {
+        var lastApplied = domain.LastAppliedAt is null ? "-" : domain.LastAppliedAt.Value.ToString("O");
+        return $"{domain.Hostname}({domain.Status},apply={domain.ApplyStatus},ssl={domain.SslStatus},lastApplied={lastApplied})";
+    }
+
     private void WriteUrlLine(string label, string url) =>
         _console.WriteLine($"{label}: {FormatTerminalLink(url, url)}");
 
@@ -847,7 +1129,9 @@ public sealed partial class CliApplication
         _console.WriteLine("  minicloud init [--advanced] [--config minicloud.yml] [--force]");
         _console.WriteLine("  minicloud add-service [app] [--app app] [--advanced] [--config minicloud.service.yml] [--force]");
         _console.WriteLine("  minicloud token set <token>");
-        _console.WriteLine("  minicloud deploy [service ...] [--all] [--config minicloud.yml] [--database db] [--pgpassword password] [--tag tag] [--no-publish] [--publish-only] [--verbose]");
+        _console.WriteLine("  minicloud deploy [service ...] [--all] [--config minicloud.yml] [--database db] [--pgpassword password] [--no-publish]");
+        _console.WriteLine("  minicloud deploy branch [--config minicloud.yml] [--database db] [--pgpassword password] [--no-publish]");
+        _console.WriteLine("  minicloud branch destroy [branch] [--config minicloud.yml]");
         _console.WriteLine("  minicloud status [deployment-id]");
         _console.WriteLine("  minicloud logs [app|deployment-id] [--service service] [--source source] [--tail count] [--since 30m]");
         _console.WriteLine("  minicloud apps list");
@@ -856,6 +1140,9 @@ public sealed partial class CliApplication
         _console.WriteLine("  minicloud domains add-subdomain --app <app> --service <service> [--label label]");
         _console.WriteLine("  minicloud domains disable --app <app> --hostname <host>");
         _console.WriteLine("  minicloud domains delete --app <app> --hostname <host>");
+        _console.WriteLine("  minicloud secrets list [--app app]");
+        _console.WriteLine("  minicloud secrets set [--app app] <NAME> [--value value]");
+        _console.WriteLine("  minicloud secrets remove [--app app] <NAME>");
         _console.WriteLine("  minicloud --env");
     }
 
@@ -863,9 +1150,6 @@ public sealed partial class CliApplication
     {
         _console.WriteLine("Minicloud CLI environment");
         _console.WriteLine($"Environment: {CliEnvironment.ApiUrlEnvironmentVariable} defaults to {_environment.ApiBaseUrl}");
-        _console.WriteLine($"Registry: {CliEnvironment.RegistryHostEnvironmentVariable} defaults to {_environment.RegistryHost}");
-        _console.WriteLine($"Runtime registry owner: {CliEnvironment.RegistryGhcrOwnerEnvironmentVariable} defaults to {_environment.RegistryGhcrOwner}");
-        _console.WriteLine($"Runtime registry prefix: {CliEnvironment.RuntimeRegistryPrefixEnvironmentVariable} defaults to {_environment.RuntimeRegistryPrefix}");
     }
 
     private static string? GetOption(IReadOnlyList<string> args, string name)
@@ -884,6 +1168,71 @@ public sealed partial class CliApplication
         }
 
         return null;
+    }
+
+    private static string? FirstPositional(IReadOnlyList<string> args)
+    {
+        var optionsWithValues = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "--app",
+            "--service",
+            "--value",
+            "--config",
+            "--hostname",
+            "--label"
+        };
+
+        for (var i = 0; i < args.Count; i++)
+        {
+            var arg = args[i];
+            if (optionsWithValues.Contains(arg))
+            {
+                i++;
+                continue;
+            }
+
+            if (optionsWithValues.Any(option => arg.StartsWith(option + "=", StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            if (!arg.StartsWith("-", StringComparison.Ordinal))
+            {
+                return arg;
+            }
+        }
+
+        return null;
+    }
+
+    private string ReadSecretValue(string prompt)
+    {
+        _console.Write(prompt);
+        var value = new StringBuilder();
+        while (true)
+        {
+            var key = _console.ReadKey(intercept: true);
+            if (key.Key == ConsoleKey.Enter)
+            {
+                _console.WriteLine();
+                return value.ToString();
+            }
+
+            if (key.Key == ConsoleKey.Backspace)
+            {
+                if (value.Length > 0)
+                {
+                    value.Length--;
+                }
+
+                continue;
+            }
+
+            if (!char.IsControl(key.KeyChar))
+            {
+                value.Append(key.KeyChar);
+            }
+        }
     }
 
     internal static string? FirstPositionalArg(IReadOnlyList<string> args)
@@ -953,6 +1302,43 @@ public sealed partial class CliApplication
         }
 
         return names;
+    }
+
+    internal static string CurrentGitBranch(string workingDirectory)
+    {
+        using var process = Process.Start(new ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            ArgumentList =
+            {
+                "rev-parse",
+                "--abbrev-ref",
+                "HEAD"
+            }
+        });
+        if (process is null)
+        {
+            throw new CliCommandException(CliExitCodes.ValidationError, "Git error: could not inspect the current branch.");
+        }
+
+        var output = process.StandardOutput.ReadToEnd().Trim();
+        var error = process.StandardError.ReadToEnd().Trim();
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+        {
+            throw new CliCommandException(CliExitCodes.ValidationError, $"Git error: {error}");
+        }
+
+        if (string.IsNullOrWhiteSpace(output) || output == "HEAD")
+        {
+            throw new CliCommandException(CliExitCodes.ValidationError, "Git error: branch deployments require a checked-out branch, not detached HEAD.");
+        }
+
+        return output;
     }
 
     private IReadOnlyList<string> ResolveDeployServiceNames(
@@ -1078,16 +1464,151 @@ public sealed partial class CliApplication
         }
     }
 
+    private IReadOnlyList<ServiceConfigDraft> PromptServiceDefinitions(string appSlug, bool advanced)
+    {
+        var detected = ServiceDetection.Detect(Directory.GetCurrentDirectory());
+        if (detected.Count == 0)
+        {
+            _console.WriteLine("No services detected. Define a custom service.");
+            return [PromptCustomServiceDefinition(appSlug, advanced, new HashSet<string>(StringComparer.Ordinal))];
+        }
+
+        var selected = PromptDetectedServiceMultiSelect(detected);
+        return selected
+            .Select(service => ToServiceConfigDraft(appSlug, service, advanced))
+            .ToArray();
+    }
+
+    private IReadOnlyList<DetectedService> PromptDetectedServiceMultiSelect(IReadOnlyList<DetectedService> services)
+    {
+        var selectedIndex = 0;
+        var selected = new HashSet<int>();
+        const int StaticLineCount = 3;
+        var rendered = false;
+
+        while (true)
+        {
+            RenderDetectedServiceMultiSelect(services, selected, selectedIndex, rendered ? StaticLineCount + services.Count + 1 : 0);
+            rendered = true;
+            var key = _console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = selectedIndex == 0 ? services.Count : selectedIndex - 1;
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = selectedIndex == services.Count ? 0 : selectedIndex + 1;
+                    break;
+                case ConsoleKey.Spacebar when selectedIndex < services.Count:
+                    if (!selected.Add(selectedIndex))
+                    {
+                        selected.Remove(selectedIndex);
+                    }
+                    break;
+                case ConsoleKey.Enter when selectedIndex == services.Count:
+                    if (rendered)
+                    {
+                        _console.WriteLine();
+                    }
+
+                    var existingNames = selected.Select(index => services[index].Name).ToHashSet(StringComparer.Ordinal);
+                    var custom = PromptCustomDetectedService(existingNames);
+                    return selected.Select(index => services[index]).Append(custom).ToArray();
+                case ConsoleKey.Enter:
+                    if (selected.Count == 0)
+                    {
+                        _console.WriteError("Select at least one service with Space, or press Enter on Custom.");
+                        break;
+                    }
+
+                    return selected.Order().Select(index => services[index]).ToArray();
+            }
+        }
+    }
+
+    private void RenderDetectedServiceMultiSelect(IReadOnlyList<DetectedService> services, ISet<int> selected, int selectedIndex, int previousLineCount)
+    {
+        ClearPreviousInteractiveRender(previousLineCount);
+
+        _console.WriteLine("Services:");
+        _console.WriteLine("Use Up/Down arrows, Space to select services, and Enter to save. Press Enter on Custom to define one manually.");
+        var nameWidth = Math.Min(Math.Max("Name".Length, services.Max(service => service.Name.Length)), 28);
+        var frameworkWidth = Math.Min(Math.Max("Framework".Length, services.Max(service => service.Framework.Length)), 16);
+        var pathWidth = Math.Min(Math.Max("Path".Length, services.Max(service => service.SourcePath.Length)), 48);
+        var dockerfileWidth = Math.Min(Math.Max("Dockerfile".Length, services.Max(service => service.Dockerfile?.Length ?? 1)), 28);
+        _console.WriteLine($"  {"".PadRight(3)} {Pad("Name", nameWidth)}  {Pad("Framework", frameworkWidth)}  {Pad("Path", pathWidth)}  {"Port".PadLeft(5)}  {Pad("Dockerfile", dockerfileWidth)}");
+        for (var i = 0; i < services.Count; i++)
+        {
+            var marker = selectedIndex == i ? ">" : " ";
+            var checkedValue = selected.Contains(i) ? "x" : " ";
+            var service = services[i];
+            _console.WriteLine($"{marker} [{checkedValue}] {Pad(service.Name, nameWidth)}  {Pad(service.Framework, frameworkWidth)}  {Pad(service.SourcePath, pathWidth)}  {service.Port,5}  {Pad(service.Dockerfile ?? "-", dockerfileWidth)}");
+        }
+
+        var customMarker = selectedIndex == services.Count ? ">" : " ";
+        _console.WriteLine($"{customMarker}     Custom");
+    }
+
+    private static string Pad(string value, int width)
+    {
+        if (value.Length <= width)
+        {
+            return value.PadRight(width);
+        }
+
+        return width <= 3 ? value[..width] : value[..(width - 3)] + "...";
+    }
+
+    private ServiceConfigDraft ToServiceConfigDraft(string appSlug, DetectedService service, bool advanced)
+    {
+        var config = service.ToConfig();
+        WriteMissingDockerfileWarning(service.Name, config);
+        if (advanced)
+        {
+            config = PromptAdvancedServiceOptions(appSlug, service.Name, config);
+        }
+
+        return new ServiceConfigDraft(service.Name, config);
+    }
+
+    private ServiceConfigDraft PromptCustomServiceDefinition(string appSlug, bool advanced, ISet<string> existingNames)
+    {
+        var detected = PromptCustomDetectedService(existingNames);
+        return ToServiceConfigDraft(appSlug, detected, advanced);
+    }
+
+    private DetectedService PromptCustomDetectedService(ISet<string> existingNames)
+    {
+        _console.WriteLine("Custom service");
+        var serviceName = PromptServiceName(existingNames);
+        _console.WriteLine();
+        _console.WriteLine($"{ToTitle(serviceName)} service");
+        var sourcePath = PromptDirectory($"{ToTitle(serviceName)} service folder");
+        var dockerfile = PromptDockerfile(sourcePath);
+        var defaults = DefaultServiceOptions(serviceName);
+        return new DetectedService(serviceName, sourcePath, dockerfile, "custom", "custom", defaults.Port, defaults.HealthPath);
+    }
+
+    private MinicloudServiceConfig PromptAdvancedServiceOptions(string appSlug, string serviceName, MinicloudServiceConfig config)
+    {
+        var defaults = DefaultServiceOptions(serviceName);
+        var imageDefault = $"{_environment.RegistryHost}/{appSlug}/{serviceName}:latest";
+        var image = PromptOptional($"{ToTitle(serviceName)} push image", imageDefault);
+        var port = PromptPort($"{ToTitle(serviceName)} port", config.Port ?? defaults.Port);
+        var routePath = PromptPath($"{ToTitle(serviceName)} public path", config.Path ?? defaults.Path);
+        var healthPath = PromptPath($"{ToTitle(serviceName)} health path", config.HealthPath ?? defaults.HealthPath);
+        return config with
+        {
+            Image = image,
+            Port = port,
+            Path = routePath,
+            HealthPath = healthPath
+        };
+    }
+
     private void RenderServiceMultiSelect(IReadOnlyList<string> services, ISet<string> selected, int selectedIndex, int previousLineCount)
     {
-        if (_console.SupportsAnsi && previousLineCount > 0)
-        {
-            _console.Write($"\u001b[{previousLineCount}F\u001b[J");
-        }
-        else if (previousLineCount > 0)
-        {
-            _console.WriteLine();
-        }
+        ClearPreviousInteractiveRender(previousLineCount);
 
         _console.WriteLine("Services:");
         _console.WriteLine("Use Up/Down, Space to toggle, Enter to deploy.");
@@ -1104,14 +1625,7 @@ public sealed partial class CliApplication
 
     private void RenderSingleSelect(string label, IReadOnlyList<(string Value, string Label)> choices, int selectedIndex, int previousLineCount)
     {
-        if (_console.SupportsAnsi && previousLineCount > 0)
-        {
-            _console.Write($"\u001b[{previousLineCount}F\u001b[J");
-        }
-        else if (previousLineCount > 0)
-        {
-            _console.WriteLine();
-        }
+        ClearPreviousInteractiveRender(previousLineCount);
 
         _console.WriteLine($"{label}:");
         _console.WriteLine("Use Up/Down arrows and Enter to select.");
@@ -1120,6 +1634,22 @@ public sealed partial class CliApplication
             var marker = i == selectedIndex ? ">" : " ";
             _console.WriteLine($"{marker} {choices[i].Label}");
         }
+    }
+
+    private void ClearPreviousInteractiveRender(int previousLineCount)
+    {
+        if (previousLineCount <= 0)
+        {
+            return;
+        }
+
+        if (_console.SupportsAnsi)
+        {
+            _console.Write($"\u001b[{previousLineCount}A\r\u001b[J");
+            return;
+        }
+
+        _console.WriteLine();
     }
 
     private string PromptSlug(string label, string defaultValue)
@@ -1245,13 +1775,49 @@ public sealed partial class CliApplication
 
     private string PromptServiceName() => PromptSlug("Service name", "backend");
 
-    private void WriteMissingDefaultDockerfileWarning(string serviceName, string sourcePath)
+    private string PromptServiceName(ISet<string> existingNames)
     {
-        if (HasDefaultDockerfile(sourcePath))
+        while (true)
+        {
+            var serviceName = PromptServiceName();
+            if (existingNames.Add(serviceName))
+            {
+                return serviceName;
+            }
+
+            _console.WriteError($"Service '{serviceName}' is already selected.");
+        }
+    }
+
+    private string? PromptDockerfile(string sourcePath)
+    {
+        _console.WriteLine("Dockerfile path [Dockerfile]:");
+        var value = _console.ReadLine();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var dockerfile = value.Trim();
+        var fullPath = Path.IsPathRooted(dockerfile)
+            ? dockerfile
+            : Path.Combine(sourcePath, dockerfile);
+        if (!File.Exists(fullPath))
+        {
+            _console.WriteError($"Warning: Dockerfile '{dockerfile}' does not exist yet.");
+        }
+
+        return Path.GetRelativePath(Environment.CurrentDirectory, fullPath).Replace(Path.DirectorySeparatorChar, '/');
+    }
+
+    private void WriteMissingDockerfileWarning(string serviceName, MinicloudServiceConfig service)
+    {
+        if (HasDockerfileForService(service))
         {
             return;
         }
 
+        var sourcePath = service.SourcePath ?? ".";
         _console.WriteError($"Warning: {serviceName} does not have a Dockerfile at '{Path.Combine(sourcePath, "Dockerfile")}'.");
         _console.WriteError("Minicloud needs a Dockerfile in the service folder before it can deploy this service.");
         _console.WriteError("Init will continue, but deploy will fail until the Dockerfile exists.");
@@ -1260,39 +1826,80 @@ public sealed partial class CliApplication
     internal static bool HasDefaultDockerfile(string sourcePath) =>
         File.Exists(Path.Combine(sourcePath, "Dockerfile"));
 
-    internal static string SuggestedInitConfigPath(string serviceName, Func<string, bool> fileExists) =>
-        fileExists("minicloud.yml") ? $"minicloud.{serviceName}.yml" : "minicloud.yml";
+    private static bool HasDockerfileForService(MinicloudServiceConfig service)
+    {
+        return !string.IsNullOrWhiteSpace(service.SourcePath) && File.Exists(EffectiveDockerfilePath(service));
+    }
 
-    private (string Image, int Port, string Path, string HealthPath) DefaultServiceOptions(string app, string serviceName) =>
+    internal static string SuggestedInitConfigPath() => "minicloud.yml";
+
+    private (int Port, string Path, string HealthPath) DefaultServiceOptions(string serviceName) =>
         serviceName switch
         {
-            "frontend" or "dashboard" => ($"{_environment.RegistryHost}/{app}/{serviceName}:latest", 3000, "/", "/"),
-            "backend" or "api" => ($"{_environment.RegistryHost}/{app}/{serviceName}:latest", 8080, "/", "/health"),
-            "registry" => ($"{_environment.RegistryHost}/{app}/registry:latest", 8080, "/", "/health"),
-            _ => ($"{_environment.RegistryHost}/{app}/{serviceName}:latest", 8080, "/", "/")
+            "frontend" or "dashboard" => (3000, "/", "/"),
+            "backend" or "api" => (8080, "/", "/health"),
+            "registry" => (8080, "/", "/health"),
+            _ => (8080, "/", "/")
         };
 
-    private async Task PublishServiceImagesAsync(MinicloudConfig config, string imageTag, bool verbose, CancellationToken cancellationToken)
+    private sealed record ServiceConfigDraft(string Name, MinicloudServiceConfig Config);
+
+    private async Task SyncLocalSecretsAsync(AppResponse app, MinicloudConfig config, CancellationToken cancellationToken)
     {
-        var publishJobs = new List<ServicePublishJob>();
         foreach (var (serviceName, service) in config.Services)
         {
-            var pushImage = PushImageForService(config, serviceName, service, imageTag);
-            if (!_registryImageMapper.UsesMinicloudRegistry(pushImage))
-            {
-                throw new CliCommandException(
-                    CliExitCodes.ValidationError,
-                    $"Config error: services.{serviceName}.image must start with '{_environment.RegistryHost}/' when publishing. Current value is '{pushImage}'. Remove image to let the CLI derive it, update minicloud.yml, or pass --no-publish to deploy an already-published image.");
-            }
-
             if (string.IsNullOrWhiteSpace(service.SourcePath))
             {
-                throw new CliCommandException(CliExitCodes.ValidationError, $"Config error: services.{serviceName}.sourcePath is required for image publishing. Add it or pass --no-publish.");
+                continue;
             }
 
-            if (!Directory.Exists(service.SourcePath))
+            var secretsPath = Path.Combine(service.SourcePath, LocalSecretsFile.FileName);
+            if (!File.Exists(secretsPath))
             {
-                throw new CliCommandException(CliExitCodes.ValidationError, $"Config error: services.{serviceName}.sourcePath '{service.SourcePath}' does not exist.");
+                continue;
+            }
+
+            var secrets = LocalSecretsFile.Parse(secretsPath);
+            if (secrets.Count == 0)
+            {
+                continue;
+            }
+
+            _console.WriteLine($"Syncing local secrets for {serviceName}: {secrets.Count}");
+            foreach (var (name, value) in secrets)
+            {
+                await _apiClient.SetSecretAsync(app.Id, new SetAppServiceSecretRequest(serviceName, name, value), cancellationToken);
+                _console.WriteLine($"Secret saved: {serviceName}/{name}");
+            }
+        }
+    }
+
+    private async Task<IReadOnlyDictionary<string, string>> BundleAndUploadDeploymentArtifactsAsync(
+        MinicloudConfig config,
+        string organizationSlug,
+        string appSlug,
+        CancellationToken cancellationToken)
+    {
+        var artifactIds = new Dictionary<string, string>(StringComparer.Ordinal);
+        var outputDirectory = Path.Combine(Path.GetTempPath(), "minicloud-artifacts");
+        foreach (var (serviceName, service) in config.Services)
+        {
+            if (string.IsNullOrWhiteSpace(service.SourcePath))
+            {
+                continue;
+            }
+
+            _console.WriteLine($"Bundling artifact: {serviceName}");
+            if (!File.Exists(EffectiveDockerfilePath(service)))
+            {
+                if (DockerfileGenerator.TryWriteDockerfile(service, out var generatedDockerfilePath, out var generationReason))
+                {
+                    _console.WriteLine($"Generated Dockerfile for {serviceName}: {generatedDockerfilePath}");
+                }
+                else if (!string.IsNullOrWhiteSpace(generationReason))
+                {
+                    _console.WriteError($"Unable to generate Dockerfile for {serviceName}: {generationReason}.");
+                }
             }
 
             var dockerfileDiagnostics = ValidateDockerfileForService(serviceName, service);
@@ -1302,153 +1909,68 @@ public sealed partial class CliApplication
                 throw new CliCommandException(CliExitCodes.ValidationError, "Dockerfile validation failed.");
             }
 
-            publishJobs.Add(new ServicePublishJob(
+            var frameworkDiagnostics = FrameworkDeploymentValidator.ValidatePublicHostCompatibility(
                 serviceName,
                 service,
-                pushImage,
-                BuildCacheImageFor(pushImage),
-                ComputeServiceFingerprint(service)));
-        }
-
-        if (publishJobs.Count > 0)
-        {
-            var token = _tokenStore.GetToken();
-            if (string.IsNullOrWhiteSpace(token))
+                organizationSlug,
+                appSlug);
+            if (frameworkDiagnostics.Count > 0)
             {
-                throw new CliCommandException(CliExitCodes.AuthError, "Auth error: run 'minicloud login' before publishing images to the Minicloud registry.");
+                PrintDiagnostics(frameworkDiagnostics);
+                throw new CliCommandException(CliExitCodes.ValidationError, "Framework deployment validation failed.");
             }
 
-            _console.WriteLine($"Logging in to {_environment.RegistryHost}...");
-            await RunProcessAsync(
-                "docker",
-                ["login", _environment.RegistryHost, "-u", "minicloud", "--password-stdin"],
-                Environment.CurrentDirectory,
-                cancellationToken,
-                standardInput: token + Environment.NewLine,
-                verbose: verbose,
-                progressLabel: "Authenticating with registry");
-        }
-
-        using var progressView = verbose ? null : new PublishProgressView(_console, publishJobs);
-        var publishCache = PublishCache.Load(_environment);
-        var publishCacheLock = new object();
-        var jobsToPublish = new List<ServicePublishJob>();
-        foreach (var job in publishJobs)
-        {
-            if (publishCache.IsCurrent(config.App, job.ServiceName, job.PushImage, DeploymentImagePlatform, job.Fingerprint))
-            {
-                if (progressView is null)
-                {
-                    _console.WriteLine($"Publishing services: skipped {job.ServiceName} - unchanged");
-                }
-                else
-                {
-                    progressView.MarkSkipped(job.ServiceName);
-                }
-
-                continue;
-            }
-
-            jobsToPublish.Add(job);
-        }
-
-        if (jobsToPublish.Count == 0)
-        {
-            if (progressView is null)
-            {
-                _console.WriteLine("Publishing services: all services unchanged");
-            }
-            else
-            {
-                progressView.Complete();
-            }
-
-            return;
-        }
-
-        var started = 0;
-        using var semaphore = new SemaphoreSlim(PublishConcurrency);
-        var publishTasks = jobsToPublish.Select(async job =>
-        {
-            await semaphore.WaitAsync(cancellationToken);
-            var serviceIndex = Interlocked.Increment(ref started);
+            var bundle = DeploymentArtifactBundler.Create(config.AppId!, serviceName, service, config.CommitSha, outputDirectory);
             try
             {
-                await PublishServiceImageAsync(job, serviceIndex, jobsToPublish.Count, verbose, progressView, cancellationToken);
-                lock (publishCacheLock)
-                {
-                    publishCache.MarkCurrent(config.App, job.ServiceName, job.PushImage, DeploymentImagePlatform, job.Fingerprint);
-                }
+                _console.WriteLine($"Uploading artifact: {serviceName} ({bundle.SizeBytes} bytes, sha256 {bundle.Sha256})");
+                var createRequest = new CreateDeploymentArtifactRequest(
+                    config.AppId!,
+                    serviceName,
+                    Path.GetFileName(bundle.ZipPath),
+                    "application/zip",
+                    bundle.SizeBytes,
+                    bundle.Sha256,
+                    bundle.Manifest);
+                var created = await _apiClient.CreateDeploymentArtifactAsync(createRequest, cancellationToken);
+                var uploaded = await _apiClient.UploadDeploymentArtifactContentAsync(created.Id, created.UploadUrl, bundle.ZipPath, bundle.Sha256, bundle.SizeBytes, cancellationToken);
+                artifactIds[serviceName] = uploaded.Id;
             }
             finally
             {
-                semaphore.Release();
+                TryDeleteFile(bundle.ZipPath);
             }
-        }).ToArray();
+        }
 
+        return artifactIds;
+    }
+
+    private IReadOnlyList<ConfigDiagnostic> ValidateDeploymentSources(MinicloudConfig config)
+    {
+        var diagnostics = new List<ConfigDiagnostic>();
+        foreach (var (serviceName, service) in config.Services)
+        {
+            var hasSource = !string.IsNullOrWhiteSpace(service.SourcePath);
+            var hasImage = !string.IsNullOrWhiteSpace(service.Image);
+            if (!hasSource && !hasImage)
+            {
+                diagnostics.Add(new ConfigDiagnostic($"services.{serviceName}", "Service must define sourcePath or image."));
+            }
+        }
+
+        return diagnostics;
+    }
+
+    private static void TryDeleteFile(string filePath)
+    {
         try
         {
-            await Task.WhenAll(publishTasks);
-            progressView?.Complete();
+            File.Delete(filePath);
         }
         catch
         {
-            progressView?.Complete();
-            throw;
+            // Best-effort cleanup only.
         }
-
-        publishCache.Save(_environment);
-    }
-
-    private async Task PublishServiceImageAsync(ServicePublishJob job, int serviceIndex, int serviceCount, bool verbose, PublishProgressView? progressView, CancellationToken cancellationToken)
-    {
-        progressView?.MarkPublishing(job.ServiceName);
-        if (progressView is null)
-        {
-            _console.WriteLine($"Publishing services: {serviceIndex} of {serviceCount} - {job.ServiceName}");
-            _console.WriteLine($"  Image: {job.PushImage} ({DeploymentImagePlatform})");
-            _console.WriteLine($"  Cache: {job.CacheImage}");
-        }
-
-        try
-        {
-            var buildArgs = DockerBuildxBuildArgumentsForService(job.Service, job.PushImage, job.CacheImage);
-            await RunProcessAsync(
-                "docker",
-                buildArgs,
-                Environment.CurrentDirectory,
-                cancellationToken,
-                verbose: verbose,
-                progressLabel: progressView is null ? $"  {job.ServiceName}" : job.ServiceName,
-                progressView: progressView);
-            progressView?.MarkDone(job.ServiceName);
-        }
-        catch
-        {
-            progressView?.MarkFailed(job.ServiceName);
-            throw;
-        }
-    }
-
-    internal static IReadOnlyList<string> DockerBuildxBuildArgumentsForService(MinicloudServiceConfig service, string pushImage, string? cacheImage = null)
-    {
-        var buildArgs = new List<string> { "buildx", "build", "--progress", "plain", "--platform", DeploymentImagePlatform, "--push", "-t", pushImage };
-        if (!string.IsNullOrWhiteSpace(cacheImage))
-        {
-            buildArgs.Add("--cache-from");
-            buildArgs.Add($"type=registry,ref={cacheImage}");
-            buildArgs.Add("--cache-to");
-            buildArgs.Add($"type=registry,ref={cacheImage},mode=max");
-        }
-
-        if (!string.IsNullOrWhiteSpace(service.Dockerfile))
-        {
-            buildArgs.Add("-f");
-            buildArgs.Add(service.Dockerfile);
-        }
-
-        buildArgs.Add(service.SourcePath!);
-        return buildArgs;
     }
 
     internal static IReadOnlyList<ConfigDiagnostic> ValidateDockerfileForService(string serviceName, MinicloudServiceConfig service)
@@ -1484,7 +2006,7 @@ public sealed partial class CliApplication
         return diagnostics;
     }
 
-    private static string EffectiveDockerfilePath(MinicloudServiceConfig service) =>
+    internal static string EffectiveDockerfilePath(MinicloudServiceConfig service) =>
         string.IsNullOrWhiteSpace(service.Dockerfile)
             ? Path.Combine(service.SourcePath!, "Dockerfile")
             : service.Dockerfile;
@@ -1539,233 +2061,8 @@ public sealed partial class CliApplication
         return diagnostics;
     }
 
-    private string DeploymentImageForService(MinicloudConfig config, string serviceName, MinicloudServiceConfig service, string organizationSlug, bool noPublish, string imageTag)
-    {
-        var image = noPublish ? service.Image! : PushImageForService(config, serviceName, service, imageTag);
-        return _registryImageMapper.RuntimeImageForDeployment(image, organizationSlug);
-    }
-
-    private string PushImageForService(MinicloudConfig config, string serviceName, MinicloudServiceConfig service, string imageTag) =>
-        string.IsNullOrWhiteSpace(service.Image)
-            ? $"{_environment.RegistryHost}/{config.App}/{serviceName}:{RegistryImageMapper.NormalizeImageSegment(imageTag)}"
-            : service.Image;
-
-    private static string BuildCacheImageFor(string pushImage)
-    {
-        var tagIndex = pushImage.LastIndexOf(':');
-        var slashIndex = pushImage.LastIndexOf('/');
-        if (tagIndex > slashIndex)
-        {
-            return pushImage[..tagIndex] + ":buildcache";
-        }
-
-        return pushImage + ":buildcache";
-    }
-
-    internal static string ComputeServiceFingerprint(MinicloudServiceConfig service)
-    {
-        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        AppendHash(hash, "platform", DeploymentImagePlatform);
-        AppendHash(hash, "sourcePath", Path.GetFullPath(service.SourcePath!));
-        AppendHash(hash, "dockerfile", Path.GetFullPath(EffectiveDockerfilePath(service)));
-
-        foreach (var filePath in EnumerateFingerprintFiles(service))
-        {
-            var relativePath = Path.GetRelativePath(service.SourcePath!, filePath).Replace(Path.DirectorySeparatorChar, '/');
-            AppendHash(hash, "file", relativePath);
-            var info = new FileInfo(filePath);
-            AppendHash(hash, "length", info.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            using var stream = File.OpenRead(filePath);
-            var buffer = new byte[64 * 1024];
-            int read;
-            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
-            {
-                hash.AppendData(buffer.AsSpan(0, read));
-            }
-        }
-
-        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
-    }
-
-    private static IEnumerable<string> EnumerateFingerprintFiles(MinicloudServiceConfig service)
-    {
-        var sourceRoot = Path.GetFullPath(service.SourcePath!);
-        var dockerfilePath = Path.GetFullPath(EffectiveDockerfilePath(service));
-        var files = Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories)
-            .Where(file => !IsIgnoredFingerprintPath(sourceRoot, file))
-            .Append(dockerfilePath)
-            .Distinct(StringComparer.Ordinal)
-            .Order(StringComparer.Ordinal);
-
-        return files;
-    }
-
-    private static bool IsIgnoredFingerprintPath(string sourceRoot, string filePath)
-    {
-        var relativeParts = Path.GetRelativePath(sourceRoot, filePath)
-            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
-        return relativeParts.Any(part => part is ".git" or ".svn" or ".hg" or "node_modules" or "bin" or "obj" or ".next" or ".nuxt" or "dist" or "build" or "coverage");
-    }
-
-    private static void AppendHash(IncrementalHash hash, string label, string value)
-    {
-        hash.AppendData(System.Text.Encoding.UTF8.GetBytes(label));
-        hash.AppendData([0]);
-        hash.AppendData(System.Text.Encoding.UTF8.GetBytes(value));
-        hash.AppendData([0]);
-    }
-
-    private async Task RunProcessAsync(
-        string fileName,
-        IReadOnlyList<string> arguments,
-        string workingDirectory,
-        CancellationToken cancellationToken,
-        string? standardInput = null,
-        bool verbose = false,
-        string? progressLabel = null,
-        PublishProgressView? progressView = null)
-    {
-        using var process = new Process();
-        process.StartInfo.FileName = fileName;
-        process.StartInfo.WorkingDirectory = workingDirectory;
-        process.StartInfo.RedirectStandardOutput = true;
-        process.StartInfo.RedirectStandardError = true;
-        process.StartInfo.RedirectStandardInput = standardInput is not null;
-        process.StartInfo.UseShellExecute = false;
-        foreach (var argument in arguments)
-        {
-            process.StartInfo.ArgumentList.Add(argument);
-        }
-
-        try
-        {
-            process.Start();
-        }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
-        {
-            throw new CliCommandException(CliExitCodes.NetworkOrApiUnavailable, $"Unable to start '{fileName}'. Make sure Docker is installed and running.");
-        }
-
-        if (standardInput is not null)
-        {
-            await process.StandardInput.WriteAsync(standardInput.AsMemory(), cancellationToken);
-            await process.StandardInput.FlushAsync(cancellationToken);
-            process.StandardInput.Close();
-        }
-
-        var outputTail = new Queue<string>();
-        var outputLock = new object();
-        var progress = verbose || string.IsNullOrWhiteSpace(progressLabel) ? null : new DockerProgressReporter(_console, progressLabel, progressView);
-        var stdout = Task.Run(async () =>
-        {
-            while (await process.StandardOutput.ReadLineAsync(cancellationToken) is { } line)
-            {
-                if (verbose)
-                {
-                    _console.WriteLine(line);
-                }
-                else
-                {
-                    RememberOutputLine(outputTail, outputLock, line);
-                    progress?.Observe(line);
-                }
-            }
-        }, cancellationToken);
-        var stderr = Task.Run(async () =>
-        {
-            while (await process.StandardError.ReadLineAsync(cancellationToken) is { } line)
-            {
-                if (verbose)
-                {
-                    _console.WriteError(line);
-                }
-                else
-                {
-                    RememberOutputLine(outputTail, outputLock, line);
-                    progress?.Observe(line);
-                }
-            }
-        }, cancellationToken);
-
-        await WaitForProcessWithProgressAsync(process, progressLabel, verbose, progress is not null, progressView is not null, cancellationToken);
-        await Task.WhenAll(stdout, stderr);
-
-        if (process.ExitCode != 0)
-        {
-            if (!verbose)
-            {
-                if (progressView is not null && !string.IsNullOrWhiteSpace(progressLabel))
-                {
-                    progressView.MarkFailed(progressLabel);
-                }
-
-                progressView?.Complete();
-                var tail = SnapshotOutputTail(outputTail, outputLock);
-                if (tail.Count > 0)
-                {
-                    _console.WriteError("Command output:");
-                    foreach (var line in tail)
-                    {
-                        _console.WriteError($"  {line}");
-                    }
-                }
-            }
-
-            throw new CliCommandException(CliExitCodes.NetworkOrApiUnavailable, $"'{fileName} {string.Join(' ', arguments)}' failed with exit code {process.ExitCode}.");
-        }
-
-        progress?.Complete();
-    }
-
-    private async Task WaitForProcessWithProgressAsync(Process process, string? progressLabel, bool verbose, bool outputDrivenProgress, bool liveProgress, CancellationToken cancellationToken)
-    {
-        var waitTask = process.WaitForExitAsync(cancellationToken);
-        if (verbose || string.IsNullOrWhiteSpace(progressLabel))
-        {
-            await waitTask;
-            return;
-        }
-
-        if (outputDrivenProgress)
-        {
-            if (!liveProgress)
-            {
-                _console.WriteLine($"{progressLabel}: starting");
-            }
-
-            await waitTask;
-            return;
-        }
-
-        _console.Write(progressLabel);
-        while (await Task.WhenAny(waitTask, Task.Delay(TimeSpan.FromSeconds(1), cancellationToken)) != waitTask)
-        {
-            _console.Write(".");
-        }
-
-        await waitTask;
-        _console.WriteLine(process.ExitCode == 0 ? " done" : " failed");
-    }
-
-    private static void RememberOutputLine(Queue<string> outputTail, object outputLock, string line)
-    {
-        lock (outputLock)
-        {
-            outputTail.Enqueue(line);
-            while (outputTail.Count > 40)
-            {
-                outputTail.Dequeue();
-            }
-        }
-    }
-
-    private static IReadOnlyList<string> SnapshotOutputTail(Queue<string> outputTail, object outputLock)
-    {
-        lock (outputLock)
-        {
-            return outputTail.ToArray();
-        }
-    }
+    private string DeploymentImageForService(MinicloudServiceConfig service, string organizationSlug) =>
+        _registryImageMapper.RuntimeImageForDeployment(service.Image!, organizationSlug);
 
     private static string ToTitle(string value) =>
         string.IsNullOrEmpty(value) ? value : char.ToUpperInvariant(value[0]) + value[1..];
@@ -1801,389 +2098,4 @@ public sealed partial class CliApplication
         return token[..visibleLength] + "...";
     }
 
-    private sealed class PublishProgressView : IDisposable
-    {
-        private readonly IConsole _console;
-        private readonly object _lock = new();
-        private readonly Dictionary<string, PublishProgressService> _services;
-        private readonly bool _live;
-        private int _renderedLines;
-        private bool _cursorHidden;
-        private bool _completed;
-        private string? _lastRender;
-
-        public PublishProgressView(IConsole console, IReadOnlyList<ServicePublishJob> jobs)
-        {
-            _console = console;
-            _live = console.SupportsAnsi;
-            _services = jobs.ToDictionary(
-                job => job.ServiceName,
-                job => new PublishProgressService(job.ServiceName, job.PushImage, job.CacheImage),
-                StringComparer.Ordinal);
-
-            Render();
-        }
-
-        public void MarkPublishing(string serviceName) =>
-            Update(serviceName, service =>
-            {
-                service.Status = "publishing";
-            });
-
-        public void UpdateDockerSteps(string serviceName, int current, int total) =>
-            Update(serviceName, service =>
-            {
-                service.Status = "building";
-                service.DockerCurrent = Math.Max(service.DockerCurrent, current);
-                service.DockerTotal = Math.Max(service.DockerTotal, total);
-            });
-
-        public void UpdatePushLayers(string serviceName, int done, int total) =>
-            Update(serviceName, service =>
-            {
-                service.Status = done >= total && total > 0 ? "pushed" : "pushing";
-                service.PushDone = Math.Max(service.PushDone, done);
-                service.PushTotal = Math.Max(service.PushTotal, total);
-            });
-
-        public void MarkSkipped(string serviceName) =>
-            Update(serviceName, service =>
-            {
-                service.Status = "skipped";
-                service.IsTerminal = true;
-            });
-
-        public void MarkDone(string serviceName) =>
-            Update(serviceName, service =>
-            {
-                service.Status = "done";
-                service.IsTerminal = true;
-            });
-
-        public void MarkFailed(string serviceName) =>
-            Update(serviceName, service =>
-            {
-                service.Status = "failed";
-                service.IsTerminal = true;
-            });
-
-        public void Complete()
-        {
-            lock (_lock)
-            {
-                if (_completed)
-                {
-                    return;
-                }
-
-                _completed = true;
-                RenderLocked(force: true);
-                RestoreCursorLocked();
-            }
-        }
-
-        public void Dispose() => Complete();
-
-        private void Update(string serviceName, Action<PublishProgressService> apply)
-        {
-            lock (_lock)
-            {
-                if (_completed)
-                {
-                    return;
-                }
-
-                if (!_services.TryGetValue(serviceName, out var service))
-                {
-                    return;
-                }
-
-                apply(service);
-                RenderLocked(force: false);
-            }
-        }
-
-        private void Render()
-        {
-            lock (_lock)
-            {
-                RenderLocked(force: false);
-            }
-        }
-
-        private void RenderLocked(bool force)
-        {
-            var lines = BuildLines();
-            var render = string.Join(Environment.NewLine, lines);
-            if (!force && render == _lastRender)
-            {
-                return;
-            }
-
-            _lastRender = render;
-            if (!_live)
-            {
-                foreach (var service in _services.Values)
-                {
-                    var summary = ServiceSummary(service);
-                    if (summary == service.LastLineSummary)
-                    {
-                        continue;
-                    }
-
-                    service.LastLineSummary = summary;
-                    _console.WriteLine(summary);
-                }
-
-                return;
-            }
-
-            if (!_cursorHidden)
-            {
-                _console.Write("\x1b[?25l");
-                _cursorHidden = true;
-            }
-
-            if (_renderedLines > 0)
-            {
-                _console.Write($"\x1b[{_renderedLines}F\x1b[J");
-            }
-
-            _console.WriteLine(render);
-            _renderedLines = lines.Count;
-        }
-
-        private IReadOnlyList<string> BuildLines()
-        {
-            var complete = _services.Values.Count(service => service.IsTerminal);
-            var lines = new List<string>
-            {
-                "Minicloud publish",
-                $"Services: {complete}/{_services.Count} complete"
-            };
-
-            foreach (var service in _services.Values.OrderBy(service => service.Name, StringComparer.Ordinal))
-            {
-                lines.Add(ServiceSummary(service));
-                lines.Add($"  image: {service.Image} ({DeploymentImagePlatform})");
-                lines.Add($"  cache: {service.CacheImage}");
-            }
-
-            return lines;
-        }
-
-        private static string ServiceSummary(PublishProgressService service)
-        {
-            var docker = service.DockerTotal > 0 ? $"{service.DockerCurrent}/{service.DockerTotal}" : "-";
-            var push = service.PushTotal > 0 ? $"{service.PushDone}/{service.PushTotal}" : "-";
-            return $"- {service.Name}: {service.Status} | docker {docker} | push {push}";
-        }
-
-        private void RestoreCursorLocked()
-        {
-            if (!_live || !_cursorHidden)
-            {
-                return;
-            }
-
-            _console.Write("\x1b[?25h");
-            _cursorHidden = false;
-        }
-
-        private sealed class PublishProgressService
-        {
-            public PublishProgressService(string name, string image, string cacheImage)
-            {
-                Name = name;
-                Image = image;
-                CacheImage = cacheImage;
-            }
-
-            public string Name { get; }
-            public string Image { get; }
-            public string CacheImage { get; }
-            public string Status { get; set; } = "waiting";
-            public int DockerCurrent { get; set; }
-            public int DockerTotal { get; set; }
-            public int PushDone { get; set; }
-            public int PushTotal { get; set; }
-            public bool IsTerminal { get; set; }
-            public string? LastLineSummary { get; set; }
-        }
-    }
-
-    private sealed class DockerProgressReporter
-    {
-        private readonly IConsole _console;
-        private readonly string _label;
-        private readonly PublishProgressView? _progressView;
-        private readonly object _lock = new();
-        private readonly HashSet<int> _seenDockerSteps = [];
-        private readonly HashSet<int> _completedDockerSteps = [];
-        private readonly Dictionary<string, string> _pushLayers = new(StringComparer.Ordinal);
-        private string? _lastMessage;
-
-        public DockerProgressReporter(IConsole console, string label, PublishProgressView? progressView = null)
-        {
-            _console = console;
-            _label = label;
-            _progressView = progressView;
-        }
-
-        public void Observe(string line)
-        {
-            lock (_lock)
-            {
-                if (TryObserveBuildKitStep(line))
-                {
-                    return;
-                }
-
-                TryObservePushLayer(line);
-            }
-        }
-
-        public void Complete()
-        {
-            lock (_lock)
-            {
-                WriteIfChanged($"{_label}: done");
-            }
-        }
-
-        private bool TryObserveBuildKitStep(string line)
-        {
-            var match = BuildKitStepRegex().Match(line);
-            if (!match.Success)
-            {
-                return false;
-            }
-
-            var step = int.Parse(match.Groups["step"].Value, System.Globalization.CultureInfo.InvariantCulture);
-            _seenDockerSteps.Add(step);
-            if (line.Contains("DONE", StringComparison.OrdinalIgnoreCase) || line.Contains("CACHED", StringComparison.OrdinalIgnoreCase))
-            {
-                _completedDockerSteps.Add(step);
-            }
-
-            var zeroBased = _seenDockerSteps.Contains(0);
-            var total = _seenDockerSteps.Count == 0 ? 1 : _seenDockerSteps.Max() + (zeroBased ? 1 : 0);
-            var currentStep = step + (zeroBased ? 1 : 0);
-            var current = Math.Max(currentStep, _completedDockerSteps.Count);
-            _progressView?.UpdateDockerSteps(_label, current, total);
-            WriteIfChanged($"{_label}: docker steps {current} of {total}");
-            return true;
-        }
-
-        private void TryObservePushLayer(string line)
-        {
-            var match = PushLayerRegex().Match(line);
-            if (!match.Success)
-            {
-                return;
-            }
-
-            _pushLayers[match.Groups["layer"].Value] = match.Groups["state"].Value;
-            var total = _pushLayers.Count;
-            var done = _pushLayers.Values.Count(state =>
-                state.Equals("Pushed", StringComparison.OrdinalIgnoreCase) ||
-                state.Equals("Layer already exists", StringComparison.OrdinalIgnoreCase));
-            _progressView?.UpdatePushLayers(_label, done, total);
-            WriteIfChanged($"{_label}: push layers {done} of {total}");
-        }
-
-        private void WriteIfChanged(string message)
-        {
-            if (_progressView is not null)
-            {
-                return;
-            }
-
-            if (message == _lastMessage)
-            {
-                return;
-            }
-
-            _lastMessage = message;
-            _console.WriteLine(message);
-        }
-    }
-
-    [GeneratedRegex("^#(?<step>\\d+)\\s+")]
-    private static partial Regex BuildKitStepRegex();
-
-    [GeneratedRegex("^(?<layer>[a-f0-9]{12,64}):\\s+(?<state>Waiting|Preparing|Pushing|Pushed|Layer already exists)$", RegexOptions.IgnoreCase)]
-    private static partial Regex PushLayerRegex();
-
-    private sealed record ServicePublishJob(
-        string ServiceName,
-        MinicloudServiceConfig Service,
-        string PushImage,
-        string CacheImage,
-        string Fingerprint);
-
-    private sealed class PublishCache
-    {
-        private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-        {
-            WriteIndented = true
-        };
-
-        public Dictionary<string, PublishCacheEntry> Entries { get; init; } = new(StringComparer.Ordinal);
-
-        public static PublishCache Load(CliEnvironment environment)
-        {
-            var path = CachePath(environment);
-            if (!File.Exists(path))
-            {
-                return new PublishCache();
-            }
-
-            try
-            {
-                var cache = JsonSerializer.Deserialize<PublishCache>(File.ReadAllText(path), JsonOptions);
-                return cache ?? new PublishCache();
-            }
-            catch (JsonException)
-            {
-                return new PublishCache();
-            }
-        }
-
-        public bool IsCurrent(string app, string serviceName, string pushImage, string platform, string fingerprint)
-        {
-            var key = Key(app, serviceName, pushImage, platform);
-            return Entries.TryGetValue(key, out var entry) && entry.Fingerprint == fingerprint;
-        }
-
-        public void MarkCurrent(string app, string serviceName, string pushImage, string platform, string fingerprint)
-        {
-            Entries[Key(app, serviceName, pushImage, platform)] = new PublishCacheEntry(fingerprint, DateTimeOffset.UtcNow);
-        }
-
-        public void Save(CliEnvironment environment)
-        {
-            Directory.CreateDirectory(environment.ConfigHome);
-            File.WriteAllText(CachePath(environment), JsonSerializer.Serialize(this, JsonOptions));
-        }
-
-        private static string CachePath(CliEnvironment environment) =>
-            Path.Combine(environment.ConfigHome, "publish-cache.json");
-
-        private static string Key(string app, string serviceName, string pushImage, string platform) =>
-            $"{app}|{serviceName}|{pushImage}|{platform}";
-    }
-
-    private sealed record PublishCacheEntry(string Fingerprint, DateTimeOffset PublishedAt);
-
-    private sealed class CliCommandException : Exception
-    {
-        public CliCommandException(int exitCode, string message)
-            : base(message)
-        {
-            ExitCode = exitCode;
-        }
-
-        public int ExitCode { get; }
-    }
 }

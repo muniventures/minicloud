@@ -17,201 +17,46 @@ on:
       services:
         required: true
         type: string
-      image_tag:
+      minicloud_version:
         required: false
         type: string
-        default: ""
+        default: latest
     secrets:
       minicloud_api_key:
         required: true
       postgres_password:
         required: false
-      service_env_secrets:
-        required: false
 
 permissions:
   contents: read
-  packages: write
-
-env:
-  REGISTRY: ghcr.io
 
 jobs:
-  publish:
-    name: publish
+  deploy:
+    name: deploy
     runs-on: ubuntu-latest
-    outputs:
-      services_json: ${{ steps.payload.outputs.services_json }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and publish service images
-        id: payload
+      - name: Install Minicloud CLI
         env:
-          SERVICES_INPUT: ${{ inputs.services }}
-          IMAGE_TAG_INPUT: ${{ inputs.image_tag }}
-          GHCR_TOKEN: ${{ github.token }}
+          MINICLOUD_REPO: muniventures/minicloud
+          MINICLOUD_VERSION: ${{ inputs.minicloud_version }}
+          MINICLOUD_INSTALL_DIR: ${{ runner.temp }}/minicloud-bin
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p "${MINICLOUD_INSTALL_DIR}"
+          curl -fsSL https://raw.githubusercontent.com/muniventures/minicloud/main/install.sh | sh
+          echo "${MINICLOUD_INSTALL_DIR}" >> "${GITHUB_PATH}"
 
-          IMAGE_TAG="${IMAGE_TAG_INPUT:-${GITHUB_SHA}}"
-          IMAGE_NAMESPACE="$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
-
-          services="$(
-            printf '%s' "${SERVICES_INPUT}" | ruby -ryaml -rjson -e '
-              services = YAML.safe_load($stdin.read, permitted_classes: [], aliases: false)
-              unless services.is_a?(Array)
-                warn "services must be a YAML array"
-                exit 1
-              end
-
-              unless services.all? { |service| service.is_a?(Hash) }
-                warn "each service must be a YAML mapping"
-                exit 1
-              end
-
-              puts JSON.generate(services)
-            '
-          )"
-
-          printf '%s' "${services}" | jq -e '
-            def valid_name: test("^[a-z0-9_-]+$");
-            def valid_env_key: test("^[A-Za-z_][A-Za-z0-9_]*$");
-            def known_service_keys: ["name", "sourcePath", "dockerfile", "image", "port", "public", "path", "healthPath", "env", "secretEnv"];
-
-            if length < 1 then
-              error("services must include at least one service")
-            elif length > 5 then
-              error("services supports at most five services")
-            elif any(.[]; (keys - known_service_keys) | length > 0) then
-              error("services contains unknown service properties")
-            elif ([.[].name] | unique | length) != length then
-              error("service names must be unique")
-            elif any(.[]; (.name | type) != "string" or (.name | valid_name | not)) then
-              error("service names must use lowercase letters, numbers, dashes, and underscores")
-            elif any(.[]; ((.image // "") == "" and (.sourcePath // "") == "")) then
-              error("each service must include image or sourcePath")
-            elif any(.[]; (.port | tonumber? // 0) < 1 or (.port | tonumber? // 0) > 65535) then
-              error("service port must be between 1 and 65535")
-            elif any(.[]; (.public | type) != "boolean") then
-              error("service public must be true or false")
-            elif any(.[]; (.path | type) != "string" or .path != "/") then
-              error("service path must be /")
-            elif any(.[]; (.healthPath | type) != "string" or (.healthPath | startswith("/") | not)) then
-              error("service healthPath must start with /")
-            elif ([.[] | select(.public)] | length) == 0 then
-              error("at least one public service is required")
-            elif any(.[]; (.env? != null) and ((.env | type) != "object")) then
-              error("service env must be an object")
-            elif any(.[]; (.env? // {}) | to_entries | any(.[]; (.key | valid_env_key | not) or ((.value | type) != "string"))) then
-              error("service env keys must be valid environment variable names and values must be strings")
-            elif any(.[]; (.secretEnv? != null) and ((.secretEnv | type) != "object")) then
-              error("service secretEnv must be an object")
-            elif any(.[]; (.secretEnv? // {}) | to_entries | any(.[]; (.key | valid_env_key | not) or ((.value | type) != "string") or (.value | valid_env_key | not))) then
-              error("service secretEnv keys and referenced secret names must be valid environment variable names")
-            elif any(.[]; ((.env // {}) | keys_unsorted) as $env_keys | (.secretEnv // {}) | keys_unsorted | any(. as $key | $env_keys | index($key))) then
-              error("service env and secretEnv must not define the same environment variable")
-            else
-              true
-            end
-          ' >/dev/null
-
-          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-
-          services_count="$(printf '%s' "${services}" | jq 'length')"
-          published='[]'
-
-          for index in $(seq 0 "$((services_count - 1))"); do
-            service="$(printf '%s' "${services}" | jq -c --argjson index "${index}" '.[$index]')"
-            name="$(printf '%s' "${service}" | jq -r '.name')"
-            source_path="$(printf '%s' "${service}" | jq -r '.sourcePath // ""')"
-            dockerfile="$(printf '%s' "${service}" | jq -r '.dockerfile // ""')"
-            image="$(printf '%s' "${service}" | jq -r '.image // ""')"
-
-            if [ -n "${source_path}" ]; then
-              if [ -z "${image}" ]; then
-                image="${REGISTRY}/${IMAGE_NAMESPACE}/${name}:${IMAGE_TAG}"
-              fi
-
-              args=(docker buildx build --platform linux/amd64 --push -t "${image}")
-              if [ -n "${dockerfile}" ]; then
-                args+=(-f "${dockerfile}")
-              fi
-              args+=("${source_path}")
-
-              "${args[@]}"
-            fi
-
-            service="$(
-              printf '%s' "${service}" | jq -c \
-                --arg image "${image}" \
-                '{
-                  name,
-                  image: $image,
-                  port: (.port | tonumber),
-                  public,
-                  path,
-                  health_path: .healthPath,
-                  env: (.env // null),
-                  secret_env: (.secretEnv // null)
-                }'
-            )"
-            published="$(jq -cn --argjson services "${published}" --argjson service "${service}" '$services + [$service]')"
-          done
-
-          printf '%s' "${published}" > minicloud-services.json
-          printf 'services_json=%s\n' "${published}" >> "${GITHUB_OUTPUT}"
-
-  deploy:
-    name: deploy
-    needs: publish
-    runs-on: ubuntu-latest
-    steps:
-      - name: Request Minicloud deploy
-        id: deploy
+      - name: Generate Minicloud config
         env:
-          MINICLOUD_API_KEY: ${{ secrets.minicloud_api_key }}
-          POSTGRES_PASSWORD: ${{ secrets.postgres_password }}
-          SERVICE_ENV_SECRETS: ${{ secrets.service_env_secrets }}
-          SERVICES_JSON: ${{ needs.publish.outputs.services_json }}
-          MINICLOUD_ENVIRONMENT: ${{ inputs.minicloud_environment }}
           APP_ID: ${{ inputs.app_id }}
           DATABASE: ${{ inputs.database }}
+          SERVICES_INPUT: ${{ inputs.services }}
         shell: bash
         run: |
           set -euo pipefail
-
-          DEPLOY_STARTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-          WORKFLOW_EXECUTION_ID="${GITHUB_RUN_ID}"
-          WORKFLOW_EXECUTION_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-
-          echo "Minicloud deploy started at: ${DEPLOY_STARTED_AT}"
-          echo "App ID: ${APP_ID}"
-          echo "Customer workflow execution ID: ${WORKFLOW_EXECUTION_ID}"
-          echo "Customer workflow execution URL: ${WORKFLOW_EXECUTION_URL}"
-
-          {
-            echo "## Minicloud deployment"
-            echo ""
-            echo "| Field | Value |"
-            echo "| --- | --- |"
-            echo "| Started at (UTC) | \`${DEPLOY_STARTED_AT}\` |"
-            echo "| App ID | \`${APP_ID}\` |"
-            echo "| Customer workflow execution ID | \`${WORKFLOW_EXECUTION_ID}\` |"
-            echo "| Customer workflow execution URL | [${WORKFLOW_EXECUTION_ID}](${WORKFLOW_EXECUTION_URL}) |"
-            echo "| Minicloud environment | \`${MINICLOUD_ENVIRONMENT}\` |"
-            echo "| Database | \`${DATABASE}\` |"
-          } >> "${GITHUB_STEP_SUMMARY}"
-
-          if [ -z "${MINICLOUD_API_KEY}" ]; then
-            echo "minicloud_api_key is missing or unavailable in this repository."
-            exit 1
-          fi
-          echo "::add-mask::${MINICLOUD_API_KEY}"
 
           if [ -z "${APP_ID}" ]; then
             echo "app_id is required. Use the app id from the Minicloud console URL, for example app_52kqllu8k1nq4kg352kqllu8."
@@ -223,17 +68,87 @@ jobs:
             exit 1
           fi
 
-          if [ "${DATABASE}" = "postgres" ] && [ -z "${POSTGRES_PASSWORD}" ]; then
-            echo "postgres_password is required when database is postgres."
+          case "${DATABASE}" in
+            sqlite|postgres|none)
+              ;;
+            *)
+              echo "database must be sqlite, postgres, or none."
+              exit 1
+              ;;
+          esac
+
+          ruby -ryaml -e '
+            services = YAML.safe_load(ENV.fetch("SERVICES_INPUT"), permitted_classes: [], aliases: false)
+            unless services.is_a?(Array) && services.any?
+              warn "services must be a non-empty YAML array"
+              exit 1
+            end
+
+            config = {
+              "app" => "github-actions",
+              "appId" => ENV.fetch("APP_ID"),
+              "database" => ENV.fetch("DATABASE"),
+              "commitSha" => ENV.fetch("GITHUB_SHA"),
+              "services" => {}
+            }
+
+            services.each do |service|
+              unless service.is_a?(Hash)
+                warn "each service must be a YAML mapping"
+                exit 1
+              end
+
+              name = service["name"]
+              unless name.is_a?(String) && name.match?(/\A[a-z0-9][a-z0-9_-]*\z/)
+                warn "service names must use lowercase letters, numbers, dashes, and underscores"
+                exit 1
+              end
+
+              if config["services"].key?(name)
+                warn "service names must be unique"
+                exit 1
+              end
+
+              known = %w[name sourcePath dockerfile image port public path healthPath env secretEnv]
+              unknown = service.keys - known
+              unless unknown.empty?
+                warn "services contains unknown service properties: #{unknown.join(", ")}"
+                exit 1
+              end
+
+              config["services"][name] = service.reject { |key, _| key == "name" }
+            end
+
+            File.write("minicloud.yml", YAML.dump(config))
+          '
+
+      - name: Deploy with Minicloud CLI
+        env:
+          MINICLOUD_TOKEN: ${{ secrets.minicloud_api_key }}
+          POSTGRES_PASSWORD: ${{ secrets.postgres_password }}
+          MINICLOUD_ENVIRONMENT: ${{ inputs.minicloud_environment }}
+          DATABASE: ${{ inputs.database }}
+          XDG_CONFIG_HOME: ${{ runner.temp }}/minicloud-config
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${MINICLOUD_TOKEN}" ]; then
+            echo "minicloud_api_key is missing or unavailable in this repository."
             exit 1
+          fi
+          echo "::add-mask::${MINICLOUD_TOKEN}"
+
+          if [ -n "${POSTGRES_PASSWORD}" ]; then
+            echo "::add-mask::${POSTGRES_PASSWORD}"
           fi
 
           case "${MINICLOUD_ENVIRONMENT}" in
             prod)
-              MINICLOUD_API_URL="https://api.cloud.muni.dev"
+              export MINICLOUD_API_URL="https://api.cloud.muni.dev"
               ;;
             staging)
-              MINICLOUD_API_URL="https://api.cloud-dev.muni.dev"
+              export MINICLOUD_API_URL="https://api.cloud-dev.muni.dev"
               ;;
             *)
               echo "minicloud_environment must be prod or staging."
@@ -241,209 +156,24 @@ jobs:
               ;;
           esac
 
-          api_post() {
-            local url="$1"
-            local body="$2"
-            local response_file
-            local http_status
-            local curl_exit
-
-            response_file="$(mktemp)"
-            http_status="$(curl -sS \
-              -o "${response_file}" \
-              -w "%{http_code}" \
-              -X POST \
-              -H "Authorization: Bearer ${MINICLOUD_API_KEY}" \
-              -H "Accept: application/json" \
-              -H "Content-Type: application/json" \
-              --data-binary "${body}" \
-              "${url}")" || {
-                curl_exit=$?
-                echo "Minicloud API request failed before a successful HTTP response." >&2
-                echo "URL: ${url}" >&2
-                if [ -s "${response_file}" ]; then
-                  echo "Response body:" >&2
-                  cat "${response_file}" >&2
-                  echo "" >&2
-                fi
-                rm -f "${response_file}"
-                return "${curl_exit}"
-              }
-
-            if ! [[ "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
-              echo "Minicloud API request failed." >&2
-              echo "URL: ${url}" >&2
-              echo "HTTP status: ${http_status}" >&2
-              if [ -s "${response_file}" ]; then
-                echo "Response body:" >&2
-                if jq -e . "${response_file}" >/dev/null 2>&1; then
-                  jq . "${response_file}" >&2
-                else
-                  cat "${response_file}" >&2
-                  echo "" >&2
-                fi
-              else
-                echo "Response body: <empty>" >&2
-              fi
-              rm -f "${response_file}"
-              return 1
+          args=(deploy --all --config minicloud.yml)
+          if [ "${DATABASE}" = "postgres" ]; then
+            if [ -z "${POSTGRES_PASSWORD}" ]; then
+              echo "postgres_password is required when database is postgres."
+              exit 1
             fi
+            args+=(--pgpassword "${POSTGRES_PASSWORD}")
+          fi
 
-            cat "${response_file}"
-            rm -f "${response_file}"
-          }
-
-          SERVICE_ENV_SECRETS_JSON="$(
-            if [ -z "${SERVICE_ENV_SECRETS}" ]; then
-              printf '{}'
-            else
-              printf '%s' "${SERVICE_ENV_SECRETS}" | jq -ce '
-                def valid_env_key: test("^[A-Za-z_][A-Za-z0-9_]*$");
-
-                if type != "object" then
-                  error("service_env_secrets must be a JSON object")
-                elif to_entries | any(.[]; (.key | valid_env_key | not) or ((.value | type) != "string")) then
-                  error("service_env_secrets keys must be valid environment variable names and values must be strings")
-                else
-                  .
-                end
-              '
-            fi
-          )"
-
-          printf '%s' "${SERVICE_ENV_SECRETS_JSON}" | jq -r 'to_entries[].value' | while IFS= read -r secret_value; do
-            if [ -n "${secret_value}" ]; then
-              echo "::add-mask::${secret_value}"
-            fi
-          done
-
-          SERVICES_FOR_API="$(
-            printf '%s' "${SERVICES_JSON}" | jq -c --argjson service_env_secrets "${SERVICE_ENV_SECRETS_JSON}" '
-              def resolved_env($secrets):
-                . as $service
-                | ($service.env // {}) as $plain_env
-                | reduce (($service.secret_env // {}) | to_entries[]) as $secret_ref ($plain_env;
-                    if ($secrets | has($secret_ref.value)) then
-                      . + {($secret_ref.key): $secrets[$secret_ref.value]}
-                    else
-                      error("service " + $service.name + " secretEnv." + $secret_ref.key + " references missing service_env_secrets key " + $secret_ref.value)
-                    end
-                  );
-
-              [.[] | {
-                name,
-                image,
-                port,
-                public,
-                path,
-                healthPath: .health_path,
-                env: (resolved_env($service_env_secrets) | if length == 0 then null else . end)
-              }]'
-          )"
-
-          DEPLOYMENT_JSON="$(
-            jq -cn \
-              --arg app_id "${APP_ID}" \
-              --arg database "${DATABASE}" \
-              --arg commit_sha "${GITHUB_SHA}" \
-              --arg postgres_password "${POSTGRES_PASSWORD}" \
-              --argjson services "${SERVICES_FOR_API}" \
-              '{
-                appId: $app_id,
-                database: $database,
-                commitSha: $commit_sha,
-                services: $services,
-                postgresPassword: (if $postgres_password == "" then null else $postgres_password end)
-              }'
-          )"
-
-          CREATED_JSON="$(api_post "${MINICLOUD_API_URL}/v1/deployments" "${DEPLOYMENT_JSON}")"
-          DEPLOYMENT_ID="$(printf '%s' "${CREATED_JSON}" | jq -r '.id')"
-          STATUS="$(printf '%s' "${CREATED_JSON}" | jq -r '.status')"
-          WEBSITE_URL="$(printf '%s' "${CREATED_JSON}" | jq -r '.websiteUrl // ""')"
-          echo "Minicloud deployment: ${DEPLOYMENT_ID}"
-          echo "Status: ${STATUS}"
           {
-            echo "| Deployment ID | \`${DEPLOYMENT_ID}\` |"
-            echo "| Initial status | \`${STATUS}\` |"
+            echo "## Minicloud deployment"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| App ID | \`${{ inputs.app_id }}\` |"
+            echo "| Minicloud environment | \`${MINICLOUD_ENVIRONMENT}\` |"
+            echo "| Database | \`${DATABASE}\` |"
+            echo "| Customer workflow execution | [${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) |"
           } >> "${GITHUB_STEP_SUMMARY}"
 
-          LAST_STATUS="${STATUS}"
-          for attempt in $(seq 1 240); do
-            DEPLOYMENT_JSON="$(api_post "${MINICLOUD_API_URL}/v1/deployments/${DEPLOYMENT_ID}/refresh" "{}")"
-            STATUS="$(printf '%s' "${DEPLOYMENT_JSON}" | jq -r '.status')"
-            WEBSITE_URL="$(printf '%s' "${DEPLOYMENT_JSON}" | jq -r '.websiteUrl // ""')"
-            CONSOLE_URL="$(printf '%s' "${DEPLOYMENT_JSON}" | jq -r '.consoleUrl // ""')"
-
-            if [ "${STATUS}" != "${LAST_STATUS}" ]; then
-              echo "Status: ${STATUS}"
-              LAST_STATUS="${STATUS}"
-            fi
-
-            case "${STATUS}" in
-              succeeded)
-                SERVICE_URL_LINES="$(
-                  printf '%s' "${DEPLOYMENT_JSON}" | jq -r '
-                    [.services[]? | select(.public) | {name, urls: (.urls // [])} | select((.urls | length) > 0)] as $services
-                    | $services[]
-                    | .name as $name
-                    | .urls[]
-                    | "- \($name): \(.)"
-                  '
-                )"
-                if [ -n "${SERVICE_URL_LINES}" ]; then
-                  echo "Service URLs:"
-                  printf '%s\n' "${SERVICE_URL_LINES}"
-                elif [ -n "${WEBSITE_URL}" ]; then
-                  echo "Website URL: ${WEBSITE_URL}"
-                fi
-                {
-                  echo ""
-                  echo "### Result"
-                  echo ""
-                  echo "- Status: succeeded"
-                  if [ -n "${SERVICE_URL_LINES}" ]; then
-                    echo ""
-                    echo "#### Service URLs"
-                    printf '%s\n' "${SERVICE_URL_LINES}"
-                  elif [ -n "${WEBSITE_URL}" ]; then
-                    echo "- Website URL: ${WEBSITE_URL}"
-                  fi
-                  echo "- Console: ${CONSOLE_URL}"
-                } >> "${GITHUB_STEP_SUMMARY}"
-                exit 0
-                ;;
-              failed|canceled)
-                FAILURE_CODE="$(printf '%s' "${DEPLOYMENT_JSON}" | jq -r '.failureCode // .status')"
-                FAILURE_MESSAGE="$(printf '%s' "${DEPLOYMENT_JSON}" | jq -r '.failureMessage // ""')"
-                echo "Minicloud deployment ${STATUS}: ${FAILURE_CODE}"
-                if [ -n "${FAILURE_MESSAGE}" ]; then
-                  echo "Message: ${FAILURE_MESSAGE}"
-                fi
-                {
-                  echo ""
-                  echo "### Result"
-                  echo ""
-                  echo "- Status: ${STATUS}"
-                  echo "- Failure code: ${FAILURE_CODE}"
-                  if [ -n "${FAILURE_MESSAGE}" ]; then
-                    echo "- Message: ${FAILURE_MESSAGE}"
-                  fi
-                } >> "${GITHUB_STEP_SUMMARY}"
-                exit 1
-                ;;
-            esac
-
-            sleep 2
-          done
-
-          echo "Timed out waiting for Minicloud deployment to complete."
-          echo "Deployment: ${DEPLOYMENT_ID}"
-          {
-            echo ""
-            echo "### Result"
-            echo ""
-            echo "- Status: timed out"
-            echo "- Deployment: ${DEPLOYMENT_ID}"
-          } >> "${GITHUB_STEP_SUMMARY}"
-          exit 1
+          minicloud "${args[@]}"

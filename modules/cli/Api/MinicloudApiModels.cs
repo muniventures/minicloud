@@ -19,9 +19,24 @@ public sealed record AppResponse(
     string OrganizationId,
     string Name,
     string Slug,
+    string? ParentAppId,
+    string? BranchName,
     string Plan,
     string Database,
+    IReadOnlyList<AppBranchResponse> Branches,
     LatestDeploymentResponse? LatestDeployment);
+
+public sealed record AppBranchResponse(
+    string Id,
+    string Name,
+    string Slug,
+    string BranchName,
+    string Plan,
+    string Database,
+    string? WebsiteUrl,
+    DateTimeOffset CreatedAt);
+
+public sealed record EnsureAppBranchRequest(string BranchName);
 
 public sealed record DomainBindingResponse(
     string Id,
@@ -40,11 +55,43 @@ public sealed record DomainBindingResponse(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
+public sealed record AppServiceInventoryResponse(
+    string Name,
+    string Image,
+    int Port,
+    bool Public,
+    string Path,
+    string HealthPath,
+    RuntimeServiceStatusResponse? Runtime,
+    IReadOnlyList<DomainBindingResponse> Domains);
+
+public sealed record RuntimeServiceStatusResponse(
+    string Name,
+    string? Container,
+    string State,
+    string? Health,
+    string? Image,
+    int? RestartCount);
+
 public sealed record CreateDomainBindingRequest(
     string ServiceName,
     string? Label);
 
 public sealed record UpdateDomainBindingRequest(bool? Disabled);
+
+public sealed record AppServiceSecretResponse(
+    string Id,
+    string AppId,
+    string ServiceName,
+    string Name,
+    string Status,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record SetAppServiceSecretRequest(
+    string? ServiceName,
+    string Name,
+    string Value);
 
 public sealed record CreateAppRequest(
     string OrganizationId,
@@ -68,12 +115,57 @@ public sealed record CreateDeploymentRequest(
 
 public sealed record DeploymentServiceRequest(
     string Name,
-    string Image,
+    string? Image,
     int Port,
     bool Public,
     string Path,
     string HealthPath,
-    IReadOnlyDictionary<string, string>? Env = null);
+    IReadOnlyDictionary<string, string>? Env = null,
+    IReadOnlyDictionary<string, string>? SecretEnv = null,
+    string? ArtifactId = null);
+
+public sealed record CreateDeploymentArtifactRequest(
+    string AppId,
+    string ServiceName,
+    string FileName,
+    string ContentType,
+    long SizeBytes,
+    string Sha256,
+    DeploymentArtifactManifest Manifest);
+
+public sealed record DeploymentArtifactCreateResponse(
+    string Id,
+    string AppId,
+    string ServiceName,
+    string Status,
+    string UploadUrl,
+    long SizeBytes,
+    string Sha256);
+
+public sealed record DeploymentArtifactResponse(
+    string Id,
+    string AppId,
+    string ServiceName,
+    string Status,
+    long SizeBytes,
+    string Sha256,
+    DateTimeOffset CreatedAt);
+
+public sealed record DeploymentArtifactManifest(
+    int SchemaVersion,
+    string AppId,
+    string ServiceName,
+    string SourcePath,
+    string? DockerfilePath,
+    string BuildContextPath,
+    int Port,
+    bool Public,
+    string Path,
+    string HealthPath,
+    string? CommitSha,
+    int FileCount,
+    long SourceBytes,
+    DateTimeOffset CreatedAt);
 
 public sealed record DeploymentCreateResponse(
     string Id,

@@ -143,29 +143,30 @@ public static partial class MinicloudConfigLoader
                 GetBool(serviceMapping, "public", $"services.{serviceName}.public", diagnostics),
                 GetScalar(serviceMapping, "path", $"services.{serviceName}.path", diagnostics),
                 GetScalar(serviceMapping, "healthPath", $"services.{serviceName}.healthPath", diagnostics),
-                GetEnvironment(serviceMapping, serviceName, diagnostics));
+                GetEnvironment(serviceMapping, serviceName, "env", diagnostics),
+                GetEnvironment(serviceMapping, serviceName, "secretEnv", diagnostics));
         }
 
         return services;
     }
 
-    private static IReadOnlyDictionary<string, string>? GetEnvironment(YamlMappingNode serviceMapping, string serviceName, List<ConfigDiagnostic> diagnostics)
+    private static IReadOnlyDictionary<string, string>? GetEnvironment(YamlMappingNode serviceMapping, string serviceName, string key, List<ConfigDiagnostic> diagnostics)
     {
-        if (!TryGetNode(serviceMapping, "env", out var envNode))
+        if (!TryGetNode(serviceMapping, key, out var envNode))
         {
             return null;
         }
 
         if (envNode is not YamlMappingNode envMapping)
         {
-            diagnostics.Add(new ConfigDiagnostic($"services.{serviceName}.env", "Environment variables must be a YAML mapping."));
+            diagnostics.Add(new ConfigDiagnostic($"services.{serviceName}.{key}", "Environment variables must be a YAML mapping."));
             return null;
         }
 
         var env = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (envKeyNode, envValueNode) in envMapping.Children)
         {
-            var envKey = ScalarKey(envKeyNode, $"services.{serviceName}.env", diagnostics);
+            var envKey = ScalarKey(envKeyNode, $"services.{serviceName}.{key}", diagnostics);
             if (envKey is null)
             {
                 continue;
@@ -173,7 +174,7 @@ public static partial class MinicloudConfigLoader
 
             if (envValueNode is not YamlScalarNode scalar || scalar.Value is null)
             {
-                diagnostics.Add(new ConfigDiagnostic($"services.{serviceName}.env.{envKey}", "Environment variable values must be strings."));
+                diagnostics.Add(new ConfigDiagnostic($"services.{serviceName}.{key}.{envKey}", "Environment variable values must be strings."));
                 continue;
             }
 

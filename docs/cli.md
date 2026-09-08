@@ -37,11 +37,13 @@ From your app repository:
 minicloud init
 ```
 
-The wizard lists existing apps in your organization and includes `Create new app`. The generated config always includes the selected or newly created `appId`.
+The wizard first lists existing apps in your organization and includes `Create new app`. The generated config always includes the selected or newly created `appId`.
 
-`minicloud init` asks for one service name and service folder, then generates one service definition by default. More services can be added later by running `minicloud init` again. If `minicloud.yml` already exists, the CLI writes a service-specific file such as `minicloud.backend.yml`.
+Next, `minicloud init` scans up to five folder levels for web services, excluding generated dependency/build folders such as `node_modules`, `.git`, `.next`, `bin`, `obj`, `target`, `dist`, `build`, and `out`. It detects common Node web frameworks, .NET web projects, Spring Boot web projects, and Dockerfile-backed service folders. Non-web .NET projects and Android projects are ignored. Detected services are shown in a multi-select list; use Space to select one or more services and Enter to save. The final `Custom` row is selected with Enter and lets you provide a service name, path, and Dockerfile path manually.
 
-If the selected service folder does not contain `Dockerfile`, init prints a warning and still creates the config. `minicloud deploy` requires a Dockerfile and fails until one exists or `services.<name>.dockerfile` points to one.
+If a selected service folder does not contain `Dockerfile` and no custom Dockerfile path is configured, init still creates the config. On deploy, the CLI generates a Dockerfile for recognized app types such as Vite, Next.js, Node API, .NET web, and Spring Boot services before validation and artifact upload. Unsupported project types still need a checked-in Dockerfile or `services.<name>.dockerfile`.
+
+Public Vite services must allow the generated Minicloud host or `.app.muni.dev` in `preview.allowedHosts`. Public Next.js services must run a production server such as `next start`, not `next dev`, from Dockerfile CMD/ENTRYPOINT.
 
 To add another service to an existing app:
 
@@ -56,7 +58,7 @@ minicloud add-service teamcore-dev
 minicloud add-service --app teamcore-dev --config minicloud.api.yml
 ```
 
-`add-service` asks for the new service name and folder, writes a service-specific config, and uses the selected app's existing `appId`.
+`add-service` uses the same service detection and custom-service flow, writes a config for the selected services, and uses the selected app's existing `appId`.
 
 For more prompts:
 
@@ -87,6 +89,30 @@ Current plan codes:
 | `P0-D-0` | DigitalOcean | `nyc1` | `s-1vcpu-512mb-10gb` | $4.00/month |
 | `P0-D-1` | DigitalOcean | `nyc1` | `s-1vcpu-1gb` | $6.00/month |
 | `P0-D-2` | DigitalOcean | `nyc1` | `s-1vcpu-2gb` | $12.00/month |
+
+## Branch Deployments
+
+Deploy every configured service from the currently checked-out Git branch:
+
+```bash
+minicloud deploy branch
+```
+
+Minicloud creates or reuses a child environment under the configured main app.
+Each branch environment has its own `P0-V-0` Vultr VPS, runtime, database,
+deployments, and domains. The main app's secrets are copied when the branch is
+first created. A branch such as `feature/cart` is normalized to `feature-cart`;
+its public service hostname ends in `-feature-cart.app.muni.dev`.
+
+Destroy a branch environment:
+
+```bash
+minicloud branch destroy
+```
+
+When several branches exist, the CLI shows a selection list. Destruction always
+requires confirmation. You can select directly with
+`minicloud branch destroy feature-cart`.
 
 ## `minicloud.yml` Reference
 
@@ -220,9 +246,9 @@ minicloud deploy --pgpassword '<strong-password>'
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `sourcePath` | Required when publishing with CLI | Directory used as the Docker build context. |
+| `sourcePath` | Required for normal CLI deploys | Directory bundled into the deployment artifact and used as the workflow Docker build context. |
 | `dockerfile` | No | Dockerfile path. Defaults to Docker's normal lookup in `sourcePath`. |
-| `image` | Required with `--no-publish`; optional otherwise | Full image reference. When CLI publishes, omit this or use the configured Minicloud registry host. |
+| `image` | Required with `--no-publish`; optional otherwise | Full image reference for prebuilt-image deploys. Normal deploys omit this and upload a source artifact instead. |
 | `port` | Yes | Internal container port, `1` to `65535`. |
 | `public` | Yes | Whether the service receives public HTTP traffic. The merged active app must have at least one public service. |
 | `path` | Yes | Public route path. First-pass service subdomains require `/`. For private services, still set `/`. |
@@ -236,6 +262,142 @@ Environment variable names must match:
 ```text
 ^[A-Za-z_][A-Za-z0-9_]*$
 ```
+
+## Runtime Environment Variables And Secrets
+
+Use `services.<name>.env` in `minicloud.yml` to set runtime environment variables for one service. `env` is a YAML mapping whose keys are environment variable names and whose values are strings:
+
+```yaml
+services:
+  backend:
+    sourcePath: .
+    dockerfile: Dockerfile
+    port: 8080
+    public: true
+    path: /
+    healthPath: /health
+    env:
+      ASPNETCORE_ENVIRONMENT: Production
+      FEATURE_FLAG_X: enabled
+      API_BASE_URL: https://api.example.com
+```
+
+For multi-service apps, each service gets only its own `env` values:
+
+```yaml
+services:
+  api:
+    sourcePath: api
+    port: 8080
+    public: true
+    path: /
+    healthPath: /health
+    env:
+      ASPNETCORE_ENVIRONMENT: Production
+      WORKER_QUEUE: default
+  worker:
+    sourcePath: worker
+    port: 8080
+    public: false
+    path: /
+    healthPath: /health
+    env:
+      WORKER_QUEUE: default
+      JOB_CONCURRENCY: "4"
+```
+
+Environment variable names must match `^[A-Za-z_][A-Za-z0-9_]*$`. Values must be strings. Quote values such as numbers, booleans, empty strings, or values with special YAML characters when you need them to stay strings:
+
+```yaml
+env:
+  JOB_CONCURRENCY: "4"
+  FEATURE_ENABLED: "true"
+  EMPTY_VALUE: ""
+  CALLBACK_URL: "https://example.com/callback?source=minicloud"
+```
+
+During `minicloud deploy`, the CLI sends `services.<name>.env` to the Minicloud API with the deployment request. Minicloud stores those values with the deployment service record and forwards them to the deployment workflow as `services_json`. The runtime writes them into the generated Docker Compose `environment:` block for that service.
+
+Do not commit sensitive values in `minicloud.yml`. Use `env` for non-sensitive runtime configuration only.
+
+Use `secretEnv` when a service needs sensitive runtime environment variables. `secretEnv` maps the environment variable name that the container receives to a stored Minicloud secret name:
+
+```yaml
+services:
+  backend:
+    sourcePath: .
+    dockerfile: Dockerfile
+    port: 8080
+    public: true
+    path: /
+    healthPath: /health
+    secretEnv:
+      MAPBOX_ACCESS_TOKEN: MAPBOX_ACCESS_TOKEN
+      STRIPE_SECRET_KEY: STRIPE_SECRET_KEY
+```
+
+Set those stored secrets before deploying. Without `--service`, the CLI creates an app-scoped secret that any service can reference by name:
+
+```bash
+minicloud secrets set --app my-api MAPBOX_ACCESS_TOKEN
+minicloud secrets list --app my-api
+```
+
+Use `--service` to create a service-scoped secret. Service-scoped secrets are only available to the matching service:
+
+```bash
+minicloud secrets set --app my-api --service backend STRIPE_SECRET_KEY --value "$STRIPE_SECRET_KEY"
+minicloud secrets list --app my-api --service backend
+minicloud secrets remove --app my-api --service backend STRIPE_SECRET_KEY
+```
+
+If you keep local secret values in `minicloud.secrets.env`, use dotenv-style `NAME=value` lines. Do not commit this file:
+
+```dotenv
+# minicloud.secrets.env
+MAPBOX_ACCESS_TOKEN=pk_live_example
+STRIPE_SECRET_KEY=sk_live_example
+OPENAI_API_KEY=sk-proj-example
+```
+
+Then load it in your shell and write the values to Minicloud:
+
+```bash
+set -a
+. ./minicloud.secrets.env
+set +a
+
+minicloud secrets set --app my-api MAPBOX_ACCESS_TOKEN --value "$MAPBOX_ACCESS_TOKEN"
+minicloud secrets set --app my-api --service backend STRIPE_SECRET_KEY --value "$STRIPE_SECRET_KEY"
+minicloud secrets set --app my-api --service worker OPENAI_API_KEY --value "$OPENAI_API_KEY"
+```
+
+`minicloud.secrets.env` is a local helper file. During `minicloud deploy`, if the selected service's `sourcePath` contains this file, the CLI reads it and saves each `NAME=value` pair as a service-scoped Minicloud secret before creating the deployment. You can also store values manually with `minicloud secrets set`.
+
+Prefer the interactive prompt. `--value` is intended for controlled CI scripts; values passed on a command line can be captured by shell history or process listings.
+
+The left side of each `secretEnv` entry is the environment variable that the container receives. The right side is the stored secret name to read. Both must match `^[A-Za-z_][A-Za-z0-9_]*$`. `env` and `secretEnv` cannot define the same runtime environment variable.
+
+Secret values do not belong in a deploy config. Keep `secretEnv` references in the selected deploy config, normally `minicloud.yml`, then write the actual values with `minicloud secrets set`.
+
+Minicloud stores secret values in its OpenBao-backed secret store and stores only secret metadata in the control-plane database. During deployment:
+
+- App-scoped secrets can be used by any service that references them in `secretEnv`.
+- Service-scoped secrets can be used only by the matching service.
+- If an app-scoped secret and a service-scoped secret have the same name, an explicit `secretEnv` reference uses the app-scoped secret.
+- If a service has no `secretEnv` mapping, Minicloud injects all service-scoped secrets whose service name matches the deployed service, using each stored secret name as the container environment variable name.
+
+App-scoped secrets are never injected automatically. Secret values are not returned by `minicloud secrets list`.
+
+The reusable GitHub Actions workflow can pass `secretEnv` references, but it never accepts runtime secret values. Create or update secrets through the CLI or portal before deployment. See [GitHub Actions workflow documentation](github-actions.md#runtime-secrets).
+
+Postgres passwords are handled separately. For Postgres deployments, pass the password with:
+
+```bash
+minicloud deploy --pgpassword '<strong-password>'
+```
+
+Minicloud stores that app-level Postgres password encrypted and reuses it on later deploys.
 
 ## Deploy
 
@@ -263,14 +425,6 @@ Common overrides:
 
 ```bash
 minicloud deploy --database postgres
-minicloud deploy --tag $(git rev-parse --short HEAD)
-minicloud deploy --verbose
-```
-
-Publish images without creating a deployment:
-
-```bash
-minicloud deploy --publish-only
 ```
 
 Deploy already-published images:
@@ -289,6 +443,9 @@ minicloud apps list
 minicloud apps inspect <app>
 ```
 
+`apps inspect` prints the latest deployment and the active service inventory,
+including public/private state, port, runtime state, and assigned domains.
+
 ## Service Subdomains
 
 Public services get Minicloud subdomains under `app.muni.dev`.
@@ -299,6 +456,9 @@ minicloud domains add-subdomain --app <app> --service <service> --label <label>
 minicloud domains disable --app <app> --hostname <host>
 minicloud domains delete --app <app> --hostname <host>
 ```
+
+`domains list` includes each hostname's service, status, runtime apply state,
+TLS state, last applied timestamp, and last updated timestamp.
 
 ## Environment Defaults
 
@@ -314,6 +474,3 @@ Supported environment variables:
 | --- | --- |
 | `MINICLOUD_TOKEN` | API key used by CLI commands. |
 | `MINICLOUD_API_URL` | API base URL. Defaults to `https://api.cloud.muni.dev`. |
-| `MINICLOUD_REGISTRY_HOST` | Registry host used for CLI image publishing. |
-| `MINICLOUD_REGISTRY_GHCR_OWNER` | Runtime GHCR owner. |
-| `MINICLOUD_RUNTIME_REGISTRY_PREFIX` | Runtime image prefix. |
