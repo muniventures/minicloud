@@ -416,10 +416,11 @@ For a config with multiple services:
 ```bash
 minicloud deploy backend
 minicloud deploy frontend backend
+minicloud deploy all
 minicloud deploy --all
 ```
 
-If a config has multiple services and no service name or `--all` is provided, the CLI asks which services to deploy. Use Up/Down to move, Space to toggle a service, or toggle `all` to select every service.
+Running `minicloud deploy` without arguments automatically checks the SHA-256 checksum of each service against active services in the Minicloud API and deploys only changed or newly added services without prompting. If no services have changed, it informs you and exits cleanly. To deploy every service unconditionally, run `minicloud deploy all` (or `minicloud deploy --all`). To deploy a branch environment, `minicloud deploy branch` always deploys all services.
 
 Common overrides:
 
@@ -438,10 +439,13 @@ minicloud deploy --no-publish
 ```bash
 minicloud status
 minicloud status <deployment-id>
+minicloud status [deployment-id] --watch
 minicloud logs <app-or-deployment-id>
 minicloud apps list
 minicloud apps inspect <app>
 ```
+
+`status` checks the current status of a deployment. Use `--watch` (or `-w`) to follow an ongoing deployment until completion. Deployment tracking automatically tolerates transient network disconnections and sleep/wake cycles, reconnecting when the network becomes available.
 
 `apps inspect` prints the latest deployment and the active service inventory,
 including public/private state, port, runtime state, and assigned domains.

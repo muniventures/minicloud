@@ -681,6 +681,14 @@ public sealed class CliConfigTests
     }
 
     [Fact]
+    public void DeployServiceNamesFromArgs_ignores_all_positional_keyword()
+    {
+        var services = CliApplication.DeployServiceNamesFromArgs(["all", "--config", "minicloud.yml"]);
+
+        Assert.Empty(services);
+    }
+
+    [Fact]
     public void FirstPositionalArg_reads_add_service_app_argument()
     {
         var app = CliApplication.FirstPositionalArg(["teamcore-dev", "--config", "minicloud.api.yml", "--advanced"]);

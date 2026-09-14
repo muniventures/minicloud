@@ -1,5 +1,8 @@
 using System.Diagnostics;
+using System.IO;
+using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using Minicloud.Cli.Api;
@@ -79,9 +82,14 @@ public sealed partial class CliApplication
             _console.WriteError($"Network error: {ex.Message}");
             return CliExitCodes.NetworkOrApiUnavailable;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _console.WriteLine("Operation canceled.");
+            return CliExitCodes.Success;
+        }
         catch (TaskCanceledException)
         {
-            _console.WriteError("Network error: request timed out or was canceled.");
+            _console.WriteError("Network error: request timed out.");
             return CliExitCodes.NetworkOrApiUnavailable;
         }
         catch (CliCommandException ex)
@@ -326,7 +334,9 @@ public sealed partial class CliApplication
         var databaseOverride = GetOption(args, "--database");
         var postgresPassword = GetOption(args, "--pgpassword");
         var noPublish = args.Contains("--no-publish", StringComparer.Ordinal);
-        var deployAll = branchDeploy || args.Contains("--all", StringComparer.Ordinal);
+        var deployAll = branchDeploy ||
+            args.Contains("--all", StringComparer.Ordinal) ||
+            args.Any(arg => string.Equals(arg, "all", StringComparison.OrdinalIgnoreCase));
         var requestedServiceNames = DeployServiceNamesFromArgs(args);
         if (args.Contains("--publish-only", StringComparer.Ordinal))
         {
@@ -353,14 +363,6 @@ public sealed partial class CliApplication
             _console.WriteError("Usage error: minicloud deploy branch deploys all configured services and does not accept service names.");
             return CliExitCodes.ValidationError;
         }
-        var selectedServiceNames = ResolveDeployServiceNames(config, requestedServiceNames, deployAll);
-        if (selectedServiceNames.Count == 0)
-        {
-            _console.WriteError("Usage error: select at least one service to deploy.");
-            return CliExitCodes.ValidationError;
-        }
-
-        config = FilterConfigServices(config, selectedServiceNames);
 
         var me = await _apiClient.GetMeAsync(cancellationToken);
         var app = await _apiClient.GetAppAsync(config.AppId!, cancellationToken);
@@ -379,6 +381,14 @@ public sealed partial class CliApplication
             config = config with { AppId = app.Id };
             _console.WriteLine($"Branch app: {app.Name} ({app.Slug})");
         }
+
+        var selectedServiceNames = await ResolveDeployServiceNamesAsync(config, app.Id, requestedServiceNames, deployAll, cancellationToken);
+        if (selectedServiceNames.Count == 0)
+        {
+            return CliExitCodes.Success;
+        }
+
+        config = FilterConfigServices(config, selectedServiceNames);
 
         await SyncLocalSecretsAsync(app, config, cancellationToken);
 
@@ -404,6 +414,11 @@ public sealed partial class CliApplication
             }
         }
 
+        var serviceHashes = config.Services.ToDictionary(
+            x => x.Key,
+            x => ServiceChecksumCalculator.Compute(x.Key, x.Value),
+            StringComparer.Ordinal);
+
         var request = new CreateDeploymentRequest(
             app.Id,
             ResolveDeploymentDatabase(databaseOverride, config),
@@ -419,7 +434,8 @@ public sealed partial class CliApplication
                 x.Value.HealthPath!,
                 x.Value.Env,
                 x.Value.SecretEnv,
-                serviceArtifactIds.TryGetValue(x.Key, out var artifactId) ? artifactId : null)).ToArray(),
+                serviceArtifactIds.TryGetValue(x.Key, out var artifactId) ? artifactId : null,
+                serviceHashes.GetValueOrDefault(x.Key))).ToArray(),
             postgresPassword);
 
         var created = await _apiClient.CreateDeploymentAsync(request, cancellationToken);
@@ -514,6 +530,7 @@ public sealed partial class CliApplication
 
     private async Task<int> RunStatusAsync(string[] args, CancellationToken cancellationToken)
     {
+        var watch = args.Contains("--watch", StringComparer.Ordinal) || args.Contains("-w", StringComparer.Ordinal);
         var deploymentId = args.FirstOrDefault(x => !x.StartsWith("-", StringComparison.Ordinal));
         if (string.IsNullOrWhiteSpace(deploymentId))
         {
@@ -539,6 +556,15 @@ public sealed partial class CliApplication
         var deployment = await _apiClient.GetDeploymentAsync(deploymentId, cancellationToken);
         if (!TerminalStatuses.Contains(deployment.Status))
         {
+            if (watch)
+            {
+                PrintDeployment(deployment);
+                deployment = await PollDeploymentAsync(deployment.Id, deployment.Status, cancellationToken);
+                _console.WriteLine();
+                PrintDeployment(deployment);
+                return deployment.Status == "failed" ? CliExitCodes.DeploymentFailed : CliExitCodes.Success;
+            }
+
             deployment = await _apiClient.RefreshDeploymentAsync(deploymentId, cancellationToken);
         }
 
@@ -1018,10 +1044,32 @@ public sealed partial class CliApplication
     {
         var lastStatus = initialStatus;
         string? lastConsoleUrl = null;
+        var reportedInterruption = false;
         while (true)
         {
             await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
-            var deployment = await _apiClient.RefreshDeploymentAsync(deploymentId, cancellationToken);
+
+            DeploymentResponse deployment;
+            try
+            {
+                deployment = await _apiClient.RefreshDeploymentAsync(deploymentId, cancellationToken);
+                if (reportedInterruption)
+                {
+                    _console.WriteLine("Connection restored.");
+                    reportedInterruption = false;
+                }
+            }
+            catch (Exception ex) when (IsTransientNetworkException(ex, cancellationToken))
+            {
+                if (!reportedInterruption)
+                {
+                    _console.WriteLine("Network connection lost. Waiting to reconnect...");
+                    reportedInterruption = true;
+                }
+
+                continue;
+            }
+
             if (deployment.Status != lastStatus)
             {
                 _console.WriteLine($"Status: {deployment.Status}");
@@ -1045,7 +1093,16 @@ public sealed partial class CliApplication
         while (DateTimeOffset.UtcNow < expiresAt)
         {
             await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
-            var exchange = await _apiClient.ExchangeCliLoginSessionAsync(sessionId, cancellationToken);
+            CliLoginSessionExchangeResponse? exchange;
+            try
+            {
+                exchange = await _apiClient.ExchangeCliLoginSessionAsync(sessionId, cancellationToken);
+            }
+            catch (Exception ex) when (IsTransientNetworkException(ex, cancellationToken))
+            {
+                continue;
+            }
+
             if (exchange is not null)
             {
                 return exchange;
@@ -1055,6 +1112,36 @@ public sealed partial class CliApplication
         }
 
         throw new ApiException(401, "cli_login_session_expired", "CLI login session expired before approval.");
+    }
+
+    private static bool IsTransientNetworkException(Exception ex, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        if (ex is OperationCanceledException or TaskCanceledException)
+        {
+            return !cancellationToken.IsCancellationRequested;
+        }
+
+        if (ex is HttpRequestException or TimeoutException or IOException or SocketException)
+        {
+            return true;
+        }
+
+        if (ex is ApiException apiEx)
+        {
+            return apiEx.StatusCode is 408 or 429 or 500 or 502 or 503 or 504;
+        }
+
+        if (ex is AggregateException agg)
+        {
+            return agg.InnerExceptions.Count > 0 && agg.InnerExceptions.All(inner => IsTransientNetworkException(inner, cancellationToken));
+        }
+
+        return ex.InnerException is not null && IsTransientNetworkException(ex.InnerException, cancellationToken);
     }
 
     private static string FormatBranchUrls(AppBranchResponse branch) =>
@@ -1140,7 +1227,7 @@ public sealed partial class CliApplication
         _console.WriteLine("  minicloud deploy [service ...] [--all] [--config minicloud.yml] [--database db] [--pgpassword password] [--no-publish]");
         _console.WriteLine("  minicloud deploy branch [--config minicloud.yml] [--database db] [--pgpassword password] [--no-publish]");
         _console.WriteLine("  minicloud branch destroy [branch] [--config minicloud.yml]");
-        _console.WriteLine("  minicloud status [deployment-id]");
+        _console.WriteLine("  minicloud status [deployment-id] [--watch]");
         _console.WriteLine("  minicloud logs [app|deployment-id] [--service service] [--source source] [--tail count] [--since 30m]");
         _console.WriteLine("  minicloud apps list");
         _console.WriteLine("  minicloud apps inspect <app>");
@@ -1306,6 +1393,11 @@ public sealed partial class CliApplication
                 continue;
             }
 
+            if (string.Equals(arg, "all", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             names.Add(arg);
         }
 
@@ -1349,12 +1441,14 @@ public sealed partial class CliApplication
         return output;
     }
 
-    private IReadOnlyList<string> ResolveDeployServiceNames(
+    private async Task<IReadOnlyList<string>> ResolveDeployServiceNamesAsync(
         MinicloudConfig config,
+        string appId,
         IReadOnlyList<string> requestedServiceNames,
-        bool deployAll)
+        bool deployAll,
+        CancellationToken cancellationToken)
     {
-        if (deployAll || config.Services.Count == 1)
+        if (deployAll)
         {
             return config.Services.Keys.ToArray();
         }
@@ -1374,7 +1468,54 @@ public sealed partial class CliApplication
             return requestedServiceNames.Distinct(StringComparer.Ordinal).ToArray();
         }
 
-        return PromptServiceMultiSelect(config.Services.Keys.OrderBy(x => x, StringComparer.Ordinal).ToArray());
+        var computedHashes = config.Services.ToDictionary(
+            x => x.Key,
+            x => ServiceChecksumCalculator.Compute(x.Key, x.Value),
+            StringComparer.Ordinal);
+
+        IReadOnlyList<AppServiceInventoryResponse> activeServices;
+        try
+        {
+            activeServices = await _apiClient.GetAppServicesAsync(appId, cancellationToken);
+        }
+        catch (ApiException ex) when (ex.StatusCode == (int)HttpStatusCode.NotFound)
+        {
+            activeServices = [];
+        }
+
+        var activeHashes = activeServices
+            .Where(x => !string.IsNullOrWhiteSpace(x.Sha256))
+            .ToDictionary(x => x.Name, x => x.Sha256!, StringComparer.Ordinal);
+
+        var changed = new List<string>();
+        var unchanged = new List<string>();
+        foreach (var serviceName in config.Services.Keys)
+        {
+            var currentHash = computedHashes[serviceName];
+            if (!activeHashes.TryGetValue(serviceName, out var deployedHash) ||
+                !string.Equals(currentHash, deployedHash, StringComparison.OrdinalIgnoreCase))
+            {
+                changed.Add(serviceName);
+            }
+            else
+            {
+                unchanged.Add(serviceName);
+            }
+        }
+
+        if (changed.Count == 0)
+        {
+            _console.WriteLine("No services have changed since the last deployment.");
+            _console.WriteLine("Use 'minicloud deploy all' to force deployment, or specify service name: minicloud deploy <service>.");
+            return [];
+        }
+
+        if (unchanged.Count > 0)
+        {
+            _console.WriteLine($"Deploying changed services: {string.Join(", ", changed)} (skipping unchanged: {string.Join(", ", unchanged)})");
+        }
+
+        return changed;
     }
 
     internal static MinicloudConfig FilterConfigServices(MinicloudConfig config, IReadOnlyList<string> selectedServiceNames)
@@ -1413,61 +1554,6 @@ public sealed partial class CliApplication
                 case ConsoleKey.Enter:
                     _console.WriteLine();
                     return choices[selectedIndex].Value;
-            }
-        }
-    }
-
-    private IReadOnlyList<string> PromptServiceMultiSelect(IReadOnlyList<string> services)
-    {
-        var selectedIndex = 0;
-        var selected = new HashSet<string>(services, StringComparer.Ordinal);
-        const int StaticLineCount = 2;
-        var rendered = false;
-
-        while (true)
-        {
-            RenderServiceMultiSelect(services, selected, selectedIndex, rendered ? StaticLineCount + services.Count + 1 : 0);
-            rendered = true;
-
-            var key = _console.ReadKey(intercept: true);
-            switch (key.Key)
-            {
-                case ConsoleKey.UpArrow:
-                    selectedIndex = selectedIndex == 0 ? services.Count : selectedIndex - 1;
-                    break;
-                case ConsoleKey.DownArrow:
-                    selectedIndex = selectedIndex == services.Count ? 0 : selectedIndex + 1;
-                    break;
-                case ConsoleKey.Spacebar:
-                    if (selectedIndex == 0)
-                    {
-                        if (selected.Count == services.Count)
-                        {
-                            selected.Clear();
-                        }
-                        else
-                        {
-                            selected = new HashSet<string>(services, StringComparer.Ordinal);
-                        }
-                    }
-                    else
-                    {
-                        var service = services[selectedIndex - 1];
-                        if (!selected.Add(service))
-                        {
-                            selected.Remove(service);
-                        }
-                    }
-                    break;
-                case ConsoleKey.Enter:
-                    if (selected.Count == 0)
-                    {
-                        _console.WriteError("Select at least one service.");
-                        break;
-                    }
-
-                    _console.WriteLine();
-                    return services.Where(selected.Contains).ToArray();
             }
         }
     }
@@ -1626,23 +1712,6 @@ public sealed partial class CliApplication
             Path = routePath,
             HealthPath = healthPath
         };
-    }
-
-    private void RenderServiceMultiSelect(IReadOnlyList<string> services, ISet<string> selected, int selectedIndex, int previousLineCount)
-    {
-        ClearPreviousInteractiveRender(previousLineCount);
-
-        _console.WriteLine("Services:");
-        _console.WriteLine("Use Up/Down, Space to toggle, Enter to deploy.");
-        var allMarker = selectedIndex == 0 ? ">" : " ";
-        var allChecked = selected.Count == services.Count ? "x" : " ";
-        _console.WriteLine($"{allMarker} [{allChecked}] all");
-        for (var i = 0; i < services.Count; i++)
-        {
-            var marker = selectedIndex == i + 1 ? ">" : " ";
-            var checkedValue = selected.Contains(services[i]) ? "x" : " ";
-            _console.WriteLine($"{marker} [{checkedValue}] {services[i]}");
-        }
     }
 
     private void RenderSingleSelect(string label, IReadOnlyList<(string Value, string Label)> choices, int selectedIndex, int previousLineCount)

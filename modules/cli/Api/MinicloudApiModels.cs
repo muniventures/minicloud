@@ -64,7 +64,8 @@ public sealed record AppServiceInventoryResponse(
     string Path,
     string HealthPath,
     RuntimeServiceStatusResponse? Runtime,
-    IReadOnlyList<DomainBindingResponse> Domains);
+    IReadOnlyList<DomainBindingResponse> Domains,
+    string? Sha256 = null);
 
 public sealed record RuntimeServiceStatusResponse(
     string Name,
@@ -123,7 +124,8 @@ public sealed record DeploymentServiceRequest(
     string HealthPath,
     IReadOnlyDictionary<string, string>? Env = null,
     IReadOnlyDictionary<string, string>? SecretEnv = null,
-    string? ArtifactId = null);
+    string? ArtifactId = null,
+    string? Sha256 = null);
 
 public sealed record CreateDeploymentArtifactRequest(
     string AppId,
@@ -199,7 +201,8 @@ public sealed record DeploymentServiceResponse(
     bool Public,
     string Path,
     string HealthPath,
-    IReadOnlyList<string>? Urls = null);
+    IReadOnlyList<string>? Urls = null,
+    string? Sha256 = null);
 
 public sealed record DeploymentEventResponse(
     string Id,
