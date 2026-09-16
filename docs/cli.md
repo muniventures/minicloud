@@ -464,6 +464,29 @@ minicloud domains delete --app <app> --hostname <host>
 `domains list` includes each hostname's service, status, runtime apply state,
 TLS state, last applied timestamp, and last updated timestamp.
 
+## Version And Help
+
+Check the installed CLI version:
+
+```bash
+minicloud --version
+minicloud -v
+```
+
+View CLI help, available commands, and options:
+
+```bash
+minicloud help
+minicloud --help
+```
+
+Get detailed help for a specific command:
+
+```bash
+minicloud help deploy
+minicloud deploy --help
+```
+
 ## Environment Defaults
 
 Show CLI environment defaults:

@@ -54,7 +54,8 @@ public sealed record DomainBindingResponse(
     string? FailureMessage,
     DateTimeOffset? LastAppliedAt,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    bool IsPrimary = false);
 
 public sealed record AppServiceInventoryResponse(
     string Name,
