@@ -3,6 +3,7 @@ using Minicloud.Cli;
 using Minicloud.Cli.Api;
 using Minicloud.Cli.Auth;
 using Minicloud.Cli.Commands;
+using Minicloud.Cli.Config;
 
 namespace Minicloud.Tests;
 
@@ -91,6 +92,73 @@ public sealed class CliInitCommandTests
         }
     }
 
+    [Theory]
+    [InlineData("app_denied", "as-tools")]
+    [InlineData("app_123", "old-name")]
+    public async Task Init_relinks_without_replacing_service_settings(string oldId, string oldSlug)
+    {
+        var directory = Directory.CreateTempSubdirectory("minicloud-cli-relink-");
+        try
+        {
+            var original = $"""
+                # Keep this comment and formatting
+                app: {oldSlug}
+                appId: {oldId} # app binding
+                database: postgres
+                services:
+                  api:
+                    sourcePath: .
+                    dockerfile: modules/api/Dockerfile
+                    port: 8000
+                    public: false
+                    path: /
+                    healthPath: /docs
+                    env:
+                      EXAMPLE: "preserve me"
+                    secretEnv:
+                      API_KEY: stored_key
+                """;
+            var path = Path.Combine(directory.FullName, "minicloud.yml");
+            await File.WriteAllTextAsync(path, original);
+            Assert.True(MinicloudConfigLoader.Load(path).IsValid);
+            var handler = new InitApiHandler();
+            var console = new TestConsole(["y"]);
+            var environment = CliEnvironment.ForTests("https://api.example", directory.FullName);
+            var tokens = new TokenStore(environment);
+            tokens.SaveToken("mc_test");
+            var cli = new CliApplication(console, environment, tokens, new MinicloudApiClient(environment, tokens, new HttpClient(handler)));
+
+            var result = await cli.RunAsync(["init", "--config", path, "--app", "as-tools"], CancellationToken.None);
+
+            Assert.Equal(CliExitCodes.Success, result);
+            var expected = original;
+            if (oldId != "app_123")
+            {
+                expected = expected.Replace($"appId: {oldId}", "appId: \"app_123\"");
+            }
+            if (oldSlug != "as-tools")
+            {
+                expected = expected.Replace($"app: {oldSlug}", "app: \"as-tools\"");
+            }
+            Assert.Equal(expected, await File.ReadAllTextAsync(path));
+            Assert.DoesNotContain("Services:", console.Output);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void Relink_preserves_comments_quoted_keys_and_line_endings(string newline)
+    {
+        var yaml = string.Join(newline, "# Header", "'app': 'old' # name", "appId: old_id # identity", "services: {}", "");
+        var result = MinicloudConfigWriter.UpdateAppIdentity(yaml, "new", "new_id");
+        Assert.Equal(yaml.Replace("'old'", "\"new\"").Replace("old_id", "\"new_id\""), result);
+    }
+
     private sealed class InitApiHandler : HttpMessageHandler
     {
         public List<string> Requests { get; } = [];
@@ -98,6 +166,20 @@ public sealed class CliInitCommandTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests.Add($"{request.Method.Method} {request.RequestUri!.PathAndQuery}");
+            if (request.RequestUri.AbsolutePath == "/v1/me")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{"userId":"usr_1","email":"dev@example.com","organizations":[{"id":"org_123","name":"Test","slug":"test","role":"owner"}]}""")
+                });
+            }
+            if (request.RequestUri.PathAndQuery == "/v1/apps?organizationId=org_123")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""[{"id":"app_123","organizationId":"org_123","name":"AS Tools","slug":"as-tools","plan":"p0","database":"none","branches":[]}]""")
+                });
+            }
             if (request.RequestUri.PathAndQuery == "/v1/apps/app_denied")
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden)

@@ -1,9 +1,41 @@
 using System.Text;
+using System.Text.Json;
+using YamlDotNet.RepresentationModel;
 
 namespace Minicloud.Cli.Config;
 
 public static class MinicloudConfigWriter
 {
+    public static string UpdateAppIdentity(string yaml, string app, string appId)
+    {
+        var stream = new YamlStream();
+        stream.Load(new StringReader(yaml));
+        var root = (YamlMappingNode)stream.Documents.Single().RootNode;
+        var replacements = new List<(int Start, int Length, string Value)>();
+        foreach (var (key, value) in root.Children)
+        {
+            var replacement = (key as YamlScalarNode)?.Value switch
+            {
+                "app" => app,
+                "appId" => appId,
+                _ => null
+            };
+            if (replacement is null || value is not YamlScalarNode scalar || scalar.Value == replacement)
+            {
+                continue;
+            }
+
+            replacements.Add(((int)value.Start.Index, (int)(value.End.Index - value.Start.Index), JsonSerializer.Serialize(replacement)));
+        }
+
+        foreach (var replacement in replacements.OrderByDescending(item => item.Start))
+        {
+            yaml = yaml.Remove(replacement.Start, replacement.Length).Insert(replacement.Start, replacement.Value);
+        }
+
+        return yaml;
+    }
+
     public static string Write(MinicloudConfig config)
     {
         var builder = new StringBuilder();
