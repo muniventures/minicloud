@@ -69,10 +69,10 @@ public sealed class CliDeploymentPollingTests
             var exitCode = await app.RunAsync(["deploy", "--no-publish", "--config", configPath], CancellationToken.None);
 
             Assert.Equal(CliExitCodes.Success, exitCode);
-            Assert.Contains("Minicloud deployment dep_deploy_123", console.Output);
-            Assert.Contains("Network connection lost. Waiting to reconnect...", console.Output);
-            Assert.Contains("Connection restored.", console.Output);
-            Assert.Contains("Status: succeeded", console.Output);
+            Assert.Contains("Deploy: created deployment dep_deploy_123", console.Output);
+            Assert.Contains("Deploy: network connection lost, waiting to reconnect...", console.Output);
+            Assert.Contains("Deploy: connection restored", console.Output);
+            Assert.Contains("Deploy: succeeded", console.Output);
             Assert.Contains("Service URL (web): https://web.example", console.Output);
         }
         finally

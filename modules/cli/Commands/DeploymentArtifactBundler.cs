@@ -62,6 +62,14 @@ internal static class DeploymentArtifactBundler
             .OrderBy(path => RelativeArchivePath(sourceRoot, path), StringComparer.Ordinal)
             .ToList();
 
+        if (files.Any(path => string.Equals(
+                RelativeArchivePath(sourceRoot, path), ManifestEntryName, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new CliCommandException(
+                CliExitCodes.ValidationError,
+                $"Artifact source for service '{serviceName}' contains reserved file '{ManifestEntryName}'.");
+        }
+
         var dockerfileFullPath = Path.GetFullPath(dockerfilePath);
         var dockerfileEntryPath = IsUnderDirectory(sourceRoot, dockerfileFullPath)
             ? RelativeArchivePath(sourceRoot, dockerfileFullPath)
@@ -105,7 +113,8 @@ internal static class DeploymentArtifactBundler
                 commitSha,
                 files.Count,
                 sourceBytes,
-                DateTimeOffset.UtcNow);
+                DateTimeOffset.UtcNow,
+                service.BuildEnv);
             var manifestEntry = zip.CreateEntry(ManifestEntryName, CompressionLevel.Optimal);
             using var manifestStream = manifestEntry.Open();
             JsonSerializer.Serialize(manifestStream, manifest, JsonOptions);

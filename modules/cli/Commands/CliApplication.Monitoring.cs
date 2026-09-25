@@ -113,7 +113,11 @@ public sealed partial class CliApplication
         return CliExitCodes.Success;
     }
 
-    private async Task<DeploymentResponse> PollDeploymentAsync(string deploymentId, string initialStatus, CancellationToken cancellationToken)
+    private async Task<DeploymentResponse> PollDeploymentAsync(
+        string deploymentId,
+        string initialStatus,
+        CancellationToken cancellationToken,
+        Rendering.IDeploymentRenderer? renderer = null)
     {
         var lastStatus = initialStatus;
         string? lastConsoleUrl = null;
@@ -128,7 +132,14 @@ public sealed partial class CliApplication
                 deployment = await _apiClient.RefreshDeploymentAsync(deploymentId, cancellationToken);
                 if (reportedInterruption)
                 {
-                    _console.WriteLine("Connection restored.");
+                    if (renderer != null)
+                    {
+                        renderer.DeploymentReconnected(deploymentId, deployment.Status);
+                    }
+                    else
+                    {
+                        _console.WriteLine("Connection restored.");
+                    }
                     reportedInterruption = false;
                 }
             }
@@ -136,7 +147,14 @@ public sealed partial class CliApplication
             {
                 if (!reportedInterruption)
                 {
-                    _console.WriteLine("Network connection lost. Waiting to reconnect...");
+                    if (renderer != null)
+                    {
+                        renderer.DeploymentReconnecting();
+                    }
+                    else
+                    {
+                        _console.WriteLine("Network connection lost. Waiting to reconnect...");
+                    }
                     reportedInterruption = true;
                 }
 
@@ -145,12 +163,22 @@ public sealed partial class CliApplication
 
             if (deployment.Status != lastStatus)
             {
-                _console.WriteLine($"Status: {deployment.Status}");
+                if (renderer != null)
+                {
+                    renderer.DeploymentStatusUpdated(deployment.Id, deployment.Status, deployment.ConsoleUrl);
+                }
+                else
+                {
+                    _console.WriteLine($"Status: {deployment.Status}");
+                }
                 lastStatus = deployment.Status;
             }
             if (!string.IsNullOrWhiteSpace(deployment.ConsoleUrl) && deployment.ConsoleUrl != lastConsoleUrl)
             {
-                WriteUrlLine("Console", deployment.ConsoleUrl);
+                if (renderer == null)
+                {
+                    WriteUrlLine("Console", deployment.ConsoleUrl);
+                }
                 lastConsoleUrl = deployment.ConsoleUrl;
             }
 

@@ -342,7 +342,7 @@ public sealed partial class CliApplication
         WriteMissingDockerfileWarning(service.Name, config);
         if (advanced)
         {
-            config = PromptAdvancedServiceOptions(appSlug, service.Name, config);
+            config = PromptAdvancedServiceOptions(service.Name, config);
         }
 
         if (service.ExposedPorts.Count > 1 && !advanced)
@@ -377,11 +377,10 @@ public sealed partial class CliApplication
         return ServiceDetection.WithDockerfilePorts(service, EffectiveDockerfilePath(service.ToConfig()));
     }
 
-    private MinicloudServiceConfig PromptAdvancedServiceOptions(string appSlug, string serviceName, MinicloudServiceConfig config)
+    private MinicloudServiceConfig PromptAdvancedServiceOptions(string serviceName, MinicloudServiceConfig config)
     {
         var defaults = DefaultServiceOptions(serviceName);
-        var imageDefault = $"{_environment.RegistryHost}/{appSlug}/{serviceName}:latest";
-        var image = PromptOptional($"{ToTitle(serviceName)} push image", imageDefault);
+        var image = PromptOptional($"{ToTitle(serviceName)} pre-built image (optional)", config.Image ?? "none");
         var port = PromptPort($"{ToTitle(serviceName)} port", config.Port ?? defaults.Port);
         var routePath = PromptPath($"{ToTitle(serviceName)} public path", config.Path ?? defaults.Path);
         var healthPath = PromptPath($"{ToTitle(serviceName)} health path", config.HealthPath ?? defaults.HealthPath);

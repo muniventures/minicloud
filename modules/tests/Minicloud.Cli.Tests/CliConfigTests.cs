@@ -1,6 +1,7 @@
 using Minicloud.Cli.Config;
 using Minicloud.Cli.Commands;
 using System.IO.Compression;
+using System.Text.Json;
 
 namespace Minicloud.Tests;
 
@@ -443,6 +444,10 @@ public sealed class CliConfigTests
                     SecretEnv = new Dictionary<string, string>(StringComparer.Ordinal)
                     {
                         ["MAPBOX_ACCESS_TOKEN"] = "MAPBOX_ACCESS_TOKEN"
+                    },
+                    BuildEnv = new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["VITE_PUBLIC_API_URL"] = "https://api.example.test"
                     }
                 }
             })
@@ -460,6 +465,7 @@ public sealed class CliConfigTests
         Assert.Equal("ghcr.io/customer/teamcore-backend:latest", result.Config.Services["backend"].Image);
         Assert.Equal("Production", result.Config.Services["backend"].Env?["ASPNETCORE_ENVIRONMENT"]);
         Assert.Equal("MAPBOX_ACCESS_TOKEN", result.Config.Services["backend"].SecretEnv?["MAPBOX_ACCESS_TOKEN"]);
+        Assert.Equal("https://api.example.test", result.Config.Services["backend"].BuildEnv?["VITE_PUBLIC_API_URL"]);
     }
 
     [Fact]
@@ -752,10 +758,10 @@ public sealed class CliConfigTests
             "    public: true",
             "    path: /",
             "    healthPath: /",
-            "  registry:",
-            "    sourcePath: modules/registry",
-            "    image: ghcr.io/minicloud/registry:latest",
-            "    port: 5000",
+            "  worker:",
+            "    sourcePath: modules/worker",
+            "    image: ghcr.io/minicloud/worker:latest",
+            "    port: 8080",
             "    public: false",
             "    path: /",
             "    healthPath: /health"
@@ -828,7 +834,11 @@ public sealed class CliConfigTests
         {
             File.WriteAllText(Path.Combine(tempDirectory.FullName, "app.js"), "console.log('ok');");
             File.WriteAllText(Path.Combine(tempDirectory.FullName, "Dockerfile"), "FROM node:22-alpine\nEXPOSE 3000\nCMD [\"node\", \"app.js\"]\n");
-            var service = new MinicloudServiceConfig(tempDirectory.FullName, null, null, 3000, true, "/", "/health");
+            var service = new MinicloudServiceConfig(tempDirectory.FullName, null, null, 3000, true, "/", "/health")
+            {
+                BuildEnv = new Dictionary<string, string> { ["VITE_PUBLIC_API_URL"] = "https://api.example.test" },
+                SecretEnv = new Dictionary<string, string> { ["DATABASE_URL"] = "DATABASE_URL" }
+            };
 
             var bundle = DeploymentArtifactBundler.Create("app_123", "web", service, "abc123", tempDirectory.FullName);
             using (var archive = ZipFile.OpenRead(bundle.ZipPath))
@@ -840,6 +850,8 @@ public sealed class CliConfigTests
 
             Assert.Equal("app_123", bundle.Manifest.AppId);
             Assert.Equal("web", bundle.Manifest.ServiceName);
+            Assert.Equal("https://api.example.test", bundle.Manifest.BuildEnv?["VITE_PUBLIC_API_URL"]);
+            Assert.DoesNotContain("DATABASE_URL", JsonSerializer.Serialize(bundle.Manifest), StringComparison.Ordinal);
             Assert.Equal(2, bundle.Manifest.FileCount);
             Assert.Equal(64, bundle.Sha256.Length);
 
@@ -867,7 +879,15 @@ public sealed class CliConfigTests
                   }
                 }
                 """);
-            var service = new MinicloudServiceConfig(tempDirectory.FullName, null, null, 3000, true, "/", "/");
+            var service = new MinicloudServiceConfig(tempDirectory.FullName, null, null, 3000, true, "/", "/")
+            {
+                BuildEnv = new Dictionary<string, string>
+                {
+                    ["VITE_PUBLIC_API_URL"] = "https://api.example.test",
+                    ["VITE_RELEASE"] = "test"
+                },
+                SecretEnv = new Dictionary<string, string> { ["API_TOKEN"] = "API_TOKEN" }
+            };
 
             var generated = DockerfileGenerator.TryWriteDockerfile(service, out var dockerfilePath, out var reason);
 
@@ -876,7 +896,11 @@ public sealed class CliConfigTests
             Assert.Equal(Path.Combine(tempDirectory.FullName, "Dockerfile"), dockerfilePath);
             var dockerfile = File.ReadAllText(dockerfilePath);
             Assert.Contains("npm run build", dockerfile, StringComparison.Ordinal);
-            Assert.Contains("""CMD ["sh", "-c", "npm run build && npx vite preview --host 0.0.0.0 --port 3000"]""", dockerfile, StringComparison.Ordinal);
+            Assert.Contains("ARG VITE_PUBLIC_API_URL", dockerfile, StringComparison.Ordinal);
+            Assert.Contains("ARG VITE_RELEASE", dockerfile, StringComparison.Ordinal);
+            Assert.DoesNotContain("API_TOKEN", dockerfile, StringComparison.Ordinal);
+            Assert.Contains("""CMD ["serve", "-s", "dist", "-l", "3000"]""", dockerfile, StringComparison.Ordinal);
+            Assert.DoesNotContain("npm run build &&", dockerfile, StringComparison.Ordinal);
             Assert.Empty(CliApplication.ValidateDockerfileForService("frontend", service));
         }
         finally
@@ -898,6 +922,39 @@ public sealed class CliConfigTests
             Assert.False(generated);
             Assert.Equal("unsupported project type", reason);
             Assert.False(File.Exists(Path.Combine(tempDirectory.FullName, "Dockerfile")));
+        }
+        finally
+        {
+            tempDirectory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Dockerfile_generator_writes_next_build_arguments_without_runtime_secrets()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory("minicloud-next-dockerfile-generator-test-");
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDirectory.FullName, "package.json"), """
+                {
+                  "name": "frontend",
+                  "dependencies": { "next": "15.5.0" }
+                }
+                """);
+            var service = new MinicloudServiceConfig(tempDirectory.FullName, null, null, 3000, true, "/", "/")
+            {
+                BuildEnv = new Dictionary<string, string> { ["NEXT_PUBLIC_API_URL"] = "https://api.example.test" },
+                SecretEnv = new Dictionary<string, string> { ["DATABASE_URL"] = "DATABASE_URL" }
+            };
+
+            Assert.True(DockerfileGenerator.TryWriteDockerfile(service, out var dockerfilePath, out var reason));
+            Assert.Null(reason);
+            var dockerfile = File.ReadAllText(dockerfilePath);
+            Assert.Contains("ARG NEXT_PUBLIC_API_URL", dockerfile, StringComparison.Ordinal);
+            Assert.Contains("RUN npm run build", dockerfile, StringComparison.Ordinal);
+            Assert.Contains("next start", dockerfile, StringComparison.Ordinal);
+            Assert.DoesNotContain("DATABASE_URL", dockerfile, StringComparison.Ordinal);
+            Assert.DoesNotContain("npm run build &&", dockerfile, StringComparison.Ordinal);
         }
         finally
         {

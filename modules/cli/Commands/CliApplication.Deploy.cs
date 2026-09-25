@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Collections.Concurrent;
 using Minicloud.Cli.Api;
 using Minicloud.Cli.Config;
 
@@ -76,9 +77,6 @@ public sealed partial class CliApplication
 
         config = FilterConfigServices(config, selectedServiceNames);
 
-        await SyncLocalSecretsAsync(app, config, cancellationToken);
-
-        IReadOnlyDictionary<string, string> serviceArtifactIds = new Dictionary<string, string>(StringComparer.Ordinal);
         if (!noPublish)
         {
             var deploymentModeDiagnostics = ValidateDeploymentSources(config);
@@ -87,8 +85,6 @@ public sealed partial class CliApplication
                 PrintDiagnostics(deploymentModeDiagnostics);
                 return CliExitCodes.ValidationError;
             }
-
-            serviceArtifactIds = await BundleAndUploadDeploymentArtifactsAsync(config, organization.Slug, app.Slug, cancellationToken);
         }
         else
         {
@@ -100,10 +96,45 @@ public sealed partial class CliApplication
             }
         }
 
+        var totalSecretsCount = CountLocalSecrets(config);
+        var sourceServices = config.Services
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Value.SourcePath))
+            .Select(x => x.Key)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+
+        var plan = new Rendering.DeploymentPlan(
+            HasSecretsStage: totalSecretsCount > 0,
+            TotalSecrets: totalSecretsCount,
+            HasArtifactsStage: !noPublish && sourceServices.Length > 0,
+            SourceServices: sourceServices,
+            HasDeployStage: true,
+            SelectedServicesCount: config.Services.Count);
+
+        await using var renderer = Rendering.DeploymentRendererFactory.Create(_console);
+        renderer.Initialize(plan);
+
+        if (totalSecretsCount > 0)
+        {
+            await SyncLocalSecretsAsync(app, config, renderer, cancellationToken);
+        }
+
+        IReadOnlyDictionary<string, string> serviceArtifactIds = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!noPublish)
+        {
+            serviceArtifactIds = await BundleAndUploadDeploymentArtifactsAsync(config, organization.Slug, app.Slug, renderer, cancellationToken);
+        }
+
+        renderer.DeploymentCreationStarted();
+
+        var hashStartedAt = DateTimeOffset.UtcNow;
+        var hashTimer = Stopwatch.StartNew();
         var serviceHashes = config.Services.ToDictionary(
             x => x.Key,
             x => ServiceChecksumCalculator.Compute(x.Key, x.Value),
             StringComparer.Ordinal);
+        hashTimer.Stop();
+        WriteCliTiming("hash", hashStartedAt, hashTimer.Elapsed, config.Services.Count);
 
         var request = new CreateDeploymentRequest(
             app.Id,
@@ -112,7 +143,7 @@ public sealed partial class CliApplication
             config.Services.Select(x => new DeploymentServiceRequest(
                 x.Key,
                 noPublish || !serviceArtifactIds.ContainsKey(x.Key)
-                    ? DeploymentImageForService(x.Value, organization.Slug)
+                    ? x.Value.Image
                     : null,
                 x.Value.Port!.Value,
                 x.Value.Public!.Value,
@@ -125,28 +156,34 @@ public sealed partial class CliApplication
             postgresPassword);
 
         var created = await _apiClient.CreateDeploymentAsync(request, cancellationToken);
-        _console.WriteLine($"Minicloud deployment {created.Id}");
-        _console.WriteLine($"Status: {created.Status}");
-        if (!string.IsNullOrWhiteSpace(created.PostgresPassword))
-        {
-            _console.WriteLine($"Postgres password: {created.PostgresPassword}");
-        }
+        renderer.DeploymentCreated(created.Id, created.Status);
 
-        var finalDeployment = await PollDeploymentAsync(created.Id, created.Status, cancellationToken);
+        var finalDeployment = await PollDeploymentAsync(created.Id, created.Status, cancellationToken, renderer);
         if (finalDeployment.Status == "succeeded")
         {
-            PrintServiceUrls(finalDeployment.Services);
+            var publicUrls = new List<(string ServiceName, string Url)>();
+            foreach (var service in finalDeployment.Services.OrderBy(x => x.Name, StringComparer.Ordinal))
+            {
+                foreach (var url in (service.Urls ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().OrderBy(x => x, StringComparer.Ordinal))
+                {
+                    publicUrls.Add((service.Name, url));
+                }
+            }
+
+            renderer.DeploymentSucceeded(new Rendering.DeploymentSuccessResult(
+                finalDeployment.Services.Count,
+                finalDeployment.ConsoleUrl,
+                publicUrls));
 
             return CliExitCodes.Success;
         }
 
-        _console.WriteLine($"Failure: {finalDeployment.FailureCode ?? finalDeployment.Status}");
-        if (!string.IsNullOrWhiteSpace(finalDeployment.FailureMessage))
-        {
-            _console.WriteLine($"Message: {finalDeployment.FailureMessage}");
-        }
+        renderer.DeploymentFailed(new Rendering.DeploymentFailureResult(
+            finalDeployment.Id,
+            finalDeployment.FailureCode ?? finalDeployment.Status,
+            finalDeployment.FailureMessage,
+            finalDeployment.ConsoleUrl));
 
-        _console.WriteLine($"Logs: minicloud logs {finalDeployment.Id}");
         return CliExitCodes.DeploymentFailed;
     }
 
@@ -319,10 +356,14 @@ public sealed partial class CliApplication
             return requestedServiceNames.Distinct(StringComparer.Ordinal).ToArray();
         }
 
+        var hashStartedAt = DateTimeOffset.UtcNow;
+        var hashTimer = Stopwatch.StartNew();
         var computedHashes = config.Services.ToDictionary(
             x => x.Key,
             x => ServiceChecksumCalculator.Compute(x.Key, x.Value),
             StringComparer.Ordinal);
+        hashTimer.Stop();
+        WriteCliTiming("change_detection_hash", hashStartedAt, hashTimer.Elapsed, config.Services.Count);
 
         IReadOnlyList<AppServiceInventoryResponse> activeServices;
         try
@@ -382,7 +423,20 @@ public sealed partial class CliApplication
         };
     }
 
-    private async Task SyncLocalSecretsAsync(AppResponse app, MinicloudConfig config, CancellationToken cancellationToken)
+    private static int CountLocalSecrets(MinicloudConfig config)
+    {
+        var total = 0;
+        foreach (var (_, service) in config.Services)
+        {
+            if (string.IsNullOrWhiteSpace(service.SourcePath)) continue;
+            var path = Path.Combine(service.SourcePath, LocalSecretsFile.FileName);
+            if (!File.Exists(path)) continue;
+            total += LocalSecretsFile.Parse(path).Count;
+        }
+        return total;
+    }
+
+    private async Task SyncLocalSecretsAsync(AppResponse app, MinicloudConfig config, Rendering.IDeploymentRenderer renderer, CancellationToken cancellationToken)
     {
         foreach (var (serviceName, service) in config.Services)
         {
@@ -403,11 +457,11 @@ public sealed partial class CliApplication
                 continue;
             }
 
-            _console.WriteLine($"Syncing local secrets for {serviceName}: {secrets.Count}");
             foreach (var (name, value) in secrets)
             {
+                renderer.SecretStarted(serviceName, name);
                 await _apiClient.SetSecretAsync(app.Id, new SetAppServiceSecretRequest(serviceName, name, value), cancellationToken);
-                _console.WriteLine($"Secret saved: {serviceName}/{name}");
+                renderer.SecretCompleted(serviceName, name);
             }
         }
     }
@@ -416,23 +470,20 @@ public sealed partial class CliApplication
         MinicloudConfig config,
         string organizationSlug,
         string appSlug,
+        Rendering.IDeploymentRenderer renderer,
         CancellationToken cancellationToken)
     {
-        var artifactIds = new Dictionary<string, string>(StringComparer.Ordinal);
-        var outputDirectory = Path.Combine(Path.GetTempPath(), "minicloud-artifacts");
-        foreach (var (serviceName, service) in config.Services)
-        {
-            if (string.IsNullOrWhiteSpace(service.SourcePath))
-            {
-                continue;
-            }
+        var sourceServices = config.Services
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Value.SourcePath))
+            .ToArray();
 
-            _console.WriteLine($"Bundling artifact: {serviceName}");
+        foreach (var (serviceName, service) in sourceServices)
+        {
             if (!File.Exists(EffectiveDockerfilePath(service)))
             {
                 if (DockerfileGenerator.TryWriteDockerfile(service, out var generatedDockerfilePath, out var generationReason))
                 {
-                    _console.WriteLine($"Generated Dockerfile for {serviceName}: {generatedDockerfilePath}");
+                    // Generated Dockerfile
                 }
                 else if (!string.IsNullOrWhiteSpace(generationReason))
                 {
@@ -457,30 +508,90 @@ public sealed partial class CliApplication
                 PrintDiagnostics(frameworkDiagnostics);
                 throw new CliCommandException(CliExitCodes.ValidationError, "Framework deployment validation failed.");
             }
+        }
 
-            var bundle = DeploymentArtifactBundler.Create(config.AppId!, serviceName, service, config.CommitSha, outputDirectory);
-            try
-            {
-                _console.WriteLine($"Uploading artifact: {serviceName} ({bundle.SizeBytes} bytes, sha256 {bundle.Sha256})");
-                var createRequest = new CreateDeploymentArtifactRequest(
-                    config.AppId!,
-                    serviceName,
-                    Path.GetFileName(bundle.ZipPath),
-                    "application/zip",
-                    bundle.SizeBytes,
-                    bundle.Sha256,
-                    bundle.Manifest);
-                var created = await _apiClient.CreateDeploymentArtifactAsync(createRequest, cancellationToken);
-                var uploaded = await _apiClient.UploadDeploymentArtifactContentAsync(created.Id, created.UploadUrl, bundle.ZipPath, bundle.Sha256, bundle.SizeBytes, cancellationToken);
-                artifactIds[serviceName] = uploaded.Id;
-            }
-            finally
+        var artifactIds = new ConcurrentDictionary<string, string>(StringComparer.Ordinal);
+        var bundles = new ConcurrentDictionary<string, DeploymentArtifactBundle>(StringComparer.Ordinal);
+        var effectiveConcurrency = Math.Min(2, sourceServices.Length);
+        var artifactStartedAt = DateTimeOffset.UtcNow;
+        var artifactTimer = Stopwatch.StartNew();
+        _timingSink.RecordTiming($"Timing: phase=artifact_prepare started_at={artifactStartedAt:O} items={sourceServices.Length} effective_concurrency={effectiveConcurrency}");
+        var outputDirectory = Path.Combine(Path.GetTempPath(), "minicloud-artifacts", Guid.NewGuid().ToString("N"));
+        try
+        {
+            await Parallel.ForEachAsync(
+                sourceServices,
+                new ParallelOptions { CancellationToken = cancellationToken, MaxDegreeOfParallelism = 2 },
+                async (pair, ct) =>
+                {
+                    var (serviceName, service) = pair;
+                    var bundleStartedAt = DateTimeOffset.UtcNow;
+                    var bundleTimer = Stopwatch.StartNew();
+                    renderer.ArtifactPackageStarted(serviceName);
+                    var bundle = DeploymentArtifactBundler.Create(config.AppId!, serviceName, service, config.CommitSha, outputDirectory);
+                    bundleTimer.Stop();
+                    _timingSink.RecordTiming($"Timing: phase=package service={serviceName} started_at={bundleStartedAt:O} duration_ms={bundleTimer.ElapsedMilliseconds} artifact_bytes={bundle.SizeBytes} outcome=succeeded");
+                    bundles[serviceName] = bundle;
+                    renderer.ArtifactPackageCompleted(serviceName, bundle.SizeBytes);
+                    await Task.CompletedTask;
+                });
+
+            await Parallel.ForEachAsync(
+                sourceServices,
+                new ParallelOptions { CancellationToken = cancellationToken, MaxDegreeOfParallelism = 2 },
+                async (pair, ct) =>
+                {
+                    var (serviceName, _) = pair;
+                    var bundle = bundles[serviceName];
+                    renderer.ArtifactUploadStarted(serviceName, bundle.SizeBytes);
+                    var createRequest = new CreateDeploymentArtifactRequest(
+                        config.AppId!,
+                        serviceName,
+                        Path.GetFileName(bundle.ZipPath),
+                        "application/zip",
+                        bundle.SizeBytes,
+                        bundle.Sha256,
+                        bundle.Manifest);
+                    var uploadStartedAt = DateTimeOffset.UtcNow;
+                    var uploadTimer = Stopwatch.StartNew();
+                    var created = await _apiClient.CreateDeploymentArtifactAsync(createRequest, ct);
+                    var uploaded = await _apiClient.UploadDeploymentArtifactContentAsync(
+                        created.Id, created.UploadUrl, bundle.ZipPath, bundle.Sha256, bundle.SizeBytes, ct);
+                    uploadTimer.Stop();
+                    _timingSink.RecordTiming($"Timing: phase=upload service={serviceName} started_at={uploadStartedAt:O} duration_ms={uploadTimer.ElapsedMilliseconds} artifact_bytes={bundle.SizeBytes} outcome=succeeded");
+                    renderer.ArtifactUploadCompleted(serviceName, bundle.SizeBytes);
+                    artifactIds[serviceName] = uploaded.Id;
+                });
+        }
+        finally
+        {
+            foreach (var bundle in bundles.Values)
             {
                 TryDeleteFile(bundle.ZipPath);
             }
+            artifactTimer.Stop();
+            _timingSink.RecordTiming($"Timing: phase=artifact_prepare started_at={artifactStartedAt:O} duration_ms={artifactTimer.ElapsedMilliseconds} items={sourceServices.Length} effective_concurrency={effectiveConcurrency} outcome={(artifactIds.Count == sourceServices.Length ? "succeeded" : "incomplete")}");
+            try
+            {
+                if (Directory.Exists(outputDirectory)) Directory.Delete(outputDirectory, recursive: true);
+            }
+            catch
+            {
+                // Best-effort cleanup only after all workers have stopped.
+            }
         }
 
-        return artifactIds;
+        return new Dictionary<string, string>(artifactIds, StringComparer.Ordinal);
+    }
+
+    private void WriteCliTiming(string phase, DateTimeOffset startedAt, TimeSpan elapsed, int itemCount)
+    {
+        var line = $"Timing: phase={phase} started_at={startedAt:O} duration_ms={(long)elapsed.TotalMilliseconds} items={itemCount} outcome=succeeded";
+        _timingSink.RecordTiming(line);
+        if (phase == "change_detection_hash")
+        {
+            _console.WriteLine(line);
+        }
     }
 
     private IReadOnlyList<ConfigDiagnostic> ValidateDeploymentSources(MinicloudConfig config)
@@ -595,6 +706,4 @@ public sealed partial class CliApplication
         return diagnostics;
     }
 
-    private string DeploymentImageForService(MinicloudServiceConfig service, string organizationSlug) =>
-        _registryImageMapper.RuntimeImageForDeployment(service.Image!, organizationSlug);
 }

@@ -96,6 +96,15 @@ public static class MinicloudConfigWriter
                     builder.AppendLine($"      {Escape(key)}: {Escape(value)}");
                 }
             }
+
+            if (service.BuildEnv is { Count: > 0 })
+            {
+                builder.AppendLine("    buildEnv:");
+                foreach (var (key, value) in service.BuildEnv)
+                {
+                    builder.AppendLine($"      {Escape(key)}: {Escape(value)}");
+                }
+            }
         }
 
         return builder.ToString();

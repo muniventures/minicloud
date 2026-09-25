@@ -18,7 +18,8 @@ public sealed record MinicloudServiceConfig(
     string? Path,
     string? HealthPath,
     IReadOnlyDictionary<string, string>? Env = null,
-    IReadOnlyDictionary<string, string>? SecretEnv = null);
+    IReadOnlyDictionary<string, string>? SecretEnv = null,
+    IReadOnlyDictionary<string, string>? BuildEnv = null);
 
 public sealed record ConfigDiagnostic(string Field, string Message);
 

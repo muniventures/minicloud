@@ -85,11 +85,28 @@ public static class MinicloudConfigValidator
                 }
             }
 
+            if (service.BuildEnv is not null)
+            {
+                foreach (var (envKey, envValue) in service.BuildEnv)
+                {
+                    ValidateEnvironmentEntry(diagnostics, $"services.{name}.buildEnv", envKey, envValue, "Build environment variable");
+                }
+            }
+
             if (service.Env is not null && service.SecretEnv is not null)
             {
                 foreach (var duplicate in service.Env.Keys.Intersect(service.SecretEnv.Keys, StringComparer.Ordinal))
                 {
                     diagnostics.Add(new ConfigDiagnostic($"services.{name}.secretEnv.{duplicate}", "Environment variables cannot be defined in both env and secretEnv."));
+                }
+            }
+
+
+            if (service.BuildEnv is not null && service.SecretEnv is not null)
+            {
+                foreach (var duplicate in service.BuildEnv.Keys.Intersect(service.SecretEnv.Keys, StringComparer.Ordinal))
+                {
+                    diagnostics.Add(new ConfigDiagnostic($"services.{name}.buildEnv.{duplicate}", "Build environment variables cannot reference secretEnv entries."));
                 }
             }
         }

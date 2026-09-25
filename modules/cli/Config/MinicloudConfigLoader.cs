@@ -144,7 +144,8 @@ public static partial class MinicloudConfigLoader
                 GetScalar(serviceMapping, "path", $"services.{serviceName}.path", diagnostics),
                 GetScalar(serviceMapping, "healthPath", $"services.{serviceName}.healthPath", diagnostics),
                 GetEnvironment(serviceMapping, serviceName, "env", diagnostics),
-                GetEnvironment(serviceMapping, serviceName, "secretEnv", diagnostics));
+                GetEnvironment(serviceMapping, serviceName, "secretEnv", diagnostics),
+                GetEnvironment(serviceMapping, serviceName, "buildEnv", diagnostics));
         }
 
         return services;

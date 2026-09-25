@@ -22,15 +22,22 @@ public sealed partial class CliApplication
     private readonly CliEnvironment _environment;
     private readonly TokenStore _tokenStore;
     private readonly MinicloudApiClient _apiClient;
-    private readonly RegistryImageMapper _registryImageMapper;
+    private readonly Rendering.IDeploymentTimingSink _timingSink;
 
-    public CliApplication(IConsole console, CliEnvironment environment, TokenStore tokenStore, MinicloudApiClient apiClient)
+    public Rendering.IDeploymentTimingSink TimingSink => _timingSink;
+
+    public CliApplication(
+        IConsole console,
+        CliEnvironment environment,
+        TokenStore tokenStore,
+        MinicloudApiClient apiClient,
+        Rendering.IDeploymentTimingSink? timingSink = null)
     {
         _console = console;
         _environment = environment;
         _tokenStore = tokenStore;
         _apiClient = apiClient;
-        _registryImageMapper = new RegistryImageMapper(environment);
+        _timingSink = timingSink ?? new Rendering.DeploymentTimingSink();
     }
 
     public async Task<int> RunAsync(string[] args, CancellationToken cancellationToken)

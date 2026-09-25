@@ -169,7 +169,8 @@ public sealed record DeploymentArtifactManifest(
     string? CommitSha,
     int FileCount,
     long SourceBytes,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    IReadOnlyDictionary<string, string>? BuildEnv = null);
 
 public sealed record DeploymentCreateResponse(
     string Id,

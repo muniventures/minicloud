@@ -18,7 +18,7 @@ public sealed class CliDeploymentChangeDetectionTests
         {
             var webDir = Directory.CreateDirectory(Path.Combine(directory.FullName, "web"));
             File.WriteAllText(Path.Combine(webDir.FullName, "index.js"), "console.log('web');");
-            File.WriteAllText(Path.Combine(webDir.FullName, "Dockerfile"), "FROM node:20\nCMD [\"node\", \"index.js\"]");
+            File.WriteAllText(Path.Combine(webDir.FullName, "Dockerfile"), "FROM node:20\nEXPOSE 3000\nCMD [\"node\", \"index.js\"]");
 
             var configPath = Path.Combine(directory.FullName, "minicloud.yml");
             await File.WriteAllTextAsync(configPath, $$"""
@@ -51,8 +51,11 @@ public sealed class CliDeploymentChangeDetectionTests
 
             var exitCode = await app.RunAsync(["deploy", "--no-publish", "--config", configPath], CancellationToken.None);
 
-            Assert.Equal(CliExitCodes.Success, exitCode);
+            Assert.True(exitCode == CliExitCodes.Success, console.Output);
             Assert.Contains("No services have changed since the last deployment.", console.Output);
+            Assert.Contains("Timing: phase=change_detection_hash", console.Output);
+            Assert.Contains("duration_ms=", console.Output);
+            Assert.Contains("items=1 outcome=succeeded", console.Output);
             Assert.Equal(0, handler.DeploymentsCreatedCount);
         }
         finally
@@ -69,11 +72,11 @@ public sealed class CliDeploymentChangeDetectionTests
         {
             var webDir = Directory.CreateDirectory(Path.Combine(directory.FullName, "web"));
             File.WriteAllText(Path.Combine(webDir.FullName, "index.js"), "console.log('web');");
-            File.WriteAllText(Path.Combine(webDir.FullName, "Dockerfile"), "FROM node:20\nCMD [\"node\", \"index.js\"]");
+            File.WriteAllText(Path.Combine(webDir.FullName, "Dockerfile"), "FROM node:20\nEXPOSE 3000\nCMD [\"node\", \"index.js\"]");
 
             var apiDir = Directory.CreateDirectory(Path.Combine(directory.FullName, "api"));
             File.WriteAllText(Path.Combine(apiDir.FullName, "server.js"), "console.log('api');");
-            File.WriteAllText(Path.Combine(apiDir.FullName, "Dockerfile"), "FROM node:20\nCMD [\"node\", \"server.js\"]");
+            File.WriteAllText(Path.Combine(apiDir.FullName, "Dockerfile"), "FROM node:20\nEXPOSE 8080\nCMD [\"node\", \"server.js\"]");
 
             var configPath = Path.Combine(directory.FullName, "minicloud.yml");
             await File.WriteAllTextAsync(configPath, $$"""
@@ -114,13 +117,18 @@ public sealed class CliDeploymentChangeDetectionTests
             var client = new MinicloudApiClient(environment, tokens, new HttpClient(handler));
             var app = new CliApplication(console, environment, tokens, client);
 
-            var exitCode = await app.RunAsync(["deploy", "--no-publish", "--config", configPath], CancellationToken.None);
+            var exitCode = await app.RunAsync(["deploy", "--config", configPath], CancellationToken.None);
 
-            Assert.Equal(CliExitCodes.Success, exitCode);
+            Assert.True(exitCode == CliExitCodes.Success, console.Output);
             Assert.Contains("Deploying changed services: web (skipping unchanged: api)", console.Output);
             Assert.Equal(1, handler.DeploymentsCreatedCount);
             Assert.Single(handler.LastCreatedRequest!.Services);
             Assert.Equal("web", handler.LastCreatedRequest.Services[0].Name);
+            var timingTracePath = Environment.GetEnvironmentVariable("MINICLOUD_CLI_TIMING_TRACE_OUTPUT");
+            if (!string.IsNullOrWhiteSpace(timingTracePath))
+            {
+                await File.WriteAllTextAsync(timingTracePath, console.Output);
+            }
         }
         finally
         {
@@ -181,9 +189,108 @@ public sealed class CliDeploymentChangeDetectionTests
         }
     }
 
-    private sealed class ChangeDetectionHandler(IReadOnlyDictionary<string, string> deployedHashes) : HttpMessageHandler
+    [Fact]
+    public async Task Deploy_does_not_submit_when_artifact_upload_fails()
+    {
+        var directory = Directory.CreateTempSubdirectory("minicloud-upload-fail-");
+        try
+        {
+            var webDir = Directory.CreateDirectory(Path.Combine(directory.FullName, "web"));
+            await File.WriteAllTextAsync(Path.Combine(webDir.FullName, "index.js"), "console.log('web');");
+            await File.WriteAllTextAsync(Path.Combine(webDir.FullName, "Dockerfile"), "FROM node:20\nEXPOSE 3000\nCMD [\"node\", \"index.js\"]");
+            var configPath = Path.Combine(directory.FullName, "minicloud.yml");
+            await File.WriteAllTextAsync(configPath, $$"""
+                app: demo
+                appId: app_main
+                database: sqlite
+                services:
+                  web:
+                    sourcePath: {{webDir.FullName}}
+                    port: 3000
+                    public: false
+                    path: /
+                    healthPath: /health
+                """);
+
+            var console = new TestConsole();
+            var environment = CliEnvironment.ForTests("https://api.example", directory.FullName);
+            var tokens = new TokenStore(environment);
+            tokens.SaveToken("mc_test");
+            var handler = new ChangeDetectionHandler(new Dictionary<string, string>(), failArtifactUpload: true);
+            var app = new CliApplication(console, environment, tokens,
+                new MinicloudApiClient(environment, tokens, new HttpClient(handler)));
+
+            var exitCode = await app.RunAsync(["deploy", "web", "--config", configPath], CancellationToken.None);
+
+            Assert.True(exitCode == CliExitCodes.NetworkOrApiUnavailable, console.Output);
+            Assert.Equal(0, handler.DeploymentsCreatedCount);
+            Assert.Contains("API error", console.Output);
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task Deploy_does_not_create_any_artifact_when_later_bundle_fails()
+    {
+        var directory = Directory.CreateTempSubdirectory("minicloud-bundle-fail-");
+        try
+        {
+            var firstDir = Directory.CreateDirectory(Path.Combine(directory.FullName, "first"));
+            await File.WriteAllTextAsync(Path.Combine(firstDir.FullName, "index.js"), "console.log('first');");
+            await File.WriteAllTextAsync(Path.Combine(firstDir.FullName, "Dockerfile"), "FROM node:20\nEXPOSE 3000");
+            var secondDir = Directory.CreateDirectory(Path.Combine(directory.FullName, "second"));
+            await File.WriteAllTextAsync(Path.Combine(secondDir.FullName, "index.js"), "console.log('second');");
+            await File.WriteAllTextAsync(Path.Combine(secondDir.FullName, "Dockerfile"), "FROM node:20\nEXPOSE 4000");
+            await File.WriteAllTextAsync(Path.Combine(secondDir.FullName, DeploymentArtifactBundler.ManifestEntryName), "reserved");
+            var configPath = Path.Combine(directory.FullName, "minicloud.yml");
+            await File.WriteAllTextAsync(configPath, $$"""
+                app: demo
+                appId: app_main
+                database: sqlite
+                services:
+                  first:
+                    sourcePath: {{firstDir.FullName}}
+                    port: 3000
+                    public: false
+                    path: /
+                    healthPath: /health
+                  second:
+                    sourcePath: {{secondDir.FullName}}
+                    port: 4000
+                    public: false
+                    path: /
+                    healthPath: /health
+                """);
+
+            var console = new TestConsole();
+            var environment = CliEnvironment.ForTests("https://api.example", directory.FullName);
+            var tokens = new TokenStore(environment);
+            tokens.SaveToken("mc_test");
+            var handler = new ChangeDetectionHandler(new Dictionary<string, string>());
+            var app = new CliApplication(console, environment, tokens,
+                new MinicloudApiClient(environment, tokens, new HttpClient(handler)));
+
+            var exitCode = await app.RunAsync(["deploy", "all", "--config", configPath], CancellationToken.None);
+
+            Assert.Equal(CliExitCodes.ValidationError, exitCode);
+            Assert.Equal(0, handler.ArtifactsCreatedCount);
+            Assert.Equal(0, handler.DeploymentsCreatedCount);
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    private sealed class ChangeDetectionHandler(
+        IReadOnlyDictionary<string, string> deployedHashes,
+        bool failArtifactUpload = false) : HttpMessageHandler
     {
         public int DeploymentsCreatedCount { get; private set; }
+        public int ArtifactsCreatedCount { get; private set; }
         public CreateDeploymentRequest? LastCreatedRequest { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -254,6 +361,41 @@ public sealed class CliDeploymentChangeDetectionTests
                         status = "succeeded"
                     })
                 };
+            }
+
+            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/v1/artifacts")
+            {
+                ArtifactsCreatedCount++;
+                return new HttpResponseMessage(HttpStatusCode.Created)
+                {
+                    Content = JsonContent.Create(new
+                    {
+                        id = "art_upload_test",
+                        appId = "app_main",
+                        serviceName = "web",
+                        status = "uploading",
+                        uploadUrl = "/v1/artifacts/art_upload_test/file"
+                    })
+                };
+            }
+
+            if (request.Method == HttpMethod.Put && request.RequestUri!.AbsolutePath == "/v1/artifacts/art_upload_test/file")
+            {
+                return failArtifactUpload
+                    ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
+                    {
+                        Content = JsonContent.Create(new
+                        {
+                            error = new { code = "artifact_upload_failed", message = "simulated upload failure" }
+                        })
+                    }
+                    : new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = JsonContent.Create(new
+                        {
+                            id = "art_upload_test", appId = "app_main", serviceName = "web", status = "ready"
+                        })
+                    };
             }
 
             if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/v1/deployments/dep_test_123/refresh")

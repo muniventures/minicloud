@@ -33,6 +33,15 @@ internal static class ServiceChecksumCalculator
             }
         }
 
+
+        if (service.BuildEnv is { Count: > 0 })
+        {
+            foreach (var kvp in service.BuildEnv.OrderBy(x => x.Key, StringComparer.Ordinal))
+            {
+                AppendString(hash, $"buildEnv:{kvp.Key}={kvp.Value}\n");
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(service.SourcePath))
         {
             var sourceRoot = Path.GetFullPath(service.SourcePath);

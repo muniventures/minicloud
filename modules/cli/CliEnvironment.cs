@@ -4,25 +4,16 @@ public sealed class CliEnvironment
 {
     public const string TokenEnvironmentVariable = "MINICLOUD_TOKEN";
     public const string ApiUrlEnvironmentVariable = "MINICLOUD_API_URL";
-    public const string RegistryHostEnvironmentVariable = "MINICLOUD_REGISTRY_HOST";
-    public const string RegistryGhcrOwnerEnvironmentVariable = "MINICLOUD_REGISTRY_GHCR_OWNER";
-    public const string RuntimeRegistryPrefixEnvironmentVariable = "MINICLOUD_RUNTIME_REGISTRY_PREFIX";
     public const string LocalOrganizationSlugEnvironmentVariable = "MINICLOUD_LOCAL_ORGANIZATION_SLUG";
 
-    private CliEnvironment(string apiBaseUrl, string registryHost, string registryGhcrOwner, string runtimeRegistryPrefix, string localOrganizationSlug, string configHome)
+    private CliEnvironment(string apiBaseUrl, string localOrganizationSlug, string configHome)
     {
         ApiBaseUrl = apiBaseUrl.TrimEnd('/');
-        RegistryHost = registryHost.Trim().TrimEnd('/');
-        RegistryGhcrOwner = registryGhcrOwner.Trim().ToLowerInvariant();
-        RuntimeRegistryPrefix = runtimeRegistryPrefix.Trim().TrimEnd('/');
         LocalOrganizationSlug = localOrganizationSlug.Trim().ToLowerInvariant();
         ConfigHome = configHome;
     }
 
     public string ApiBaseUrl { get; }
-    public string RegistryHost { get; }
-    public string RegistryGhcrOwner { get; }
-    public string RuntimeRegistryPrefix { get; }
     public string LocalOrganizationSlug { get; }
     public string ConfigHome { get; }
     public string TokenFilePath => Path.Combine(ConfigHome, "token");
@@ -33,24 +24,6 @@ public sealed class CliEnvironment
         if (string.IsNullOrWhiteSpace(apiBaseUrl))
         {
             apiBaseUrl = "https://api.cloud.muni.dev";
-        }
-
-        var registryHost = Environment.GetEnvironmentVariable(RegistryHostEnvironmentVariable);
-        if (string.IsNullOrWhiteSpace(registryHost))
-        {
-            registryHost = DefaultRegistryHostForApiBaseUrl(apiBaseUrl);
-        }
-
-        var registryGhcrOwner = Environment.GetEnvironmentVariable(RegistryGhcrOwnerEnvironmentVariable);
-        if (string.IsNullOrWhiteSpace(registryGhcrOwner))
-        {
-            registryGhcrOwner = "muniventures";
-        }
-
-        var runtimeRegistryPrefix = Environment.GetEnvironmentVariable(RuntimeRegistryPrefixEnvironmentVariable);
-        if (string.IsNullOrWhiteSpace(runtimeRegistryPrefix))
-        {
-            runtimeRegistryPrefix = $"ghcr.io/{registryGhcrOwner}";
         }
 
         var localOrganizationSlug = Environment.GetEnvironmentVariable(LocalOrganizationSlugEnvironmentVariable);
@@ -67,24 +40,8 @@ public sealed class CliEnvironment
                 ".config");
         }
 
-        return new CliEnvironment(apiBaseUrl, registryHost, registryGhcrOwner, runtimeRegistryPrefix, localOrganizationSlug, Path.Combine(configHome, "minicloud"));
+        return new CliEnvironment(apiBaseUrl, localOrganizationSlug, Path.Combine(configHome, "minicloud"));
     }
 
-    public static CliEnvironment ForTests(string apiBaseUrl, string configHome) => new(apiBaseUrl, "registry.muni.dev", "minicloud", "ghcr.io/minicloud", "local", configHome);
-
-    public static CliEnvironment ForTests(
-        string apiBaseUrl,
-        string configHome,
-        string registryHost,
-        string runtimeRegistryPrefix,
-        string localOrganizationSlug) =>
-        new(apiBaseUrl, registryHost, "minicloud", runtimeRegistryPrefix, localOrganizationSlug, configHome);
-
-    private static string DefaultRegistryHostForApiBaseUrl(string apiBaseUrl)
-    {
-        return Uri.TryCreate(apiBaseUrl, UriKind.Absolute, out var uri) &&
-            uri.Host.Equals("api.cloud-dev.muni.dev", StringComparison.OrdinalIgnoreCase)
-            ? "registry-dev.muni.dev"
-            : "registry.muni.dev";
-    }
+    public static CliEnvironment ForTests(string apiBaseUrl, string configHome) => new(apiBaseUrl, "local", configHome);
 }
