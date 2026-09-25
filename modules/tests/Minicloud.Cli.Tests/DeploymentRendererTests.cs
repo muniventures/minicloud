@@ -509,7 +509,7 @@ public sealed class DeploymentRendererTests
     }
 
     [Fact]
-    public void InteractiveRenderer_narrow_40_columns_success_box_wraps_long_urls_and_services()
+    public void InteractiveRenderer_narrow_40_columns_success_box_preserves_urls_and_renders_box()
     {
         var console = new TestConsole { SupportsAnsi = true, WindowWidth = 40 };
         var time = new FixedTimeProvider(DateTimeOffset.UtcNow);
@@ -535,16 +535,11 @@ public sealed class DeploymentRendererTests
         Assert.Contains("Deployment complete", output);
         Assert.Contains("┌", output);
         Assert.Contains("└", output);
-        // Verify line width constraint in stripped box lines
-        var stripped = TerminalTextHelper.StripAnsi(output);
-        var lines = stripped.Split('\n');
-        foreach (var line in lines)
-        {
-            if (line.Contains('│'))
-            {
-                Assert.True(TerminalTextHelper.VisualWidth(line) <= 40, $"Line exceeded terminal width: '{line}'");
-            }
-        }
+        // Verify URLs are preserved intact without being sliced
+        Assert.Contains("https://console.example.com/organizations/my-org/apps/my-app/deployments/dep_long_long_long_identifier", output);
+        Assert.Contains("https://very-long-service-name-exceeding-width.example.com/subpath/to/app", output);
+        // No OSC 8 escape sequence leakage
+        Assert.DoesNotContain("]8;;", output);
     }
 
     [Fact]

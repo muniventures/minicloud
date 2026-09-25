@@ -9,7 +9,7 @@ public static partial class TerminalTextHelper
     private static partial Regex AnsiEscapeRegex();
 
     public static string StripControlCharacters(string value) =>
-        new(value.Where(c => !char.IsControl(c) || c is '\t').ToArray());
+        new(value.Where(c => !char.IsControl(c) || c is '\t' or '\x1b').ToArray());
 
     public static string StripAnsi(string value) =>
         AnsiEscapeRegex().Replace(value, "");
@@ -156,7 +156,7 @@ public static partial class TerminalTextHelper
         {
             // Plain-text delimited format
             var maxContentWidth = sanitizedLines.Count > 0 ? sanitizedLines.Max(VisualWidth) : 40;
-            var delimiterLen = Math.Min(terminalWidth, Math.Max(40, maxContentWidth));
+            var delimiterLen = Math.Max(40, maxContentWidth);
             var delimiter = new string('-', delimiterLen);
 
             var plainBox = new List<string> { delimiter };
@@ -166,19 +166,29 @@ public static partial class TerminalTextHelper
         }
 
         // Interactive bordered box
-        // Content-sized: inner width fits the content up to terminalWidth - 4
-        var maxAllowedInnerWidth = Math.Max(20, terminalWidth - 4);
+        // Content-sized: inner width fits the content
+        var wrapLimit = Math.Max(76, terminalWidth - 4);
         var wrappedLines = new List<string>();
         foreach (var line in sanitizedLines)
         {
-            var wrapped = Wrap(line, maxAllowedInnerWidth);
-            wrappedLines.AddRange(wrapped);
+            var isUnbreakable = line.StartsWith("Console:", StringComparison.OrdinalIgnoreCase) ||
+                                line.StartsWith("Service URL", StringComparison.OrdinalIgnoreCase) ||
+                                line.StartsWith("Logs:", StringComparison.OrdinalIgnoreCase) ||
+                                line.Contains("http://", StringComparison.OrdinalIgnoreCase) ||
+                                line.Contains("https://", StringComparison.OrdinalIgnoreCase);
+
+            if (isUnbreakable || VisualWidth(line) <= wrapLimit)
+            {
+                wrappedLines.Add(line);
+            }
+            else
+            {
+                wrappedLines.AddRange(Wrap(line, wrapLimit));
+            }
         }
 
         var contentWidth = wrappedLines.Count > 0 ? wrappedLines.Max(VisualWidth) : 20;
-        var innerWidth = Math.Min(contentWidth, maxAllowedInnerWidth);
-        // Ensure at least 30 cols unless terminal is smaller
-        innerWidth = Math.Max(innerWidth, Math.Min(30, maxAllowedInnerWidth));
+        var innerWidth = Math.Max(contentWidth, 30);
 
         var useColor = supportsAnsi && !noColor;
         var borderColor = useColor

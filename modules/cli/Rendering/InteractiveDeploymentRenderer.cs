@@ -277,14 +277,12 @@ public sealed class InteractiveDeploymentRenderer : IDeploymentRenderer
 
             if (!string.IsNullOrWhiteSpace(result.ConsoleUrl))
             {
-                var link = TerminalTextHelper.FormatTerminalLink(result.ConsoleUrl, result.ConsoleUrl, _console.SupportsAnsi);
-                lines.Add($"Console: {link}");
+                lines.Add($"Console: {result.ConsoleUrl}");
             }
 
             foreach (var (serviceName, url) in result.ServiceUrls.OrderBy(x => x.ServiceName, StringComparer.Ordinal).ThenBy(x => x.Url, StringComparer.Ordinal))
             {
-                var link = TerminalTextHelper.FormatTerminalLink(url, url, _console.SupportsAnsi);
-                lines.Add($"Service URL ({serviceName}): {link}");
+                lines.Add($"Service URL ({serviceName}): {url}");
             }
 
             var boxLines = TerminalTextHelper.FormatBox(
@@ -348,8 +346,7 @@ public sealed class InteractiveDeploymentRenderer : IDeploymentRenderer
 
             if (!string.IsNullOrWhiteSpace(result.ConsoleUrl))
             {
-                var link = TerminalTextHelper.FormatTerminalLink(result.ConsoleUrl, result.ConsoleUrl, _console.SupportsAnsi);
-                lines.Add($"Console: {link}");
+                lines.Add($"Console: {result.ConsoleUrl}");
             }
 
             var boxLines = TerminalTextHelper.FormatBox(
