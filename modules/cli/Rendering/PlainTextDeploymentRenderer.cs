@@ -21,6 +21,7 @@ public sealed class PlainTextDeploymentRenderer : IDeploymentRenderer
 
     private bool _deployStarted;
     private string? _lastDeployStatus;
+    private string? _lastDeployPhase;
     private bool _completed;
 
     public PlainTextDeploymentRenderer(IConsole console, TimeProvider? timeProvider = null)
@@ -144,6 +145,19 @@ public sealed class PlainTextDeploymentRenderer : IDeploymentRenderer
             {
                 _lastDeployStatus = status;
                 _console.WriteLine($"Deploy: status {status}");
+            }
+        }
+    }
+
+    public void DeploymentActivityUpdated(string deploymentId, string phase, string? detail = null)
+    {
+        lock (_lock)
+        {
+            if (phase != _lastDeployPhase)
+            {
+                _lastDeployPhase = phase;
+                var detailText = !string.IsNullOrWhiteSpace(detail) ? $": {detail}" : "";
+                _console.WriteLine($"Deploy: {phase}{detailText}");
             }
         }
     }

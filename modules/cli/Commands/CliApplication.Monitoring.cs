@@ -117,7 +117,8 @@ public sealed partial class CliApplication
         string deploymentId,
         string initialStatus,
         CancellationToken cancellationToken,
-        Rendering.IDeploymentRenderer? renderer = null)
+        Rendering.IDeploymentRenderer? renderer = null,
+        int totalServices = 0)
     {
         var lastStatus = initialStatus;
         string? lastConsoleUrl = null;
@@ -173,6 +174,26 @@ public sealed partial class CliApplication
                 }
                 lastStatus = deployment.Status;
             }
+
+            if (!TerminalStatuses.Contains(deployment.Status))
+            {
+                try
+                {
+                    var (phase, detail) = await InspectDeploymentActivityAsync(deployment.Id, deployment.Status, totalServices, cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(phase))
+                    {
+                        if (renderer != null)
+                        {
+                            renderer.DeploymentActivityUpdated(deployment.Id, phase, detail);
+                        }
+                    }
+                }
+                catch
+                {
+                    // Activity inspection is best-effort and must not fail deployment polling.
+                }
+            }
+
             if (!string.IsNullOrWhiteSpace(deployment.ConsoleUrl) && deployment.ConsoleUrl != lastConsoleUrl)
             {
                 if (renderer == null)
@@ -187,6 +208,185 @@ public sealed partial class CliApplication
                 return deployment;
             }
         }
+    }
+
+    private async Task<(string? Phase, string? Detail)> InspectDeploymentActivityAsync(
+        string deploymentId,
+        string deploymentStatus,
+        int totalServices,
+        CancellationToken cancellationToken)
+    {
+        string? phase = deploymentStatus switch
+        {
+            "provisioning" => "Provisioning server",
+            "verifying" => "Verifying health checks",
+            _ => null
+        };
+        string? detail = null;
+
+        try
+        {
+            var events = await _apiClient.GetDeploymentEventsAsync(deploymentId, cancellationToken);
+            if (events is { Count: > 0 })
+            {
+                var lastEvent = events[^1];
+                var msg = lastEvent.Message;
+                if (msg.Contains("health check", StringComparison.OrdinalIgnoreCase) ||
+                    msg.Contains("health-finalize", StringComparison.OrdinalIgnoreCase) ||
+                    msg.Contains("verifying", StringComparison.OrdinalIgnoreCase))
+                {
+                    phase = "Verifying health checks";
+                }
+                else if (msg.Contains("Transferring deployment payload", StringComparison.OrdinalIgnoreCase))
+                {
+                    phase = "Transferring payload to server";
+                }
+                else if (msg.Contains("DNS", StringComparison.OrdinalIgnoreCase))
+                {
+                    phase = "Configuring DNS records";
+                }
+                else if (msg.Contains("Provisioning", StringComparison.OrdinalIgnoreCase) ||
+                         msg.Contains("Resolved registered server", StringComparison.OrdinalIgnoreCase))
+                {
+                    phase = "Provisioning server";
+                }
+            }
+        }
+        catch
+        {
+            // Ignore event query errors
+        }
+
+        if (deploymentStatus == "deploying")
+        {
+            try
+            {
+                var logs = await _apiClient.GetDeploymentLogsAsync(deploymentId, cancellationToken);
+                if (logs is { Count: > 0 })
+                {
+                    var builtServices = new HashSet<string>(StringComparer.Ordinal);
+                    string? currentRemotePhase = null;
+                    string? currentBuildingService = null;
+                    string? latestBuildStep = null;
+                    string? latestServiceLine = null;
+
+                    foreach (var log in logs)
+                    {
+                        var content = log.Content.Trim();
+
+                        if (content.StartsWith("===== phase: ", StringComparison.Ordinal) && content.EndsWith(" =====", StringComparison.Ordinal))
+                        {
+                            currentRemotePhase = content["===== phase: ".Length..^" =====".Length].Trim();
+                            continue;
+                        }
+
+                        if (content.StartsWith("TIMING phase=service_build", StringComparison.Ordinal) && content.Contains("outcome=succeeded", StringComparison.Ordinal))
+                        {
+                            var match = System.Text.RegularExpressions.Regex.Match(content, @"\bservice=([^\s]+)");
+                            if (match.Success)
+                            {
+                                builtServices.Add(match.Groups[1].Value);
+                            }
+                        }
+
+                        if (content.StartsWith("Building Docker image", StringComparison.Ordinal))
+                        {
+                            var match = System.Text.RegularExpressions.Regex.Match(content, @"\bfor service ([^\s\.]+)");
+                            if (match.Success)
+                            {
+                                currentBuildingService = match.Groups[1].Value;
+                            }
+                        }
+
+                        if (content.StartsWith("[build:", StringComparison.Ordinal))
+                        {
+                            var endIdx = content.IndexOf(']');
+                            if (endIdx > 7)
+                            {
+                                var svc = content[7..endIdx];
+                                var subline = content[(endIdx + 1)..].Trim();
+                                currentBuildingService = svc;
+                                if (subline.StartsWith("Step ", StringComparison.Ordinal) ||
+                                    subline.StartsWith("#", StringComparison.Ordinal) ||
+                                    subline.Contains("RUN ", StringComparison.Ordinal) ||
+                                    subline.Contains("COPY ", StringComparison.Ordinal))
+                                {
+                                    latestBuildStep = $"{svc}: {subline}";
+                                }
+                            }
+                        }
+
+                        if (content.StartsWith("Creating minicloud-", StringComparison.Ordinal) ||
+                            content.StartsWith("Starting minicloud-", StringComparison.Ordinal))
+                        {
+                            latestServiceLine = content;
+                        }
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(currentRemotePhase))
+                    {
+                        switch (currentRemotePhase)
+                        {
+                            case "preflight":
+                            case "acquire_lock":
+                            case "prepare_paths":
+                            case "render_next_configs":
+                            case "validate_next_configs":
+                                phase = "Preparing host environment";
+                                break;
+
+                            case "build_artifacts":
+                                var buildCount = builtServices.Count;
+                                phase = totalServices > 0
+                                    ? $"Building Docker images ({buildCount}/{totalServices})"
+                                    : "Building Docker images";
+                                detail = latestBuildStep ?? (currentBuildingService != null ? $"building image for {currentBuildingService}" : null);
+                                break;
+
+                            case "wait_for_rollout_gate":
+                                phase = "Waiting for rollout gate";
+                                break;
+
+                            case "migrate_postgres_if_needed":
+                            case "ensure_postgres_data_owner":
+                                phase = "Preparing database";
+                                break;
+
+                            case "start_infra":
+                            case "sync_postgres_password":
+                            case "configure_openbao":
+                            case "start_observability":
+                                phase = "Starting infrastructure";
+                                break;
+
+                            case "start_app_services":
+                                phase = "Starting application services";
+                                detail = latestServiceLine;
+                                break;
+
+                            case "verify_local_health":
+                                phase = "Verifying container health";
+                                break;
+
+                            case "activate_caddy":
+                                phase = "Configuring traffic routing";
+                                break;
+
+                            case "record_deploy":
+                            case "complete":
+                                phase = "Finalizing deployment";
+                                break;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore log query errors
+            }
+        }
+
+        return (phase, detail);
     }
 
     private static string FormatBranchUrls(AppBranchResponse branch) =>

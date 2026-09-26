@@ -44,6 +44,9 @@ public sealed class InteractiveDeploymentRenderer : IDeploymentRenderer
     private string _deployDetail = "creating deployment";
     private bool _deployReconnecting;
     private string? _deployStatus;
+    private string? _deploymentId;
+    private string? _deployPhase;
+    private string? _deployActivityDetail;
 
     public InteractiveDeploymentRenderer(
         IConsole console,
@@ -211,7 +214,9 @@ public sealed class InteractiveDeploymentRenderer : IDeploymentRenderer
         lock (_lock)
         {
             _deployState = StageState.Active;
+            _deploymentId = deploymentId;
             _deployStatus = status;
+            _deployPhase = "Deploying";
             _deployDetail = $"{deploymentId}  {status}";
             _tracker?.OnDeploymentCreated();
             Redraw();
@@ -222,9 +227,23 @@ public sealed class InteractiveDeploymentRenderer : IDeploymentRenderer
     {
         lock (_lock)
         {
+            _deploymentId = deploymentId;
             _deployStatus = status;
             _deployReconnecting = false;
             _deployDetail = $"{deploymentId}  {status}";
+            Redraw();
+        }
+    }
+
+    public void DeploymentActivityUpdated(string deploymentId, string phase, string? detail = null)
+    {
+        lock (_lock)
+        {
+            _deploymentId = deploymentId;
+            _deployPhase = phase;
+            _deployActivityDetail = detail;
+            _deployReconnecting = false;
+            _deployDetail = $"{deploymentId}  {phase.ToLowerInvariant()}";
             Redraw();
         }
     }
@@ -242,6 +261,7 @@ public sealed class InteractiveDeploymentRenderer : IDeploymentRenderer
     {
         lock (_lock)
         {
+            _deploymentId = deploymentId;
             _deployReconnecting = false;
             _deployStatus = status;
             _deployDetail = $"{deploymentId}  {status}";
@@ -392,21 +412,31 @@ public sealed class InteractiveDeploymentRenderer : IDeploymentRenderer
         var lines = new List<string>();
 
         // 1. Overall progress bar
-        var percentage = _tracker?.CurrentPercentage ?? 0;
+        var spinner = SpinnerFrames[_spinnerFrameIndex % SpinnerFrames.Length];
         var elapsedStr = FormatElapsed();
 
-        var barWidth = Math.Max(10, Math.Min(20, termWidth - 30));
-        var filledCount = (int)Math.Round((percentage / 100.0) * barWidth);
-        filledCount = Math.Clamp(filledCount, 0, barWidth);
-        var unfilledCount = barWidth - filledCount;
+        if (_deployState == StageState.Active && !isFinal)
+        {
+            var serviceCount = _plan.SelectedServicesCount;
+            var serviceText = serviceCount > 0 ? $" ({serviceCount} {(serviceCount == 1 ? "service" : "services")})" : "";
+            var phaseText = !string.IsNullOrWhiteSpace(_deployPhase) ? _deployPhase : "Deploying";
+            var barStr = $"{bold}Overall{reset}  {gray}[{reset}{cyan}{spinner}{reset}{gray}]{reset}  {bold}{phaseText}{serviceText}{reset}  {gray}({elapsedStr}){reset}";
+            lines.Add(barStr);
+        }
+        else
+        {
+            var percentage = _tracker?.CurrentPercentage ?? 0;
+            var barWidth = Math.Max(10, Math.Min(20, termWidth - 30));
+            var filledCount = (int)Math.Round((percentage / 100.0) * barWidth);
+            filledCount = Math.Clamp(filledCount, 0, barWidth);
+            var unfilledCount = barWidth - filledCount;
 
-        var filledBlocks = new string('█', filledCount);
-        var unfilledBlocks = new string('░', unfilledCount);
+            var filledBlocks = new string('█', filledCount);
+            var unfilledBlocks = new string('░', unfilledCount);
 
-        var barStr = $"{bold}Overall{reset}  {gray}[{reset}{green}{filledBlocks}{reset}{gray}{unfilledBlocks}]{reset}  {cyan}{percentage}%{reset}  {gray}({elapsedStr}){reset}";
-        lines.Add(barStr);
-
-        var spinner = SpinnerFrames[_spinnerFrameIndex % SpinnerFrames.Length];
+            var barStr = $"{bold}Overall{reset}  {gray}[{reset}{green}{filledBlocks}{reset}{gray}{unfilledBlocks}]{reset}  {cyan}{percentage}%{reset}  {gray}({elapsedStr}){reset}";
+            lines.Add(barStr);
+        }
 
         // 2. Stage rows
         // Secrets stage
@@ -469,14 +499,29 @@ public sealed class InteractiveDeploymentRenderer : IDeploymentRenderer
                     lines.Add($"  {gray}○{reset} Deploy");
                     break;
                 case StageState.Active when !isFinal:
-                    lines.Add($"  {cyan}{spinner}{reset} Deploy");
+                    var serviceCount = _plan.SelectedServicesCount;
+                    var serviceHeader = serviceCount > 0 ? $"  {gray}({serviceCount} {(serviceCount == 1 ? "service" : "services")}){reset}" : "";
+                    lines.Add($"  {cyan}{spinner}{reset} Deploy{serviceHeader}");
                     if (_deployReconnecting)
                     {
                         lines.Add($"      {amber}Network connection lost. Waiting to reconnect...{reset}");
                     }
                     else
                     {
-                        lines.Add($"      {_deployDetail}");
+                        if (!string.IsNullOrWhiteSpace(_deployPhase) &&
+                            !string.Equals(_deployPhase, "Deploying", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(_deployPhase, _deployStatus, StringComparison.OrdinalIgnoreCase))
+                        {
+                            lines.Add($"      {_deploymentId}  {cyan}{_deployPhase}{reset}".TrimEnd());
+                        }
+                        else
+                        {
+                            lines.Add($"      {_deploymentId}  {_deployStatus}".TrimEnd());
+                        }
+                        if (!string.IsNullOrWhiteSpace(_deployActivityDetail))
+                        {
+                            lines.Add($"      {gray}›{reset} {_deployActivityDetail}");
+                        }
                     }
                     break;
                 case StageState.Completed:

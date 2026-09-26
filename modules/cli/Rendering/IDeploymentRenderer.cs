@@ -15,6 +15,7 @@ public interface IDeploymentRenderer : IDisposable, IAsyncDisposable
     void DeploymentCreationStarted();
     void DeploymentCreated(string deploymentId, string status);
     void DeploymentStatusUpdated(string deploymentId, string status, string? consoleUrl = null);
+    void DeploymentActivityUpdated(string deploymentId, string phase, string? detail = null);
     void DeploymentReconnecting();
     void DeploymentReconnected(string deploymentId, string status);
 

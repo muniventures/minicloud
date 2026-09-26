@@ -46,8 +46,8 @@ public sealed class DeploymentProgressTracker
     public void OnDeploymentCreated()
     {
         if (_failed) return;
-        _deployOpCompleted = 1;
-        UpdatePercentage();
+        // Deploy is an active indeterminate stage; do not advance to a static/misleading percentage on creation.
+        // Final completion transitions to 100%.
     }
 
     public void OnDeploymentSucceeded()

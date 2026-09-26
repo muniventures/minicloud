@@ -158,7 +158,7 @@ public sealed partial class CliApplication
         var created = await _apiClient.CreateDeploymentAsync(request, cancellationToken);
         renderer.DeploymentCreated(created.Id, created.Status);
 
-        var finalDeployment = await PollDeploymentAsync(created.Id, created.Status, cancellationToken, renderer);
+        var finalDeployment = await PollDeploymentAsync(created.Id, created.Status, cancellationToken, renderer, plan.SelectedServicesCount);
         if (finalDeployment.Status == "succeeded")
         {
             var publicUrls = new List<(string ServiceName, string Url)>();

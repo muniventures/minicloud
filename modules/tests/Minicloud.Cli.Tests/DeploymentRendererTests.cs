@@ -70,9 +70,9 @@ public sealed class DeploymentRendererTests
         tracker.OnArtifactOpCompleted();
         Assert.Equal(66, tracker.CurrentPercentage);
 
-        // Deploy: created -> 50% of 1/3 = 16.6% -> 66 + 16 = 83%
+        // Deploy: created does not advance artificial percentage (deploy stage is indeterminate while active)
         tracker.OnDeploymentCreated();
-        Assert.Equal(83, tracker.CurrentPercentage);
+        Assert.Equal(66, tracker.CurrentPercentage);
 
         // Succeeded -> 100%
         tracker.OnDeploymentSucceeded();
@@ -91,13 +91,13 @@ public sealed class DeploymentRendererTests
             SelectedServicesCount: 1);
 
         var tracker = new DeploymentProgressTracker(plan);
-        // Deploy created -> 50%
+        // Deploy created -> does not advance percentage
         tracker.OnDeploymentCreated();
-        Assert.Equal(50, tracker.CurrentPercentage);
+        Assert.Equal(0, tracker.CurrentPercentage);
 
         // Deploy failed -> frozen at reached percentage, strictly < 100
         tracker.OnDeploymentFailed();
-        Assert.Equal(50, tracker.CurrentPercentage);
+        Assert.Equal(0, tracker.CurrentPercentage);
         Assert.True(tracker.CurrentPercentage < 100);
     }
 
@@ -153,7 +153,7 @@ public sealed class DeploymentRendererTests
         Assert.Equal(0, tracker.CurrentPercentage);
 
         tracker.OnDeploymentCreated();
-        Assert.Equal(50, tracker.CurrentPercentage);
+        Assert.Equal(0, tracker.CurrentPercentage);
 
         tracker.OnDeploymentSucceeded();
         Assert.Equal(100, tracker.CurrentPercentage);
@@ -621,4 +621,94 @@ public sealed class DeploymentRendererTests
         var interactiveRenderer = DeploymentRendererFactory.Create(ansiConsole, enableSpinnerTimer: false);
         Assert.IsType<InteractiveDeploymentRenderer>(interactiveRenderer);
     }
+
+    [Fact]
+    public void InteractiveRenderer_deploy_stage_renders_indeterminate_spinner_and_service_count()
+    {
+        var console = new TestConsole { SupportsAnsi = true };
+        var time = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        var renderer = new InteractiveDeploymentRenderer(console, time, noColor: false, enableSpinnerTimer: false);
+
+        var plan = new DeploymentPlan(
+            HasSecretsStage: false,
+            TotalSecrets: 0,
+            HasArtifactsStage: false,
+            SourceServices: [],
+            HasDeployStage: true,
+            SelectedServicesCount: 6);
+
+        renderer.Initialize(plan);
+        renderer.DeploymentCreationStarted();
+        renderer.DeploymentCreated("dep_test_123", "deploying");
+
+        var output = console.Output;
+        var stripped = TerminalTextHelper.StripAnsi(output);
+
+        // Header shows indeterminate Deploying with service count
+        Assert.Contains("Deploying (6 services)", stripped);
+        Assert.DoesNotContain("83%", stripped);
+        Assert.DoesNotContain("50%", stripped);
+
+        // Stage row shows service count and deployment ID
+        Assert.Contains("Deploy  (6 services)", stripped);
+        Assert.Contains("dep_test_123", stripped);
+    }
+
+    [Fact]
+    public void InteractiveRenderer_activity_updated_displays_phase_and_detail()
+    {
+        var console = new TestConsole { SupportsAnsi = true };
+        var time = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        var renderer = new InteractiveDeploymentRenderer(console, time, noColor: false, enableSpinnerTimer: false);
+
+        var plan = new DeploymentPlan(
+            HasSecretsStage: false,
+            TotalSecrets: 0,
+            HasArtifactsStage: false,
+            SourceServices: [],
+            HasDeployStage: true,
+            SelectedServicesCount: 6);
+
+        renderer.Initialize(plan);
+        renderer.DeploymentCreated("dep_test_456", "deploying");
+        renderer.DeploymentActivityUpdated("dep_test_456", "Building Docker images (2/6)", "agency-ui: Step 4/8 RUN npm run build");
+
+        var output = console.Output;
+        var stripped = TerminalTextHelper.StripAnsi(output);
+
+        // Header and stage show the active phase
+        Assert.Contains("Building Docker images (2/6)", stripped);
+        Assert.Contains("agency-ui: Step 4/8 RUN npm run build", stripped);
+        Assert.DoesNotContain("83%", stripped);
+    }
+
+    [Fact]
+    public void PlainTextRenderer_activity_updated_emits_milestones()
+    {
+        var console = new TestConsole { SupportsAnsi = false };
+        var time = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        var renderer = new PlainTextDeploymentRenderer(console, time);
+
+        var plan = new DeploymentPlan(
+            HasSecretsStage: false,
+            TotalSecrets: 0,
+            HasArtifactsStage: false,
+            SourceServices: [],
+            HasDeployStage: true,
+            SelectedServicesCount: 2);
+
+        renderer.Initialize(plan);
+        renderer.DeploymentCreated("dep_plain_1", "deploying");
+        renderer.DeploymentActivityUpdated("dep_plain_1", "Preparing host environment");
+        renderer.DeploymentActivityUpdated("dep_plain_1", "Building Docker images (1/2)", "web: Step 1/5");
+        // Repeating same phase should not duplicate milestone output
+        renderer.DeploymentActivityUpdated("dep_plain_1", "Building Docker images (1/2)", "web: Step 2/5");
+        renderer.DeploymentActivityUpdated("dep_plain_1", "Starting application services");
+
+        var output = console.Output;
+        Assert.Contains("Deploy: Preparing host environment", output);
+        Assert.Contains("Deploy: Building Docker images (1/2): web: Step 1/5", output);
+        Assert.Contains("Deploy: Starting application services", output);
+    }
 }
+
