@@ -1,9 +1,0 @@
-<Solution>
-  <Folder Name="/modules/" />
-  <Folder Name="/modules/cli/">
-    <Project Path="modules/cli/Minicloud.Cli.csproj" />
-  </Folder>
-  <Folder Name="/modules/tests/">
-    <Project Path="modules/tests/Minicloud.Cli.Tests/Minicloud.Cli.Tests.csproj" />
-  </Folder>
-</Solution>
