@@ -246,9 +246,10 @@ minicloud deploy --pgpassword '<strong-password>'
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `sourcePath` | Required for normal CLI deploys | Directory bundled into the deployment artifact and used as the workflow Docker build context. |
+| `sourcePath` | Required for normal CLI deploys | Directory frozen as the local Docker build context. Explicit source mode uploads it as an artifact instead. |
+| `buildMode` | No | `local` (default for sourcePath services) builds and pushes an image locally; `source` uploads source for a server build. |
 | `dockerfile` | No | Dockerfile path. Defaults to Docker's normal lookup in `sourcePath`. |
-| `image` | Required with `--no-publish`; optional otherwise | Full image reference for prebuilt-image deploys. Normal deploys omit this and upload a source artifact instead. |
+| `image` | Required with `--no-publish`; optional otherwise | Full image reference for prebuilt-image deploys. Normal sourcePath deploys omit this and build/push a managed image instead. |
 | `port` | Yes | Internal container port, `1` to `65535`. |
 | `public` | Yes | Whether the service receives public HTTP traffic. The merged active app must have at least one public service. |
 | `path` | Yes | Public route path. First-pass service subdomains require `/`. For private services, still set `/`. |
@@ -408,6 +409,17 @@ minicloud deploy
 ```
 
 On deploy, the CLI requires `appId` in the selected config. App selection or app creation happens in `minicloud init`, not during deploy.
+
+By default, Docker/buildx builds selected services on this machine for the target
+Linux platform, pushes images to Minicloud's private registry, and deploys verified
+immutable digests. Docker must be running. Use `--build-mode source` or service-level
+`buildMode: source` only to select the older source-upload/server-build mode.
+
+CLI 2.0.0 shows image preparation in a colored panel with a ready/total service count,
+current activity, elapsed time, and a fixed-height recent-output box. Warnings are
+summarized; the complete sanitized log file path is printed after image preparation,
+including on failure. Set `NO_COLOR=1` to disable colors. Redirected output and CI
+use plain logs without cursor controls.
 
 Deploy is service-scoped. The CLI publishes and sends only the selected services. Existing services for the same app that are omitted from the selected deployment remain active. Omission does not delete a service.
 
