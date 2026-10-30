@@ -523,3 +523,18 @@ Supported environment variables:
 Deploy completion and status output list every assigned service URL with its service name. App inspection and branch output also list all assigned URLs; no URL is treated as the main website.
 
 - Private services: init/add-service explicitly ask whether each service should receive a public URL. Set `public: false` for internal APIs and workers; private containers have no host-port mapping and remain accessible to peer containers by service name. Making a service private disables its existing domain bindings and requests routing reconciliation; deployment responses omit private-service URLs. Workers may retain internal health listeners without public URLs. Portless worker processes remain a separate capability.
+
+## Deployment failures
+
+The CLI checks required `secretEnv` names before image builds and uploads. Secrets
+from each service's `minicloud.secrets.env` are synchronized during deployment;
+other references must already exist for that service or at app scope. A missing
+reference reports `missing_service_secret`, including the service, secret name and
+environment variable, and exits with validation code 2. Configure the real secret
+or remove its deployment reference until that integration is configured.
+
+`minicloud status <deployment-id>` and `minicloud logs <deployment-id>` include
+the deployment failure code and message. Secret-store outages report
+`secret_store_unavailable`; preparation failures do not wait for an unrelated SSH
+readiness timeout. CLI 2.0.1 requires the updated control API's
+`POST /v1/deployments/validate-secrets` endpoint for remote secret checks.
