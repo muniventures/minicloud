@@ -538,3 +538,15 @@ the deployment failure code and message. Secret-store outages report
 `secret_store_unavailable`; preparation failures do not wait for an unrelated SSH
 readiness timeout. CLI 2.0.1 requires the updated control API's
 `POST /v1/deployments/validate-secrets` endpoint for remote secret checks.
+
+## Local build visibility
+
+CLI 2.0.2 creates a **Waiting for build** deployment before building local images.
+The dashboard discovers it automatically, and that same record moves into the
+deployment queue after image preparation succeeds. Build failures and cancellation
+close the waiting record; an abandoned client expires after five minutes without
+a heartbeat. Total elapsed time includes local preparation; queue time starts at
+admission. Unchanged-service deployments do not create a waiting record.
+
+Upgrade Minicloud's API, worker and dashboard before installing CLI 2.0.2. Local
+builds require the new deployment preparation endpoints.
