@@ -553,7 +553,7 @@ builds require the new deployment preparation endpoints.
 
 ## Parallel local builds
 
-Set `buildJobs` at the top level of `minicloud.yml` in CLI 2.1.0:
+Set `buildJobs` at the top level of `minicloud.yml` in CLI 2.1.1:
 
 ```yaml
 buildJobs: 5
