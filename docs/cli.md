@@ -550,3 +550,16 @@ admission. Unchanged-service deployments do not create a waiting record.
 
 Upgrade Minicloud's API, worker and dashboard before installing CLI 2.0.2. Local
 builds require the new deployment preparation endpoints.
+
+## Parallel local builds
+
+Set `buildJobs` at the top level of `minicloud.yml` in CLI 2.1.0:
+
+```yaml
+buildJobs: 5
+```
+
+The default is 2 and the supported range is 1 to 10. Use
+`minicloud deploy --build-jobs 3` to override the setting for one invocation.
+All selected local builds finish before any uploads start. The CLI stages
+images in the local Docker image store and uploads up to two at a time.
