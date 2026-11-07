@@ -18,6 +18,8 @@ RUN dotnet publish "Minicloud.Worker.csproj" -c Release -o /app/publish /p:UseAp
 FROM mcr.microsoft.com/dotnet/runtime:10.0-alpine AS final
 WORKDIR /app
 COPY --from=build /app/publish .
+COPY LICENSE /usr/share/minicloud/LICENSE
+COPY LICENSES /usr/share/minicloud/LICENSES
 COPY --from=runtime-agent /agent/Minicloud.RuntimeAgent /app/runtime-agent/minicloud-agent
 COPY templates/runtime/minicloud-agent.service templates/runtime/apply-minicloud-routing.py templates/runtime/install-minicloud-agent.sh /app/runtime-agent/
 ENTRYPOINT ["dotnet", "Minicloud.Worker.dll"]

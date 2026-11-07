@@ -22,4 +22,6 @@ RUN cd modules/dashboard && npm run build
 FROM nginx:1.27-alpine AS runtime
 COPY modules/dashboard/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /src/modules/dashboard/dist /usr/share/nginx/html
+COPY LICENSE /usr/share/nginx/html/LICENSE
+COPY LICENSES /usr/share/nginx/html/licenses
 EXPOSE 8080
