@@ -1049,8 +1049,10 @@ public sealed class CliConfigTests
         }
     }
 
-    [Fact]
-    public void Framework_validation_accepts_vite_with_minicloud_allowed_host_suffix()
+    [Theory]
+    [InlineData("app.muni.dev")]
+    [InlineData("apps.operator.test")]
+    public void Framework_validation_accepts_vite_with_minicloud_allowed_host_suffix(string appDomain)
     {
         var tempDirectory = Directory.CreateTempSubdirectory("minicloud-framework-test-");
         try
@@ -1070,10 +1072,10 @@ public sealed class CliConfigTests
                     allowedHosts: [".app.muni.dev"],
                   },
                 });
-                """);
+                """.Replace(".app.muni.dev", "." + appDomain, StringComparison.Ordinal));
             var service = new MinicloudServiceConfig(tempDirectory.FullName, null, null, 3000, true, "/", "/");
 
-            var diagnostics = FrameworkDeploymentValidator.ValidatePublicHostCompatibility("web", service, "teamcore", "airlinesim-routes");
+            var diagnostics = FrameworkDeploymentValidator.ValidatePublicHostCompatibility("web", service, "teamcore", "airlinesim-routes", appDomain);
 
             Assert.Empty(diagnostics);
         }

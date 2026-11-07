@@ -512,6 +512,7 @@ Supported environment variables:
 | Variable | Description |
 | --- | --- |
 | `MINICLOUD_TOKEN` | API key used by CLI commands. |
+| `MINICLOUD_APP_DOMAIN` | Generated application hostname suffix. Set to APP_DOMAIN for a self-hosted install. Hosted default: `app.muni.dev`. |
 | `MINICLOUD_API_URL` | API base URL. Defaults to `https://api.cloud.muni.dev`. |
 
 ### Dockerfile port detection

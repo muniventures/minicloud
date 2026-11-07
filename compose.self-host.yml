@@ -2,6 +2,13 @@ x-core-env: &core-env
   ConnectionStrings__Minicloud: "Host=postgres;Database=minicloud;Username=minicloud;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}"
   DeploymentArtifacts__RootPath: /var/lib/minicloud/artifacts
   ManagedDomains__Suffix: ${APP_DOMAIN:?set APP_DOMAIN}
+  ManagedDomains__ManageDnsRecords: ${MANAGE_DNS_RECORDS:-false}
+  ManagedDomains__ReservedHostnames__0: ${API_HOSTNAME:?set API_HOSTNAME}
+  ManagedDomains__ReservedHostnames__1: ${CONSOLE_HOSTNAME:?set CONSOLE_HOSTNAME}
+  Telemetry__IngestionUrl: ${TELEMETRY_INGESTION_URL:-}
+  Telemetry__AccessOrigin: ${TELEMETRY_ACCESS_ORIGIN:-}
+  ManagedDomains__ReservedHostnames__2: ${TELEMETRY_HOSTNAME:-unused.invalid}
+  ManagedDomains__ReservedHostnames__3: ${TELEMETRY_ACCESS_HOSTNAME:-unused.invalid}
   OpenBao__Address: ${OPENBAO_ADDRESS:?set OPENBAO_ADDRESS}
   OpenBao__MountPath: ${OPENBAO_MOUNT_PATH:-minicloud-apps}
   OpenBao__Token: ${OPENBAO_TOKEN:?set OPENBAO_TOKEN}
@@ -86,8 +93,8 @@ services:
       Worker__Ssh__HostKeyPinsFile: /run/minicloud-ssh/host-pins
       Worker__RuntimeAgent__ApiBaseUrl: ${API_URL:?set API_URL}
       Hetzner__ApiToken: ${HETZNER_API_TOKEN:?set HETZNER_API_TOKEN}
-      Cloudflare__ApiToken: ${CLOUDFLARE_API_TOKEN:?set CLOUDFLARE_API_TOKEN}
-      Cloudflare__ZoneId: ${CLOUDFLARE_ZONE_ID:?set CLOUDFLARE_ZONE_ID}
+      Cloudflare__ApiToken: ${CLOUDFLARE_API_TOKEN:-}
+      Cloudflare__ZoneId: ${CLOUDFLARE_ZONE_ID:-}
     volumes:
       - artifacts:/var/lib/minicloud/artifacts
       - type: bind

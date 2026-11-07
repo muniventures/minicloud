@@ -93,7 +93,15 @@ public sealed class DnsSetupStep : IPipelineStep
                 async (hostname, ct) =>
                 {
                     _logger?.LogInformation("Upserting DNS record {Hostname} -> {Ip}", hostname, context.ServerIp);
-                    await _dnsClient.UpsertDnsRecordAsync(hostname, context.ServerIp, ct);
+                    if (_managedDomains.ManageDnsRecords)
+                    {
+                        await _dnsClient.UpsertDnsRecordAsync(hostname, context.ServerIp, ct);
+                    }
+                    else
+                    {
+                        await RecordEventAsync(context.DeploymentId, context.OwnershipToken, EventLevel.Info,
+                            $"Manual DNS: set {hostname} to {context.ServerIp}; waiting for propagation.", ct);
+                    }
                     await _dnsClient.WaitForPropagationAsync(hostname, context.ServerIp, _options.DnsPropagationTimeout, ct);
                 });
         }

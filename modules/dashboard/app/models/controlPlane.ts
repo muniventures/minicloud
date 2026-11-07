@@ -263,6 +263,7 @@ export type DeploymentActivityStepResponse = {
 };
 
 export type TelemetrySettingsResponse = {
+  ingestionUrl?: string | null;
   appId: string;
   organizationId: string;
   tenantId: string;

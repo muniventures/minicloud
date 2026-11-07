@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Minicloud.Common.Data;
 using Minicloud.Common.Providers.Dns;
 using Minicloud.Common.Services;
@@ -10,7 +11,8 @@ using Minicloud.Common.Services;
 namespace Minicloud.Worker.Pipeline;
 
 public sealed class DomainDnsReconciler(
-    MinicloudDbContext db, ICloudflareDnsClient dns, TimeProvider timeProvider, ILogger<DomainDnsReconciler> logger)
+    MinicloudDbContext db, ICloudflareDnsClient dns, TimeProvider timeProvider, ILogger<DomainDnsReconciler> logger,
+    IOptions<ManagedDomainOptions>? managedDomains = null)
 {
     public async Task ReconcileAsync(CancellationToken cancellationToken)
     {
@@ -21,6 +23,11 @@ public sealed class DomainDnsReconciler(
             .OrderBy(d => d.Id).Take(100).ToListAsync(cancellationToken);
         foreach (var domain in candidates)
         {
+            var options = managedDomains?.Value ?? new();
+            if (!options.Contains(domain.Hostname))
+            {
+                continue;
+            }
             if (await db.Deployments.AnyAsync(d => d.AppId == domain.AppId && d.OwnershipToken != null, cancellationToken))
             {
                 continue;
@@ -49,7 +56,10 @@ public sealed class DomainDnsReconciler(
             var serviceName = domain.ServiceName;
             try
             {
-                await dns.UpsertDnsRecordAsync(domain.Hostname, server.IpAddress!, cancellationToken);
+                if (options.ManageDnsRecords)
+                {
+                    await dns.UpsertDnsRecordAsync(domain.Hostname, server.IpAddress!, cancellationToken);
+                }
                 await dns.WaitForPropagationAsync(domain.Hostname, server.IpAddress!, TimeSpan.FromSeconds(30), cancellationToken);
                 await db.Entry(domain).ReloadAsync(cancellationToken);
                 if (db.Entry(domain).State == EntityState.Detached || domain.Hostname != hostname || domain.ServiceName != serviceName || domain.Status == DomainBindingService.StatusDisabled)

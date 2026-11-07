@@ -9,7 +9,8 @@ public sealed record TelemetrySettingsResponse(
     string ProvisioningStatus,
     DateTimeOffset? LastAcceptedAt,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string? IngestionUrl = null);
 
 public sealed record UpdateTelemetrySettingsRequest(bool Enabled);
 

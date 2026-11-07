@@ -13,9 +13,10 @@ namespace Minicloud.Worker.Tests;
 public sealed class AppDeletionTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task CleansRegisteredInfrastructureAndPreservesAudit(bool failDns)
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    public async Task CleansRegisteredInfrastructureAndPreservesAudit(bool failDns, bool manageDnsRecords)
     {
         await using var harness = new WorkerSqliteTestHarness();
         await harness.InitializeAsync();
@@ -31,10 +32,11 @@ public sealed class AppDeletionTests
         await db.SaveChangesAsync();
         var provider = new FakeProvider();
         var dns = new Dns { Fail = failDns };
-        var processor = new AppDeletionProcessor(db, _ => provider, dns, NullLogger<AppDeletionProcessor>.Instance);
+        var processor = new AppDeletionProcessor(db, _ => provider, dns, NullLogger<AppDeletionProcessor>.Instance,
+            Options.Create(new Minicloud.Common.Services.ManagedDomainOptions { ManageDnsRecords = manageDnsRecords }));
         Assert.True(await processor.ProcessNextAsync(default));
         Assert.Equal(["owned"], provider.Deleted);
-        if (failDns)
+        if (failDns && manageDnsRecords)
         {
             Assert.Equal("failed", (await db.Apps.SingleAsync()).DeletionStatus);
             Assert.Single(await db.ServerInstances.ToListAsync());

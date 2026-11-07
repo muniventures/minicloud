@@ -12,6 +12,29 @@ public sealed class CustomDomainRegistrationTests : IAsyncLifetime
 {
     private readonly SqliteTestHarness harness = new();
 
+    [Theory]
+    [InlineData("apps.operator.test", true)]
+    [InlineData("web.apps.operator.test", true)]
+    [InlineData("api.operator.test", true)]
+    [InlineData("child.api.operator.test", true)]
+    [InlineData("customer.test", false)]
+    [InlineData("cloud.muni.dev", false)]
+    public async Task ReservesOnlyConfiguredInstallationDomains(string hostname, bool reserved)
+    {
+        await using var db = harness.CreateDbContext();
+        var app = await SeedAsync(db);
+        var service = new CustomDomainRegistrationService(db, new IdGenerator(), new Dns(), TimeProvider.System,
+            new AuditEventService(db, new IdGenerator(), TimeProvider.System),
+            Microsoft.Extensions.Options.Options.Create(new ManagedDomainOptions
+            {
+                Suffix = "apps.operator.test", ReservedHostnames = ["api.operator.test"]
+            }));
+        if (reserved)
+            await Assert.ThrowsAsync<ArgumentException>(() => service.RegisterAsync(app.OrganizationId, app.Id, hostname, default));
+        else
+            Assert.Equal(hostname, (await service.RegisterAsync(app.OrganizationId, app.Id, hostname, default)).Hostname);
+    }
+
     [Fact]
     public async Task OwnershipIsVerifiedWithoutAnyServiceOrServerAndDeletedWithApp()
     {

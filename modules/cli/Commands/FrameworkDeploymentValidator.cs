@@ -9,8 +9,6 @@ namespace Minicloud.Cli.Commands;
 
 internal static class FrameworkDeploymentValidator
 {
-    private const string MinicloudSuffix = "app.muni.dev";
-
     private static readonly string[] ViteConfigFiles =
     [
         "vite.config.ts",
@@ -25,7 +23,8 @@ internal static class FrameworkDeploymentValidator
         string serviceName,
         MinicloudServiceConfig service,
         string organizationSlug,
-        string appSlug)
+        string appSlug,
+        string appDomain = "app.muni.dev")
     {
         if (service.Public != true || string.IsNullOrWhiteSpace(service.SourcePath) || !Directory.Exists(service.SourcePath))
         {
@@ -39,11 +38,11 @@ internal static class FrameworkDeploymentValidator
         }
 
         var diagnostics = new List<ConfigDiagnostic>();
-        var hostname = DefaultHostname(organizationSlug, appSlug, serviceName);
+        var hostname = DefaultHostname(organizationSlug, appSlug, serviceName, appDomain);
 
         if (dependencies.Contains("vite"))
         {
-            ValidateVitePreviewHost(serviceName, service.SourcePath, hostname, diagnostics);
+            ValidateVitePreviewHost(serviceName, service.SourcePath, hostname, appDomain, diagnostics);
         }
 
         if (dependencies.Contains("next"))
@@ -58,6 +57,7 @@ internal static class FrameworkDeploymentValidator
         string serviceName,
         string sourcePath,
         string hostname,
+        string appDomain,
         List<ConfigDiagnostic> diagnostics)
     {
         var configPath = ViteConfigFiles
@@ -65,27 +65,27 @@ internal static class FrameworkDeploymentValidator
             .FirstOrDefault(File.Exists);
         if (configPath is null)
         {
-            diagnostics.Add(ViteDiagnostic(serviceName, hostname));
+            diagnostics.Add(ViteDiagnostic(serviceName, hostname, appDomain));
             return;
         }
 
         var configText = File.ReadAllText(configPath);
-        if (!ConfigAllowsHost(configText, hostname))
+        if (!ConfigAllowsHost(configText, hostname, appDomain))
         {
-            diagnostics.Add(ViteDiagnostic(serviceName, hostname));
+            diagnostics.Add(ViteDiagnostic(serviceName, hostname, appDomain));
         }
     }
 
-    private static ConfigDiagnostic ViteDiagnostic(string serviceName, string hostname) =>
+    private static ConfigDiagnostic ViteDiagnostic(string serviceName, string hostname, string appDomain) =>
         new(
             $"services.{serviceName}.sourcePath",
-            $"Vite preview blocks the Minicloud host '{hostname}'. Add preview.allowedHosts: ['.{MinicloudSuffix}'] or the exact hostname to vite.config.* before deploying.");
+            $"Vite preview blocks the Minicloud host '{hostname}'. Add preview.allowedHosts: ['.{appDomain}'] or the exact hostname to vite.config.* before deploying.");
 
-    private static bool ConfigAllowsHost(string configText, string hostname)
+    private static bool ConfigAllowsHost(string configText, string hostname, string appDomain)
     {
         var compact = RemoveWhitespace(configText);
         return compact.Contains("allowedHosts:true", StringComparison.Ordinal) ||
-            configText.Contains($".{MinicloudSuffix}", StringComparison.Ordinal) ||
+            configText.Contains($".{appDomain}", StringComparison.Ordinal) ||
             configText.Contains(hostname, StringComparison.Ordinal);
     }
 
@@ -144,8 +144,8 @@ internal static class FrameworkDeploymentValidator
         }
     }
 
-    private static string DefaultHostname(string organizationSlug, string appSlug, string serviceName) =>
-        $"{DefaultLabel(organizationSlug, appSlug, serviceName)}.{MinicloudSuffix}";
+    private static string DefaultHostname(string organizationSlug, string appSlug, string serviceName, string appDomain) =>
+        $"{DefaultLabel(organizationSlug, appSlug, serviceName)}.{appDomain}";
 
     private static string DefaultLabel(string organizationSlug, string appSlug, string serviceName)
     {

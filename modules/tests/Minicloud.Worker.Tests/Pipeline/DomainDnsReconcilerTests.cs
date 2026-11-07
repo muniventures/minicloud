@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Minicloud.Common.Models;
 using Minicloud.Common.Providers.Dns;
 using Minicloud.Common.Services;
@@ -12,22 +13,26 @@ public sealed class DomainDnsReconcilerTests : IClassFixture<WorkerSqliteTestHar
     private readonly WorkerSqliteTestHarness _harness;
     public DomainDnsReconcilerTests(WorkerSqliteTestHarness harness) => _harness = harness;
 
-    [Fact]
-    public async Task AddedAliasGetsDnsWithoutDeploymentAndVerifiedBindingIsSkipped()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AddedAliasGetsDnsWithoutDeploymentAndVerifiedBindingIsSkipped(bool manageDnsRecords)
     {
-        var (app, domain) = await SeedAsync("dns-alias");
+        var (app, domain) = await SeedAsync("dns-alias-" + manageDnsRecords);
         var dns = new DnsClient();
         await using var db = _harness.CreateDbContext();
-        var service = new DomainDnsReconciler(db, dns, TimeProvider.System, NullLogger<DomainDnsReconciler>.Instance);
+        var service = new DomainDnsReconciler(db, dns, TimeProvider.System, NullLogger<DomainDnsReconciler>.Instance,
+            Options.Create(new ManagedDomainOptions { ManageDnsRecords = manageDnsRecords }));
         await service.ReconcileAsync(default);
-        Assert.Contains((domain.Hostname, "192.0.2.10"), dns.Upserts);
+        if (manageDnsRecords) Assert.Contains((domain.Hostname, "192.0.2.10"), dns.Upserts);
+        else Assert.Empty(dns.Upserts);
         Assert.Equal(1, dns.PropagationChecks);
         var updated = await db.Domains.FindAsync(domain.Id);
         Assert.Equal(DomainBindingService.DnsVerified, updated!.DnsStatus);
         Assert.Equal("192.0.2.10", updated.TargetIp);
         Assert.Equal(DomainBindingService.StatusPendingApply, updated.Status);
         await service.ReconcileAsync(default);
-        Assert.Single(dns.Upserts);
+        Assert.Equal(manageDnsRecords ? 1 : 0, dns.Upserts.Count);
     }
 
     [Fact]

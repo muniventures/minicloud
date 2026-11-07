@@ -19,7 +19,7 @@ public sealed class CustomDomainRegistrationService(
             throw new ArgumentException("App is unavailable.");
         }
         var normalized = DomainBindingService.NormalizeCustomHostname(hostname);
-        if (normalized is null || managedDomains?.Value.Contains(normalized) == true)
+        if (normalized is null || (managedDomains?.Value ?? new()).IsReserved(normalized))
         {
             throw new ArgumentException("Enter a domain without a URL, port, path or wildcard.");
         }

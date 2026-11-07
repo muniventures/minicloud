@@ -130,7 +130,7 @@ public sealed class DomainBindingService(
             return DomainBindingCreateResult.Validation("serviceName", "Choose an existing public service.");
         }
         var normalized = NormalizeCustomHostname(hostname);
-        if (normalized is null || _managedDomains.Contains(normalized))
+        if (normalized is null || _managedDomains.IsReserved(normalized))
         {
             return DomainBindingCreateResult.Validation("hostname", "Enter an apex domain or subdomain, without a URL, port, path or wildcard. Minicloud domains are reserved.");
         }
@@ -174,8 +174,7 @@ public sealed class DomainBindingService(
         }
         var labels = hostname.Split('.');
         return ("_minicloud-verification." + hostname).Length <= 253 && labels.Length >= 2 && labels.All(IsValidLabel) &&
-            char.IsAsciiLetterLower(labels[^1][0]) && !System.Net.IPAddress.TryParse(hostname, out _) &&
-            hostname != "muni.dev" && !hostname.EndsWith(".muni.dev", StringComparison.Ordinal)
+            char.IsAsciiLetterLower(labels[^1][0]) && !System.Net.IPAddress.TryParse(hostname, out _)
             ? hostname : null;
     }
 

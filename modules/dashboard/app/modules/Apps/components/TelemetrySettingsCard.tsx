@@ -82,7 +82,7 @@ export function TelemetrySettingsCard({ appId, settings, onChanged }: Props) {
               </p>
               <pre className="mt-2 overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs text-muted-foreground">
 {`OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/protobuf
-OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=https://telemetry.cloud.muni.dev/otlp/v1/logs
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=${settings.ingestionUrl ?? "<ask your operator for the logs ingestion endpoint>"}
 OTEL_EXPORTER_OTLP_LOGS_HEADERS=Authorization=Bearer%20<token>
 OTEL_SERVICE_NAME=<service-name>`}
               </pre>

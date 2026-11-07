@@ -225,3 +225,11 @@ secrets:
 ```
 
 For SQLite, omit `postgres_password`.
+
+## Self-hosted domains
+
+Set `minicloud_api_url` to your HTTPS API origin and `minicloud_app_domain` to
+that installation's APP_DOMAIN. The latter sets `MINICLOUD_APP_DOMAIN` for
+framework host validation. Both are required when selecting a self-hosted instance.
+Use a CLI release containing these options, or build the current source during
+pre-release qualification.

@@ -40,6 +40,7 @@ function settings(enabled = true, lastAcceptedAt: string | null = "2026-09-08T11
     appId: "app_123",
     organizationId: "org_123",
     tenantId: "mcl_abc",
+    ingestionUrl: "https://ingest.operator.test/otlp/v1/logs",
     enabled,
     retentionPolicy: "7d",
     provisioningStatus: "ready",
@@ -90,6 +91,11 @@ describe("AppTelemetryPanel", () => {
       destination: "/explore?orgId=1",
       expiresAt: "2026-09-08T13:00:00Z"
     });
+  });
+
+  it("shows the installation's configured exporter endpoint", async () => {
+    render(<AppTelemetryPanel app={{ ...app }} />);
+    expect(await screen.findByText(/OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=https:\/\/ingest\.operator\.test\/otlp\/v1\/logs/)).toBeInTheDocument();
   });
 
   it("shows the not-configured state without implying collection", async () => {

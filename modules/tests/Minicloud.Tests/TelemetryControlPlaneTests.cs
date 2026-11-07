@@ -31,6 +31,7 @@ public sealed class TelemetryControlPlaneTests : IClassFixture<SqliteTestHarness
         var principal = ManagePrincipal($"usr_{tag}");
         var enabled = await svc.SetEnabledAsync(principal, app.Id, true, CancellationToken.None);
         Assert.NotNull(enabled);
+        Assert.Equal("https://ingest.operator.test/otlp/v1/logs", enabled.Settings!.IngestionUrl);
         Assert.Matches(@"^mcl_[0-9a-f]{32}$", enabled.Settings!.TenantId);
 
         var first = await svc.IssueCredentialAsync(principal, app.Id, "backend", "edge-a", null, CancellationToken.None);
@@ -452,7 +453,12 @@ public sealed class TelemetryControlPlaneTests : IClassFixture<SqliteTestHarness
     private TelemetryService CreateTelemetryService(MinicloudDbContext db, TimeProvider time) =>
         new(db, new GuidIdGenerator(), time, new TelemetryTokenService(),
             new DeploymentServiceSetService(), new ControlPlaneAuthorization(db),
-            new AuditEventService(db, new GuidIdGenerator(), time), new TestHostEnvironment());
+            new AuditEventService(db, new GuidIdGenerator(), time), new TestHostEnvironment(),
+            Microsoft.Extensions.Options.Options.Create(new TelemetryClientOptions
+            {
+                IngestionUrl = "https://ingest.operator.test/otlp/v1/logs",
+                AccessOrigin = "https://logs.operator.test"
+            }));
 
     private static TelemetryCredentialAuthService CreateAuthService(MinicloudDbContext db, TimeProvider time) =>
         new(db, new TelemetryTokenService(), time);

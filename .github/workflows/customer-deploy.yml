@@ -27,6 +27,11 @@ on:
         required: false
         type: string
         default: ""
+      minicloud_app_domain:
+        description: "Generated application hostname suffix for a self-hosted instance."
+        required: false
+        type: string
+        default: ""
     secrets:
       minicloud_api_key:
         required: true
@@ -150,6 +155,7 @@ jobs:
           MINICLOUD_TOKEN: ${{ secrets.minicloud_api_key }}
           POSTGRES_PASSWORD: ${{ secrets.postgres_password }}
           MINICLOUD_ENVIRONMENT: ${{ inputs.minicloud_environment }}
+          MINICLOUD_APP_DOMAIN: ${{ inputs.minicloud_app_domain }}
           SELF_HOSTED_API_URL: ${{ inputs.minicloud_api_url }}
           APP_ID: ${{ inputs.app_id }}
           DATABASE: ${{ inputs.database }}
@@ -171,6 +177,10 @@ jobs:
           if [[ -n "$SELF_HOSTED_API_URL" ]]; then
             if [[ ! "$SELF_HOSTED_API_URL" =~ ^https://[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]+)?/?$ ]]; then
               echo "minicloud_api_url must be an HTTPS origin." >&2
+              exit 1
+            fi
+            if [[ -z "$MINICLOUD_APP_DOMAIN" ]]; then
+              echo "minicloud_app_domain is required for a self-hosted instance." >&2
               exit 1
             fi
             export MINICLOUD_API_URL="$SELF_HOSTED_API_URL"

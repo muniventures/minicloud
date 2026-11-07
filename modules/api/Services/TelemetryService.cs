@@ -438,7 +438,7 @@ public sealed class TelemetryService(
             options?.Value?.AuthSigningKey ?? "minicloud-telemetry-auth-signing-dev-key-must-be-long",
             timeProvider);
 
-        var accessOrigin = options?.Value?.AccessOrigin ?? "https://logs.cloud.muni.dev";
+        var accessOrigin = options?.Value?.AccessOrigin ?? "http://localhost:8088";
         var queryUrl = $"{accessOrigin.TrimEnd('/')}/v1/logs";
         return new Minicloud.Common.Contracts.TelemetryReadTokenIssueResponse(token, expiresAt, queryUrl);
     }
@@ -457,8 +457,8 @@ public sealed class TelemetryService(
         throw new InvalidOperationException("Could not generate a unique telemetry tenant ID.");
     }
 
-    private static TelemetrySettingsResponse ToSettingsResponse(AppTelemetrySettings settings) =>
+    private TelemetrySettingsResponse ToSettingsResponse(AppTelemetrySettings settings) =>
         new(settings.AppId, settings.OrganizationId, settings.TenantId, settings.Enabled,
             settings.RetentionPolicy, settings.ProvisioningStatus, settings.LastAcceptedAt,
-            settings.CreatedAt, settings.UpdatedAt);
+            settings.CreatedAt, settings.UpdatedAt, options?.Value.IngestionUrl);
 }

@@ -17,18 +17,20 @@ public sealed class DnsSetupStepTests : IClassFixture<WorkerSqliteTestHarness>
         _harness = harness;
     }
 
-    [Fact]
-    public async Task UpsertsDnsRecordForPublicServices()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UpsertsDnsRecordForPublicServices(bool manageDnsRecords)
     {
-        var (org, app) = await _harness.SeedOrgAndAppAsync("dns");
+        var (org, app) = await _harness.SeedOrgAndAppAsync("dns-" + manageDnsRecords);
         var now = DateTimeOffset.UtcNow;
 
         await using (var db = _harness.CreateDbContext())
         {
             var dep = new Deployment
             {
-                Id = "dep-dns-1",
-                OwnershipToken = "owner-dns-1",
+                Id = $"dep-dns-{manageDnsRecords}",
+                OwnershipToken = $"owner-dns-{manageDnsRecords}",
                 OrganizationId = org.Id,
                 AppId = app.Id,
                 Status = DeploymentStatus.Provisioning,
@@ -40,7 +42,7 @@ public sealed class DnsSetupStepTests : IClassFixture<WorkerSqliteTestHarness>
             db.Deployments.Add(dep);
             db.DeploymentServices.Add(new DeploymentService
             {
-                Id = "svc-web",
+                Id = $"svc-web-{manageDnsRecords}",
                 DeploymentId = dep.Id,
                 Name = "web",
                 Image = "test/web:latest",
@@ -72,12 +74,13 @@ public sealed class DnsSetupStepTests : IClassFixture<WorkerSqliteTestHarness>
             mockDns,
             Options.Create(new DeploymentPipelineOptions()),
             TimeProvider.System,
-            NullLogger<DnsSetupStep>.Instance);
+            NullLogger<DnsSetupStep>.Instance,
+            Options.Create(new ManagedDomainOptions { ManageDnsRecords = manageDnsRecords }));
 
         var context = new PipelineStepContext
         {
-            DeploymentId = "dep-dns-1",
-            OwnershipToken = "owner-dns-1",
+            DeploymentId = $"dep-dns-{manageDnsRecords}",
+            OwnershipToken = $"owner-dns-{manageDnsRecords}",
             OrganizationId = org.Id,
             AppId = app.Id,
             ServerIp = "192.0.2.100"
@@ -85,8 +88,15 @@ public sealed class DnsSetupStepTests : IClassFixture<WorkerSqliteTestHarness>
 
         await step.ExecuteAsync(context, CancellationToken.None);
 
-        Assert.NotEmpty(upserted);
-        Assert.Equal("192.0.2.100", upserted[0].Ip);
+        if (manageDnsRecords)
+        {
+            Assert.NotEmpty(upserted);
+            Assert.Equal("192.0.2.100", upserted[0].Ip);
+        }
+        else
+        {
+            Assert.Empty(upserted);
+        }
         Assert.NotEmpty(waited);
         Assert.Contains(context.PrimaryHostname, waited);
     }

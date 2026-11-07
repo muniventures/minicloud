@@ -184,7 +184,7 @@ public sealed partial class CliApplication
                 {
                     var diagnostics = ValidateDockerfileForService(name, service);
                     if (diagnostics.Count > 0) { PrintDiagnostics(diagnostics); return CliExitCodes.ValidationError; }
-                    var framework = FrameworkDeploymentValidator.ValidatePublicHostCompatibility(name, service, organization.Slug, app.Slug);
+                    var framework = FrameworkDeploymentValidator.ValidatePublicHostCompatibility(name, service, organization.Slug, app.Slug, _environment.AppDomain);
                     if (framework.Count > 0) { PrintDiagnostics(framework); return CliExitCodes.ValidationError; }
                 }
                 if (localServices.Length > 0)
@@ -691,7 +691,8 @@ public sealed partial class CliApplication
                 serviceName,
                 service,
                 organizationSlug,
-                appSlug);
+                appSlug,
+                _environment.AppDomain);
             if (frameworkDiagnostics.Count > 0)
             {
                 PrintDiagnostics(frameworkDiagnostics);

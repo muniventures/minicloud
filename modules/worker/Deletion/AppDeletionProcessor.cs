@@ -143,7 +143,7 @@ public sealed class AppDeletionProcessor(
         }
         foreach (var domain in domains)
         {
-            if (domain.Kind == DomainBindingService.KindMinicloudSubdomain)
+            if (domain.Kind == DomainBindingService.KindMinicloudSubdomain && _managedDomains.ManageDnsRecords)
             {
                 await dns.DeleteDnsRecordsAsync(domain.Hostname, ct);
             }

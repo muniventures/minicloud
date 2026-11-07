@@ -23,8 +23,8 @@ public sealed class CustomDomainTests : IAsyncLifetime
     [InlineData("a..example.com", null)]
     [InlineData("example.com..", null)]
     [InlineData("example.1abc", null)]
-    [InlineData("a.app.muni.dev", null)]
-    [InlineData("cloud.muni.dev", null)]
+    [InlineData("a.app.muni.dev", "a.app.muni.dev")]
+    [InlineData("cloud.muni.dev", "cloud.muni.dev")]
     public void NormalizesAndValidatesHostnames(string hostname, string? expected) =>
         Assert.Equal(expected, DomainBindingService.NormalizeCustomHostname(hostname));
 

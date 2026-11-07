@@ -1499,7 +1499,8 @@ render_observability_configs() {
     --arg config_dir "${OBSERVABILITY_CONFIG_DIR}" \
     --arg grafana_password "${grafana_password}" \
     --arg telemetry_management_key "${telemetry_management_key}" \
-    --arg telemetry_auth_signing_key "${telemetry_auth_signing_key}" '
+    --arg telemetry_auth_signing_key "${telemetry_auth_signing_key}" \
+    --arg telemetry_access_origin "$(printf '%s' "${SERVICES_JSON}" | jq -r '[.[] | .env.Telemetry__AccessOrigin // empty][0] // ""')" '
       {
         services: {
           loki: {
@@ -1547,6 +1548,7 @@ render_observability_configs() {
               ASPNETCORE_URLS: "http://+:8080",
               Database__Provider: "Sqlite",
               Database__ConnectionString: "Data Source=/var/lib/minicloud/telemetry/telemetry.db",
+              Telemetry__AccessOrigin: $telemetry_access_origin,
               Telemetry__LokiBaseUrl: "http://loki:3100",
               Telemetry__GrafanaBaseUrl: "http://grafana:3000",
               Telemetry__ManagementApiKey: $telemetry_management_key,
@@ -1572,12 +1574,15 @@ render_observability_configs() {
 
 write_observability_caddy_config() {
   local caddy_obs_file="/opt/minicloud/caddy/apps/${APP_NAME}-observability.caddy"
-  local telemetry_domain="telemetry.cloud.muni.dev"
-  local logs_domain="logs.cloud.muni.dev"
-  if [ "${APP_ENV}" = "staging" ]; then
-    telemetry_domain="telemetry.cloud-dev.muni.dev"
-    logs_domain="logs.cloud-dev.muni.dev"
-  fi
+  local telemetry_domain logs_domain
+  telemetry_domain="$(printf '%s' "${SERVICES_JSON}" | jq -r '[.[] | .env.Telemetry__IngestionUrl // empty][0] // ""' | sed -E 's#^https://([^/]+)/.*$#\1#')"
+  logs_domain="$(printf '%s' "${SERVICES_JSON}" | jq -r '[.[] | .env.Telemetry__AccessOrigin // empty][0] // ""' | sed -E 's#^https://([^/]+)/?$#\1#')"
+  for hostname in "${telemetry_domain}" "${logs_domain}"; do
+    if ! [[ "${hostname}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]]; then
+      echo "Configure HTTPS Telemetry__IngestionUrl and Telemetry__AccessOrigin before enabling observability." >&2
+      return 1
+    fi
+  done
 
   sudo mkdir -p /opt/minicloud/caddy/apps
   sudo tee "${caddy_obs_file}" >/dev/null <<CADDY_CONFIG
