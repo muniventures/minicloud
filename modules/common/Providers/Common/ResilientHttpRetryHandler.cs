@@ -35,6 +35,8 @@ public class ResilientHttpRetryHandler : DelegatingHandler
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
+        if (request.Options.TryGetValue(Hetzner.HetznerClient.NoRetry, out var noRetry) && noRetry)
+        { return await base.SendAsync(request, cancellationToken); }
         var attempt = 0;
 
         while (true)

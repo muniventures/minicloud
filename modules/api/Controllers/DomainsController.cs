@@ -52,7 +52,7 @@ public sealed class DomainsController : ControllerBase
                     .Select(DomainBindingService.ToResponse)
                     .ToArray(),
                 service.Sha256,
-                latestStatus.ObservedAt)));
+                latestStatus.ObservedAt, service.Storage)));
     }
 
     [HttpGet]

@@ -26,7 +26,8 @@ public sealed record MinicloudServiceConfig(
     IReadOnlyDictionary<string, string>? BuildEnv = null,
     IReadOnlyDictionary<string, Minicloud.Common.Contracts.AssetMountRequest>? AssetMounts = null,
     string BuildMode = Minicloud.Common.Contracts.ServiceBuildModes.Local,
-    string? BuildPlatform = null);
+    string? BuildPlatform = null,
+    IReadOnlyDictionary<string, Minicloud.Common.Contracts.StorageMountRequest>? Storage = null);
 
 public sealed record ConfigDiagnostic(string Field, string Message);
 

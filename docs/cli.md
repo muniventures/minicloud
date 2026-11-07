@@ -564,3 +564,7 @@ The default is 2 and the supported range is 1 to 10. Use
 `minicloud deploy --build-jobs 3` to override the setting for one invocation.
 All selected local builds finish before any uploads start. The CLI stages
 images in the local Docker image store and uploads up to two at a time.
+
+## Durable app storage
+
+Hetzner apps can declare named writable volumes under each service’s `storage` mapping. See [configuration, retention and growth](durable-storage.md). Storage changes participate in deployment change detection.

@@ -121,6 +121,7 @@ public sealed partial class SshDeployStep : IPipelineStep
         var payloadJson = await BuildPayloadJsonAsync(context, deployment, retainedImageOwners, cancellationToken, agent);
         var uploads = BuildArtifactUploads(deployment, retainedImageOwners);
         uploads.Add(RuntimeHelperUpload("runtime-maintenance.py"));
+        if (deployment.Services.Any(s => s.StorageJson is not null)) { uploads.Add(RuntimeHelperUpload("storage-volume.py")); }
         if (deployment.Services.Any(s => s.AssetMountsJson is not null)) { uploads.Add(AssetHelperUpload()); }
         if (agent is not null)
         {
@@ -418,6 +419,7 @@ public sealed partial class SshDeployStep : IPipelineStep
             throw new PipelineStepException("secret_store_unavailable", "Minicloud could not read deployment secrets. Retry when the secret store is available.", ex);
         }
 
+        var storageMounts = await ResolveStorageAsync(context, deployment, cancellationToken);
         var assetMounts = await ResolveAssetMountsAsync(context, deployment.Services, cancellationToken);
         var services = deployment.Services
             .OrderBy(s => s.Name, StringComparer.Ordinal)
@@ -434,6 +436,7 @@ public sealed partial class SshDeployStep : IPipelineStep
                 health_path = string.IsNullOrWhiteSpace(s.HealthPath) ? "/health" : s.HealthPath,
                 hosts = ResolveServiceHosts(context, s),
                 asset_mounts = assetMounts.GetValueOrDefault(s.Name, []),
+                storage_mounts = storageMounts.GetValueOrDefault(s.Name, []).Select(m => new { name = m.Name, volume_id = m.VolumeId, mount_path = m.MountPath, uid = m.Uid, gid = m.Gid }).ToArray(),
                 env = MergeEnvironment(DeserializeEnv(s.EnvJson), resolvedSecrets.GetValueOrDefault(s.Name)),
             })
             .ToArray();

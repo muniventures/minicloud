@@ -293,7 +293,7 @@ public sealed partial class CliApplication
                     x.Value.Env,
                     x.Value.SecretEnv,
                     serviceArtifactIds.TryGetValue(x.Key, out var artifactId) ? artifactId : null,
-                    serviceHashes.GetValueOrDefault(x.Key), x.Value.AssetMounts, imagePublications.GetValueOrDefault(x.Key)?.Id)).ToArray(),
+                    serviceHashes.GetValueOrDefault(x.Key), x.Value.AssetMounts, imagePublications.GetValueOrDefault(x.Key)?.Id, x.Value.Storage)).ToArray(),
                 postgresPassword, preparation?.Id);
 
             if (preparation is not null)

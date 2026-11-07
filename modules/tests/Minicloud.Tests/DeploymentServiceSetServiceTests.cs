@@ -24,6 +24,8 @@ public sealed class DeploymentServiceSetServiceTests : IClassFixture<SqliteTestH
             Service("frontend", "ghcr.io/teamcore/frontend:a", 3000, true, "/", "/", """{"NODE_ENV":"production"}""")));
         db.Deployments.Add(SucceededDeployment("dep_backend_1", app, new DateTimeOffset(2026, 5, 1, 11, 0, 0, TimeSpan.Zero),
             Service("backend", "ghcr.io/teamcore/backend:a", 8080, true, "/", "/health")));
+        var persisted = db.ChangeTracker.Entries<Deployment>().SelectMany(x => x.Entity.Services).FirstOrDefault(x => x.Name == "frontend");
+        if (persisted is not null) { persisted.StorageJson = """{"uploads":{"sizeGb":20,"mountPath":"/app/uploads","uid":1000,"gid":1000}}"""; }
         await db.SaveChangesAsync();
 
         var service = new DeploymentServiceSetService();
@@ -40,6 +42,7 @@ public sealed class DeploymentServiceSetServiceTests : IClassFixture<SqliteTestH
         var backend = Assert.Single(merged, x => x.Name == "backend");
         Assert.Equal("ghcr.io/teamcore/frontend:a", frontend.Image);
         Assert.Equal("production", frontend.Env?["NODE_ENV"]);
+        Assert.Equal(20, frontend.Storage?["uploads"].SizeGb);
         Assert.Equal("ghcr.io/teamcore/backend:b", backend.Image);
     }
 

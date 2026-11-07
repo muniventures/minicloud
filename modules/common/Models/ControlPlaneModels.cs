@@ -190,6 +190,7 @@ public sealed class DeploymentService
     public string? ImageDigest { get; set; }
     public string? ImagePlatform { get; set; }
     public string? AssetMountsJson { get; set; }
+    public string? StorageJson { get; set; }
     [Key]
     public string Id { get; set; } = default!;
     public string DeploymentId { get; set; } = default!;

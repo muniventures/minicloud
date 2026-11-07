@@ -105,7 +105,7 @@ public static class DtoMapping
                 x.Path,
                 x.HealthPath,
                 x.Public ? urlsByService.GetValueOrDefault(x.Name, []) : [],
-                x.Sha256 ?? x.Artifact?.Sha256, AssetReleaseService.Mounts(x))).ToArray(),
+                x.Sha256 ?? x.Artifact?.Sha256, AssetReleaseService.Mounts(x), StorageMounts.Read(x.StorageJson))).ToArray(),
             deployment.CreatedAt,
             deployment.StartedAt,
             deployment.CompletedAt,

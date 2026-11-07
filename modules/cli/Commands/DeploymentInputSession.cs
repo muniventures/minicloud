@@ -26,7 +26,8 @@ internal sealed class DeploymentInputSession : IDisposable
             Env = service.Env?.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal),
             SecretEnv = service.SecretEnv?.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal),
             BuildEnv = service.BuildEnv?.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal),
-            AssetMounts = service.AssetMounts?.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal)
+            AssetMounts = service.AssetMounts?.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal),
+            Storage = service.Storage?.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal)
         };
         if (string.IsNullOrWhiteSpace(service.SourcePath))
         {

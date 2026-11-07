@@ -54,6 +54,7 @@ import type {
   AppServiceInventoryResponse,
   AppServiceSecretServiceResponse,
 } from "../../models/controlPlane";
+import { AppStoragePanel } from "./AppStoragePanel";
 import { AppConsolePanel } from "./AppConsolePanel";
 import { AppTelemetryPanel } from "./AppTelemetryPanel";
 import { AppDomains } from "./components/AppDomains";
@@ -410,6 +411,7 @@ export function AppDetailModule() {
           >
             Services
           </TabsTrigger>
+          <TabsTrigger value="storage">Storage</TabsTrigger>
           <TabsTrigger value="domains">Domains</TabsTrigger>
           <TabsTrigger onClick={() => setActiveTab("secrets")} value="secrets">
             Secrets
@@ -427,6 +429,10 @@ export function AppDetailModule() {
             Application logs
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="storage">
+          <AppStoragePanel key={app.id} appId={app.id} services={services} />
+        </TabsContent>
 
         <TabsContent value="domains">
           <AppDomains key={app.id} organizationId={app.organizationId} appId={app.id} services={services} onSaved={refreshServices} onManageService={setManageDomainsServiceName} />
@@ -819,6 +825,16 @@ export function AppDetailModule() {
                                       {service.healthPath || "Not configured"}
                                     </p>
                                   </div>
+                                  {Object.keys(service.storage ?? {}).length > 0 ? (
+                                    <div className="sm:col-span-2">
+                                      <p className="text-xs font-medium text-muted-foreground">Durable storage</p>
+                                      {Object.entries(service.storage ?? {}).map(([name, mount]) => (
+                                        <p key={name} className="break-all text-xs">
+                                          {name} · {mount.sizeGb} GB · <code>{mount.mountPath}</code>
+                                        </p>
+                                      ))}
+                                    </div>
+                                  ) : null}
                                   {service.domains.some(
                                     (domain) => domain.status === "disabled",
                                   ) ? (

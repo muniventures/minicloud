@@ -151,7 +151,8 @@ public static partial class MinicloudConfigLoader
                 GetEnvironment(serviceMapping, serviceName, "secretEnv", diagnostics),
                 GetEnvironment(serviceMapping, serviceName, "buildEnv", diagnostics),
                 ParseAssetMounts(serviceMapping, serviceName, diagnostics),
-                ParseBuildMode(serviceMapping, serviceName, diagnostics));
+                ParseBuildMode(serviceMapping, serviceName, diagnostics),
+                Storage: ParseStorage(serviceMapping, serviceName, diagnostics));
         }
 
         return services;

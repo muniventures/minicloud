@@ -480,7 +480,7 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
             "      echo 'vm.swappiness=10' >> /etc/sysctl.d/99-minicloud-swap.conf",
             "    fi",
             "  - apt-get update",
-            "  - apt-get install -y python3 ca-certificates curl gnupg jq ufw caddy docker.io docker-compose-v2 docker-buildx",
+            "  - apt-get install -y python3 ca-certificates curl gnupg jq ufw caddy docker.io docker-compose-v2 docker-buildx e2fsprogs util-linux",
             "  - usermod -aG docker minicloud",
             "  - mkdir -p /opt/minicloud/bin /opt/minicloud/caddy/apps /opt/minicloud/apps /opt/minicloud/logs",
             "  - printf 'import /opt/minicloud/caddy/apps/*.caddy\\n' > /etc/caddy/Caddyfile",

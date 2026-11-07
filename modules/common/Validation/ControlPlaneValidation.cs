@@ -120,6 +120,10 @@ public static partial class ControlPlaneValidation
             result.Add("services", $"At most {MaxDeploymentServices} services are supported.");
         }
 
+        foreach (var error in StorageValidation.Validate(request.Services.Select(x => (x.Name, x.Storage,
+            (IEnumerable<string>)(x.AssetMounts?.Values.Select(m => m.MountPath) ?? []))),
+            string.Equals(request.Database, "sqlite", StringComparison.OrdinalIgnoreCase)).Errors)
+        { result.Add(error.Field, error.Message); }
         var names = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < request.Services.Count; i++)
         {
@@ -181,7 +185,7 @@ public static partial class ControlPlaneValidation
         return result;
     }
 
-    public static ValidationResult ValidateMergedDeploymentServices(IReadOnlyList<DeploymentServiceRequest> services)
+    public static ValidationResult ValidateMergedDeploymentServices(IReadOnlyList<DeploymentServiceRequest> services, bool sqlite = false)
     {
         var result = new ValidationResult();
         if (services.Count == 0)
@@ -195,6 +199,9 @@ public static partial class ControlPlaneValidation
             result.Add("services", $"At most {MaxDeploymentServices} active services are supported.");
         }
 
+        foreach (var error in StorageValidation.Validate(services.Select(x => (x.Name, x.Storage,
+            (IEnumerable<string>)(x.AssetMounts?.Values.Select(m => m.MountPath) ?? []))), sqlite).Errors)
+        { result.Add(error.Field, error.Message); }
         if (!services.Any(x => x.Public))
         {
             result.Add("services", "At least one public service is required across the app's active services.");

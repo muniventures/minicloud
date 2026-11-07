@@ -141,11 +141,35 @@ public sealed class DeploymentsController : ControllerBase
             }
 
             var desiredServices = await serviceSets.BuildMergedServicesAsync(db, appRecord.Id, deployment.Services, cancellationToken);
-            var desiredValidation = ControlPlaneValidation.ValidateMergedDeploymentServices(desiredServices);
+            var desiredValidation = ControlPlaneValidation.ValidateMergedDeploymentServices(desiredServices, deployment.Database == DatabaseMode.Sqlite);
             if (!desiredValidation.IsValid)
             {
                 return EndpointResults.ValidationProblem("Deployment request is invalid for the app's active service set.", desiredValidation);
             }
+
+            if (desiredServices.Any(x => x.Storage is { Count: > 0 }))
+            {
+                var servers = await db.ServerInstances.Where(x => x.AppId == appRecord.Id).ToListAsync(cancellationToken);
+                if (servers.Count > 1 || servers.Any(x => x.OrganizationId != appRecord.OrganizationId))
+                { return EndpointResults.Conflict("storage_server_conflict", "Storage requires one verified app server."); }
+                var options = HttpContext.RequestServices.GetRequiredService<Microsoft.Extensions.Options.IOptions<ProviderPlanOptions>>().Value;
+                var provider = servers.SingleOrDefault()?.Provider ?? ProviderPlanMapping.FromAppPlan(appRecord.Plan, options).Provider.ToString();
+                if (!string.Equals(provider, "Hetzner", StringComparison.OrdinalIgnoreCase))
+                { return EndpointResults.Problem("storage_provider_unsupported", "Durable storage is currently supported only on Hetzner.", StatusCodes.Status400BadRequest); }
+            }
+
+            var storedVolumes = await db.AppStorageVolumes.Where(x => x.AppId == appRecord.Id).ToListAsync(cancellationToken);
+            var desiredVolumes = desiredServices.SelectMany(x => x.Storage ?? new Dictionary<string, StorageMountRequest>()).ToArray();
+            foreach (var (name, mount) in desiredVolumes)
+            {
+                var stored = storedVolumes.SingleOrDefault(x => x.Name == name);
+                if (stored is not null && (mount.SizeGb < stored.SizeGb || mount.Uid != stored.Uid || mount.Gid != stored.Gid))
+                { return EndpointResults.Problem("invalid_storage_change", "Storage cannot shrink or change ownership. Retain its size, UID and GID.", StatusCodes.Status400BadRequest); }
+            }
+            var retainedSizes = storedVolumes.ToDictionary(x => x.Name, x => x.SizeGb);
+            foreach (var (name, mount) in desiredVolumes) { retainedSizes[name] = mount.SizeGb; }
+            if (retainedSizes.Count > StorageValidation.MaxVolumes || retainedSizes.Values.Sum(x => (long)x) > StorageValidation.MaxSizeGb)
+            { return EndpointResults.Problem("storage_limit_exceeded", "Retained and requested storage exceeds the app's volume count or capacity limit.", StatusCodes.Status400BadRequest); }
 
             try
             {

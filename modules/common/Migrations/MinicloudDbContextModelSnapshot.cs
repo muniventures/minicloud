@@ -238,6 +238,58 @@ namespace Minicloud.Common.Migrations
                     b.ToTable("app_service_secret_services", (string)null);
                 });
 
+            modelBuilder.Entity("Minicloud.Common.Models.AppStorageVolume", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AppId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("app_id");
+
+                    b.Property<bool>("CreationAttempted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("creation_attempted");
+
+                    b.Property<int>("Gid")
+                        .HasColumnType("integer")
+                        .HasColumnName("gid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<string>("ProviderVolumeId")
+                        .HasColumnType("text")
+                        .HasColumnName("provider_volume_id");
+
+                    b.Property<string>("Region")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("region");
+
+                    b.Property<int>("SizeGb")
+                        .HasColumnType("integer")
+                        .HasColumnName("size_gb");
+
+                    b.Property<int>("Uid")
+                        .HasColumnType("integer")
+                        .HasColumnName("uid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProviderVolumeId")
+                        .IsUnique();
+
+                    b.HasIndex("AppId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("app_storage_volumes", (string)null);
+                });
+
             modelBuilder.Entity("Minicloud.Common.Models.AppTelemetrySettings", b =>
                 {
                     b.Property<string>("Id")
@@ -893,6 +945,10 @@ namespace Minicloud.Common.Migrations
                     b.Property<string>("Sha256")
                         .HasColumnType("text")
                         .HasColumnName("sha256");
+
+                    b.Property<string>("StorageJson")
+                        .HasColumnType("text")
+                        .HasColumnName("storage_json");
 
                     b.HasKey("Id");
 

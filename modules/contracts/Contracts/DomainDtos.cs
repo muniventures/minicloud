@@ -48,7 +48,8 @@ public sealed record AppServiceInventoryResponse(
     RuntimeServiceStatusDto? Runtime,
     IReadOnlyList<DomainBindingResponse> Domains,
     string? Sha256 = null,
-    DateTimeOffset? RuntimeObservedAt = null);
+    DateTimeOffset? RuntimeObservedAt = null,
+    IReadOnlyDictionary<string, StorageMountRequest>? Storage = null);
 
 public sealed record RuntimeDesiredRoutingResponse(
     string Version,
