@@ -1,0 +1,122 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.Extensions.Options;
+using System.Net.Http;
+
+namespace Minicloud.Common.Services;
+
+public sealed class OpenBaoSecretStore(HttpClient httpClient, IOptions<OpenBaoSecretStoreOptions> options) : ISecretStore
+{
+    public const string ProviderName = "openbao";
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private readonly OpenBaoSecretStoreOptions _options = options.Value;
+
+    public async Task<StoredSecretReference> PutAsync(SecretStoreWriteRequest request, CancellationToken cancellationToken)
+    {
+        var path = PathFor(request.OrganizationId, request.AppId, request.ServiceName, request.Name);
+        var response = await SendAsync(
+            HttpMethod.Post,
+            $"v1/{EscapePath(_options.MountPath)}/data/{path}",
+            new { data = new Dictionary<string, string>(StringComparer.Ordinal) { ["value"] = request.Value } },
+            cancellationToken);
+
+        var body = await response.Content.ReadFromJsonAsync<OpenBaoWriteResponse>(JsonOptions, cancellationToken);
+        return new StoredSecretReference(ProviderName, path, body?.Data?.Version?.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    public async Task<string> GetAsync(StoredSecretReference reference, CancellationToken cancellationToken)
+    {
+        var response = await SendAsync(
+            HttpMethod.Get,
+            $"v1/{EscapePath(_options.MountPath)}/data/{reference.Path}",
+            body: null,
+            cancellationToken);
+        var body = await response.Content.ReadFromJsonAsync<OpenBaoReadResponse>(JsonOptions, cancellationToken);
+        if (body?.Data?.Data is null || !body.Data.Data.TryGetValue("value", out var value))
+        {
+            throw new SecretStoreUnavailableException("OpenBao secret response did not include a value.");
+        }
+
+        return value;
+    }
+
+    public async Task DeleteAsync(StoredSecretReference reference, CancellationToken cancellationToken)
+    {
+        var response = await SendAsync(
+            HttpMethod.Delete,
+            $"v1/{EscapePath(_options.MountPath)}/metadata/{reference.Path}",
+            body: null,
+            cancellationToken);
+        response.Dispose();
+    }
+
+    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string relativePath, object? body, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(_options.Address) || string.IsNullOrWhiteSpace(_options.Token))
+        {
+            throw new SecretStoreUnavailableException("OpenBao is not configured.");
+        }
+
+        using var request = new HttpRequestMessage(method, new Uri(new Uri(_options.Address.TrimEnd('/') + "/"), relativePath));
+        request.Headers.Add("X-Vault-Token", _options.Token);
+        if (body is not null)
+        {
+            request.Content = JsonContent.Create(body, options: JsonOptions);
+        }
+
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(_options.Timeout);
+            var response = await httpClient.SendAsync(request, timeoutCts.Token);
+            if (response.IsSuccessStatusCode)
+            {
+                return response;
+            }
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                throw new SecretStoreUnavailableException("OpenBao secret was not found.");
+            }
+
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(responseBody))
+            {
+                throw new SecretStoreUnavailableException($"OpenBao returned HTTP {(int)response.StatusCode}.");
+            }
+
+            throw new SecretStoreUnavailableException($"OpenBao returned HTTP {(int)response.StatusCode}: {responseBody}");
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new SecretStoreUnavailableException("OpenBao request timed out.", ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new SecretStoreUnavailableException("OpenBao request failed.", ex);
+        }
+    }
+
+    private string PathFor(string organizationId, string appId, string serviceName, string name) =>
+        string.Join(
+            '/',
+            "env",
+            Segment(_options.EnvironmentPrefix),
+            "orgs",
+            Segment(organizationId),
+            "apps",
+            Segment(appId),
+            "services",
+            Segment(serviceName),
+            Segment(name));
+
+    private static string Segment(string value) => Uri.EscapeDataString(value);
+
+    private static string EscapePath(string value) => string.Join('/', value.Split('/').Select(Segment));
+
+    private sealed record OpenBaoWriteResponse(OpenBaoWriteData? Data);
+    private sealed record OpenBaoWriteData(int? Version);
+    private sealed record OpenBaoReadResponse(OpenBaoReadOuterData? Data);
+    private sealed record OpenBaoReadOuterData(Dictionary<string, string>? Data);
+}

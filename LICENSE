@@ -1,0 +1,14 @@
+Minicloud license scope
+
+The Minicloud control plane is licensed under AGPL-3.0-only. This includes
+the API, dashboard, worker, runtime agent, telemetry, server-side Common
+project, runtime templates, and server tests and deployment scripts.
+
+The CLI, shared client contracts, CLI tests, and CLI distribution tooling are
+licensed under MPL-2.0. See docs/licensing.md for the path map.
+
+Full license texts:
+  LICENSES/AGPL-3.0-only.txt
+  LICENSES/MPL-2.0.txt
+
+Third-party material remains under its respective license.

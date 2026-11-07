@@ -1,0 +1,611 @@
+{
+  "schemaVersion": 1,
+  "source": "modules/tests/Minicloud.Tests/DeploymentIntegration/scenario-matrix.md",
+  "cases": [
+    {
+      "id": "PK01",
+      "tiers": [
+        "C",
+        "S"
+      ],
+      "scenario": "Packaged startup",
+      "variants": [
+        "api-migrates",
+        "worker-claims",
+        "broken-worker-control"
+      ]
+    },
+    {
+      "id": "PK02",
+      "tiers": [
+        "C",
+        "A"
+      ],
+      "scenario": "Dependency graph",
+      "variants": [
+        "hetzner",
+        "digitalocean",
+        "vultr",
+        "cloudflare",
+        "ssh-activation",
+        "di-failure-control"
+      ]
+    },
+    {
+      "id": "PK03",
+      "tiers": [
+        "C",
+        "S"
+      ],
+      "scenario": "Migrations",
+      "variants": [
+        "empty",
+        "prior-schema",
+        "pending-model-control"
+      ]
+    },
+    {
+      "id": "HP01",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "First source deployment",
+      "variants": [
+        "first-source"
+      ]
+    },
+    {
+      "id": "HP02",
+      "tiers": [
+        "C",
+        "R",
+        "A"
+      ],
+      "scenario": "Same-app redeploy",
+      "variants": [
+        "v1-to-v2",
+        "zero-create"
+      ]
+    },
+    {
+      "id": "HP03",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "Partial deployment",
+      "variants": [
+        "one-of-six",
+        "unchanged-config",
+        "unchanged-secrets"
+      ]
+    },
+    {
+      "id": "HP04",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "Database modes",
+      "variants": [
+        "none",
+        "sqlite",
+        "postgres"
+      ]
+    },
+    {
+      "id": "HP05",
+      "tiers": [
+        "C",
+        "R",
+        "A"
+      ],
+      "scenario": "Branches",
+      "variants": [
+        "main",
+        "branch",
+        "branch-redeploy",
+        "branch-destroy"
+      ]
+    },
+    {
+      "id": "AR01",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "Nested Dockerfiles",
+      "variants": [
+        "nested-dotnet",
+        "parent-context",
+        "non-default-dockerfile"
+      ]
+    },
+    {
+      "id": "AR02",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "Image mapping",
+      "variants": [
+        "ghcr-placeholder",
+        "no-ghcr-credentials"
+      ]
+    },
+    {
+      "id": "AR03",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "Mixed image sources",
+      "variants": [
+        "artifact",
+        "external-public",
+        "external-private",
+        "mixed"
+      ]
+    },
+    {
+      "id": "AR04",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "Artifact integrity",
+      "variants": [
+        "missing",
+        "expired",
+        "interrupted",
+        "checksum"
+      ]
+    },
+    {
+      "id": "AR05",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "Archive/path safety",
+      "variants": [
+        "traversal",
+        "absolute",
+        "symlink",
+        "escaping-manifest",
+        "malformed-manifest"
+      ]
+    },
+    {
+      "id": "AR06",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "Build failure",
+      "variants": [
+        "invalid-dockerfile",
+        "failing-run"
+      ]
+    },
+    {
+      "id": "AR07",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "Resource exhaustion",
+      "variants": [
+        "disk-full",
+        "memory-pressure"
+      ]
+    },
+    {
+      "id": "AR08",
+      "tiers": [
+        "R"
+      ],
+      "scenario": "Caching",
+      "variants": [
+        "cached",
+        "source-changed",
+        "identical-archive"
+      ]
+    },
+    {
+      "id": "SR01",
+      "tiers": [
+        "C",
+        "A"
+      ],
+      "scenario": "Runtime-only association",
+      "variants": [
+        "runtime-only-reuse"
+      ]
+    },
+    {
+      "id": "SR02",
+      "tiers": [
+        "C",
+        "A"
+      ],
+      "scenario": "Established naming",
+      "variants": [
+        "valid",
+        "wrong-customer",
+        "wrong-environment",
+        "ambiguous"
+      ]
+    },
+    {
+      "id": "SR03",
+      "tiers": [
+        "C",
+        "A"
+      ],
+      "scenario": "Conflicting/incomplete records",
+      "variants": [
+        "conflicting-ids",
+        "duplicate",
+        "missing-id",
+        "cross-app"
+      ]
+    },
+    {
+      "id": "SR04",
+      "tiers": [
+        "C",
+        "A"
+      ],
+      "scenario": "Missing established server",
+      "variants": [
+        "provider-404",
+        "permission",
+        "transient",
+        "no-ip"
+      ]
+    },
+    {
+      "id": "SR05",
+      "tiers": [
+        "C",
+        "A"
+      ],
+      "scenario": "Provisioning readiness",
+      "variants": [
+        "becomes-ready",
+        "timeout"
+      ]
+    },
+    {
+      "id": "SR06",
+      "tiers": [
+        "A"
+      ],
+      "scenario": "Provider bootstrap request contract",
+      "variants": [
+        "hetzner-cloud-init",
+        "digitalocean-cloud-init",
+        "vultr-cloud-init"
+      ]
+    },
+    {
+      "id": "SR07",
+      "tiers": [
+        "C",
+        "A"
+      ],
+      "scenario": "Plan/identity changes",
+      "variants": [
+        "plan-changed",
+        "overlong-name",
+        "colliding-name",
+        "ownership-mismatch"
+      ]
+    },
+    {
+      "id": "QU01",
+      "tiers": [
+        "C"
+      ],
+      "scenario": "Concurrent workers",
+      "variants": [
+        "two-workers",
+        "same-app-serialization"
+      ]
+    },
+    {
+      "id": "QU02",
+      "tiers": [
+        "C"
+      ],
+      "scenario": "Queue progress",
+      "variants": [
+        "long-running-first",
+        "failing-first"
+      ]
+    },
+    {
+      "id": "QU03",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "Worker interruption",
+      "variants": [
+        "after-claim",
+        "during-provision",
+        "during-build",
+        "after-activation"
+      ]
+    },
+    {
+      "id": "QU04",
+      "tiers": [
+        "C"
+      ],
+      "scenario": "Database outage",
+      "variants": [
+        "claim",
+        "heartbeat",
+        "finalization"
+      ]
+    },
+    {
+      "id": "QU05",
+      "tiers": [
+        "C"
+      ],
+      "scenario": "Cancel/delete race",
+      "variants": [
+        "queued",
+        "active",
+        "app-delete"
+      ]
+    },
+    {
+      "id": "DN01",
+      "tiers": [
+        "C",
+        "A"
+      ],
+      "scenario": "DNS and HTTPS boundary handling",
+      "variants": [
+        "create",
+        "reuse",
+        "wrong-ip",
+        "propagation-delay",
+        "acme-failure"
+      ]
+    },
+    {
+      "id": "DN02",
+      "tiers": [
+        "R"
+      ],
+      "scenario": "Routing isolation",
+      "variants": [
+        "private-service",
+        "multi-host-path",
+        "invalid-caddy"
+      ]
+    },
+    {
+      "id": "DN03",
+      "tiers": [
+        "C",
+        "R",
+        "A"
+      ],
+      "scenario": "Cutover safety",
+      "variants": [
+        "build-failure",
+        "health-failure"
+      ]
+    },
+    {
+      "id": "SS01",
+      "tiers": [
+        "C"
+      ],
+      "scenario": "Remote transport boundary",
+      "variants": [
+        "capture-bytes",
+        "disconnect",
+        "authentication",
+        "permission",
+        "transport-security"
+      ]
+    },
+    {
+      "id": "SS02",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "Manifest precedence",
+      "variants": [
+        "nested-manifest",
+        "root-fallback"
+      ]
+    },
+    {
+      "id": "SE01",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "Secrets",
+      "variants": [
+        "intended-service",
+        "cross-service-isolation",
+        "redaction"
+      ]
+    },
+    {
+      "id": "SE02",
+      "tiers": [
+        "C",
+        "S"
+      ],
+      "scenario": "Secret-store outage",
+      "variants": [
+        "sealed",
+        "unavailable",
+        "expired-token",
+        "missing-secret"
+      ]
+    },
+    {
+      "id": "SE03",
+      "tiers": [
+        "C"
+      ],
+      "scenario": "Authorization",
+      "variants": [
+        "cross-org-app",
+        "cross-org-artifact",
+        "cross-org-secret",
+        "cross-org-deployment",
+        "runtime-token"
+      ]
+    },
+    {
+      "id": "RO01",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "Health rollback",
+      "variants": [
+        "healthy-v1",
+        "unhealthy-v2"
+      ]
+    },
+    {
+      "id": "RO02",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "Rollback failure",
+      "variants": [
+        "restore-failure"
+      ]
+    },
+    {
+      "id": "RO03",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "First-deploy failure",
+      "variants": [
+        "first-fail",
+        "retry"
+      ]
+    },
+    {
+      "id": "OB01",
+      "tiers": [
+        "C",
+        "R"
+      ],
+      "scenario": "Visibility",
+      "variants": [
+        "cli-api-browser",
+        "reconnect"
+      ]
+    },
+    {
+      "id": "OB02",
+      "tiers": [
+        "C",
+        "R",
+        "A"
+      ],
+      "scenario": "Failure classification",
+      "variants": [
+        "preflight",
+        "registry",
+        "artifact",
+        "ssh",
+        "build",
+        "database",
+        "dns",
+        "health"
+      ]
+    },
+    {
+      "id": "DE01",
+      "tiers": [
+        "C",
+        "A"
+      ],
+      "scenario": "App teardown",
+      "variants": [
+        "scoped-delete",
+        "partial-retry",
+        "canary-preserved"
+      ]
+    },
+    {
+      "id": "SD01",
+      "tiers": [
+        "S",
+        "C",
+        "R"
+      ],
+      "scenario": "Fresh local platform",
+      "variants": [
+        "fresh-local-platform"
+      ]
+    },
+    {
+      "id": "SD02",
+      "tiers": [
+        "S",
+        "C",
+        "A"
+      ],
+      "scenario": "Reused local volumes",
+      "variants": [
+        "reused-local-volumes"
+      ]
+    },
+    {
+      "id": "SD03",
+      "tiers": [
+        "S"
+      ],
+      "scenario": "Fresh secret store",
+      "variants": [
+        "stale-bootstrap"
+      ]
+    },
+    {
+      "id": "SD04",
+      "tiers": [
+        "S"
+      ],
+      "scenario": "Worker release health",
+      "variants": [
+        "broken-framework",
+        "dead-consumer"
+      ]
+    },
+    {
+      "id": "SD05",
+      "tiers": [
+        "S"
+      ],
+      "scenario": "Optional telemetry",
+      "variants": [
+        "optional-telemetry",
+        "required-db",
+        "required-openbao"
+      ]
+    }
+  ]
+}

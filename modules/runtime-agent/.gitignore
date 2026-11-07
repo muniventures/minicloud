@@ -1,0 +1,34 @@
+# Ignore build outputs
+bin/
+obj/
+local/
+
+# User-specific files
+*.user
+*.userosscache
+*.suo
+*.swp
+*.sln.docstates
+
+# Logs
+*.log
+*.tlog
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+
+# Generated files
+*.GeneratedMSBuildEditorConfig.editorconfig
+*.AssemblyAttributes.cs
+*.GlobalUsings.g.cs
+
+# Backup files
+*.bak
+*.old
+*.orig
+
+# Other
+*.DS_Store
+*.lock.json
