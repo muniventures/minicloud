@@ -32,7 +32,7 @@ public sealed class TokenStore
 
     public void SaveToken(string token)
     {
-        Directory.CreateDirectory(_environment.ConfigHome);
+        Directory.CreateDirectory(Path.GetDirectoryName(_environment.TokenFilePath)!);
         File.WriteAllText(_environment.TokenFilePath, token.Trim() + Environment.NewLine);
         RestrictPermissions(_environment.TokenFilePath);
     }

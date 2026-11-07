@@ -4,7 +4,7 @@ The Compose setup runs the control plane on one Linux host and provisions an app
 
 ## Prepare the control plane
 
-1. Choose separate HTTPS hostnames for the API and dashboard, and an application subdomain suffix inside your DNS zone. Set API_HOSTNAME and CONSOLE_HOSTNAME to the hostnames in API_URL and CONSOLE_URL. Set the API and dashboard DNS records to the control-plane host. Configure a reverse proxy there to terminate TLS and forward to loopback ports 3210 and 3200, respectively.
+1. Choose a main service hostname for the dashboard (for example `cloud.example.com`) and its API hostname (`api.cloud.example.com`), and an application subdomain suffix inside your DNS zone. Set API_HOSTNAME and CONSOLE_HOSTNAME to the hostnames in API_URL and CONSOLE_URL. Set the API and dashboard DNS records to the control-plane host. Configure a reverse proxy there to terminate TLS and forward to loopback ports 3210 and 3200, respectively.
 2. Create a Firebase project and web app, enable your sign-in method, and authorize the dashboard hostname. Create an operator account and copy its Firebase user ID. The API admits only the configured operator ID in this setup.
 3. Prepare a persistent OpenBao instance reachable from the containers. Enable KV v2 at your chosen mount path. Supply a scoped renewable token with access to Minicloud's paths and permission to renew itself. Back up the database, OpenBao data, artifact volume, and stable encryption key together.
 4. Create a dedicated deployment SSH key under `local/ssh/deploy-key`, restrict it to its owner, and create an empty `local/ssh/host-pins` file. Supply the matching public key and a dedicated Hetzner provider token. Supply DNS tokens only if using Cloudflare automation. The provisioned deploy user can administer Docker and the server, so protect its private key as a root credential.
@@ -14,19 +14,28 @@ The Compose setup runs the control plane on one Linux host and provisions an app
 chmod 600 .env local/ssh/deploy-key
 docker compose -f compose.self-host.yml up -d --build
 docker compose -f compose.self-host.yml ps
-curl --fail https://api.example.com/health
+curl --fail https://api.cloud.example.com/health
 ```
 
 ## Deploy an app
 
-Sign in to the dashboard, create an app on the Hetzner plan, and create an API key for your CLI. Set `MINICLOUD_API_URL` before adding the token. Set a separate `XDG_CONFIG_HOME` if you also use a different Minicloud instance.
+Sign in to the dashboard and create an app on the Hetzner plan. Point the CLI at
+the main service hostname; it derives the API by prefixing `api.` and validates
+`GET /v1/instance` before saving the instance. The API returns the installation's
+application domain, so the CLI does not need a separate domain setting.
 
 ```sh
-export MINICLOUD_API_URL=https://api.example.com
-export MINICLOUD_APP_DOMAIN=apps.example.com
-minicloud login --token <your-api-key>
+minicloud instance add personal cloud.example.com
+minicloud login
 minicloud init
 ```
+
+Alternatively, run `minicloud login` on a fresh installation and enter the main
+service URL when prompted. Use `minicloud login --token <your-api-key>` for an
+API key created in the dashboard. Each instance has its own saved token.
+Use `minicloud instance list` and `minicloud instance use <name>` to switch.
+Configure API DNS and TLS at `api.<main-service-hostname>` before connecting.
+The API must include the instance-info endpoint introduced with this CLI version.
 
 Set `buildMode: source` for services that build from a `sourcePath`, then run
 `minicloud deploy`. On initial provisioning the worker refuses SSH until the

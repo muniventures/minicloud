@@ -68,12 +68,6 @@ public sealed partial class CliApplication
             return CliExitCodes.Success;
         }
 
-        if (args[0] == "--env")
-        {
-            PrintEnvironment();
-            return CliExitCodes.Success;
-        }
-
         if (args.Skip(1).Any(a => a is "-h" or "--help"))
         {
             var commandPrefix = string.Join(" ", args.TakeWhile(a => a is not ("-h" or "--help")));
@@ -82,6 +76,14 @@ public sealed partial class CliApplication
 
         try
         {
+            if (args[0] == "--env")
+            {
+                PrintEnvironment();
+                return CliExitCodes.Success;
+            }
+            if (args[0] == "instance") return await RunInstanceAsync(args.Skip(1).ToArray(), cancellationToken);
+            if (args[0] is "token" or "init" or "add-service" or "login" or "assets" or "deploy" or "branch" or "status" or "logs" or "apps" or "domains" or "secrets")
+                await EnsureInstanceAsync(cancellationToken);
             return args[0] switch
             {
                 "token" => await RunTokenAsync(args.Skip(1).ToArray(), cancellationToken),
@@ -185,6 +187,7 @@ public sealed partial class CliApplication
         _console.WriteLine("  secrets         Manage encrypted environment secrets");
         _console.WriteLine("  login           Log in to Minicloud using an API token");
         _console.WriteLine("  token           Set active API authentication token");
+        _console.WriteLine("  instance        Add, list, or switch Minicloud instances");
         _console.WriteLine("  help            Show help for Minicloud commands (or 'minicloud help <command>')");
         _console.WriteLine("  version         Show the current CLI version (-v, --version)");
         _console.WriteLine();
@@ -202,6 +205,16 @@ public sealed partial class CliApplication
         var normalized = command.Trim().ToLowerInvariant();
         switch (normalized)
         {
+            case "instance":
+            case "instance add":
+            case "instance list":
+            case "instance use":
+                _console.WriteLine("Manage Minicloud instances (add validates and activates the instance)");
+                _console.WriteLine("  minicloud instance add <name> <url>");
+                _console.WriteLine("  minicloud instance list");
+                _console.WriteLine("  minicloud instance use <name>");
+                _console.WriteLine("URL is the main service hostname, e.g. cloud.example.com; the API is api.cloud.example.com.");
+                return CliExitCodes.Success;
             case "assets":
             case "assets publish":
                 _console.WriteLine("Usage: minicloud assets publish <name> [--config minicloud.yml]");
@@ -377,7 +390,10 @@ public sealed partial class CliApplication
     private void PrintEnvironment()
     {
         _console.WriteLine("Minicloud CLI environment");
-        _console.WriteLine($"Environment: {CliEnvironment.ApiUrlEnvironmentVariable} defaults to {_environment.ApiBaseUrl}");
+        _environment.LoadActiveInstance();
+        _console.WriteLine($"Active instance: {_environment.ActiveInstanceName ?? "none"}");
+        _console.WriteLine($"API URL: {(string.IsNullOrEmpty(_environment.ApiBaseUrl) ? "not configured" : _environment.ApiBaseUrl)}");
+        _console.WriteLine($"Application domain: {_environment.AppDomain}");
     }
 
     private int UnknownCommand(string command)

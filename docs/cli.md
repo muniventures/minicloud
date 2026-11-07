@@ -2,6 +2,34 @@
 
 The current command is `minicloud`.
 
+## Instances
+
+The CLI has no default hosted instance. The first command needing a connection
+asks for the main service URL, such as `cloud.example.com` (HTTPS is assumed).
+It derives `https://api.cloud.example.com` and validates `GET /v1/instance`
+without credentials before saving the instance and its application domain.
+Configure DNS and TLS for the derived API hostname on your installation.
+
+```sh
+minicloud instance add personal cloud.example.com
+minicloud instance add work https://cloud.company.com
+minicloud instance list
+minicloud instance use personal
+minicloud login
+```
+
+Adding an instance validates it and makes it active. Listing marks the active
+instance with `*`. Switching revalidates the instance. Each instance keeps its
+own authentication token; log in once per instance. Saved instances and the active
+selection live under `~/.config/minicloud/` (or `$XDG_CONFIG_HOME/minicloud/`).
+Help and version commands work without configuring an instance.
+HTTP is supported only for local development, e.g. `http://localhost:3210`
+with the API reachable at `http://api.localhost:3210`.
+
+Existing users must add their instance explicitly and log in again; the previous
+shared token file is not reused. For the hosted installation, use
+`minicloud instance add muni cloud.muni.dev`.
+
 ## Authenticate
 
 Create an API key in the Minicloud console with these scopes:
@@ -501,7 +529,7 @@ minicloud deploy --help
 
 ## Environment Defaults
 
-Show CLI environment defaults:
+Show the active instance and resolved API URL:
 
 ```bash
 minicloud --env
@@ -512,8 +540,8 @@ Supported environment variables:
 | Variable | Description |
 | --- | --- |
 | `MINICLOUD_TOKEN` | API key used by CLI commands. |
-| `MINICLOUD_APP_DOMAIN` | Generated application hostname suffix. Set to APP_DOMAIN for a self-hosted install. Hosted default: `app.muni.dev`. |
-| `MINICLOUD_API_URL` | API base URL. Defaults to `https://api.cloud.muni.dev`. |
+| `MINICLOUD_APP_DOMAIN` | Application domain for an explicit API URL override; otherwise discovered from the instance. |
+| `MINICLOUD_API_URL` | Explicit API base URL override for CI/development. Takes precedence over the saved active instance; has no default. |
 
 ### Dockerfile port detection
 

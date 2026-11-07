@@ -22,6 +22,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         Handler.requests.append((parsed.path, parsed.query, self.headers.get("Authorization")))
+        if parsed.path == "/v1/instance":
+            self.respond({"product": "minicloud", "protocolVersion": 1, "appDomain": "apps.example.invalid"})
+            return
         if self.headers.get("Authorization") != f"Bearer {TOKEN}":
             self.send_response(401)
             self.end_headers()
@@ -112,6 +115,7 @@ def main():
         with tempfile.TemporaryDirectory(prefix="minicloud-release-smoke-") as config_home:
             environment = os.environ.copy()
             environment["MINICLOUD_API_URL"] = f"http://127.0.0.1:{server.server_port}"
+            environment.pop("MINICLOUD_APP_DOMAIN", None)
             environment["MINICLOUD_TOKEN"] = TOKEN
             environment["XDG_CONFIG_HOME"] = config_home
             output = run(executable, "apps", "list", env=environment)
@@ -123,6 +127,7 @@ def main():
     if "release-smoke\tnone" not in output:
         raise AssertionError(f"apps list did not render the mocked app: {output}")
     expected_requests = [
+        ("/v1/instance", "", None),
         ("/v1/me", "", f"Bearer {TOKEN}"),
         ("/v1/apps", "organizationId=release-smoke-org", f"Bearer {TOKEN}"),
     ]
