@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 name: Minicloud Customer Deploy
 
 on:
@@ -21,6 +22,11 @@ on:
         required: false
         type: string
         default: latest
+      minicloud_api_url:
+        description: "HTTPS API origin for a self-hosted Minicloud instance."
+        required: false
+        type: string
+        default: ""
     secrets:
       minicloud_api_key:
         required: true
@@ -35,18 +41,35 @@ jobs:
     name: deploy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install Minicloud CLI
         env:
-          MINICLOUD_REPO: muniventures/minicloud
           MINICLOUD_VERSION: ${{ inputs.minicloud_version }}
           MINICLOUD_INSTALL_DIR: ${{ runner.temp }}/minicloud-bin
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "${MINICLOUD_INSTALL_DIR}"
-          curl -fsSL https://raw.githubusercontent.com/muniventures/minicloud/main/install.sh | sh
+          base=https://github.com/muniventures/minicloud/releases
+          if [[ "$MINICLOUD_VERSION" == latest ]]; then
+            base="$base/latest/download"
+          elif [[ "$MINICLOUD_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            base="$base/download/$MINICLOUD_VERSION"
+          else
+            echo "minicloud_version must be latest or a release tag such as v2.1.1." >&2
+            exit 1
+          fi
+          archive=minicloud-linux-x64.tar.gz
+          cd "${MINICLOUD_INSTALL_DIR}"
+          curl -fsSL "$base/$archive" -o "$archive"
+          curl -fsSL "$base/checksums.txt" -o checksums.txt
+          awk -v asset="$archive" '$2 == asset && $1 ~ /^[a-fA-F0-9]+$/ && length($1) == 64 { print $1 "  " asset; found++ } END { exit(found != 1) }' checksums.txt > checksum
+          sha256sum -c checksum
+          tar -xzf "$archive"
+          test -x minicloud
           echo "${MINICLOUD_INSTALL_DIR}" >> "${GITHUB_PATH}"
 
       - name: Generate Minicloud config
@@ -109,7 +132,7 @@ jobs:
                 exit 1
               end
 
-              known = %w[name sourcePath dockerfile image port public path healthPath env secretEnv]
+              known = %w[name sourcePath dockerfile image port public path healthPath env secretEnv buildMode]
               unknown = service.keys - known
               unless unknown.empty?
                 warn "services contains unknown service properties: #{unknown.join(", ")}"
@@ -127,6 +150,8 @@ jobs:
           MINICLOUD_TOKEN: ${{ secrets.minicloud_api_key }}
           POSTGRES_PASSWORD: ${{ secrets.postgres_password }}
           MINICLOUD_ENVIRONMENT: ${{ inputs.minicloud_environment }}
+          SELF_HOSTED_API_URL: ${{ inputs.minicloud_api_url }}
+          APP_ID: ${{ inputs.app_id }}
           DATABASE: ${{ inputs.database }}
           XDG_CONFIG_HOME: ${{ runner.temp }}/minicloud-config
         shell: bash
@@ -143,7 +168,15 @@ jobs:
             echo "::add-mask::${POSTGRES_PASSWORD}"
           fi
 
-          case "${MINICLOUD_ENVIRONMENT}" in
+          if [[ -n "$SELF_HOSTED_API_URL" ]]; then
+            if [[ ! "$SELF_HOSTED_API_URL" =~ ^https://[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]+)?/?$ ]]; then
+              echo "minicloud_api_url must be an HTTPS origin." >&2
+              exit 1
+            fi
+            export MINICLOUD_API_URL="$SELF_HOSTED_API_URL"
+            MINICLOUD_ENVIRONMENT=self-hosted
+          else
+            case "${MINICLOUD_ENVIRONMENT}" in
             prod)
               export MINICLOUD_API_URL="https://api.cloud.muni.dev"
               ;;
@@ -154,7 +187,8 @@ jobs:
               echo "minicloud_environment must be prod or staging."
               exit 1
               ;;
-          esac
+            esac
+          fi
 
           args=(deploy --all --config minicloud.yml)
           if [ "${DATABASE}" = "postgres" ]; then
@@ -170,7 +204,7 @@ jobs:
             echo ""
             echo "| Field | Value |"
             echo "| --- | --- |"
-            echo "| App ID | \`${{ inputs.app_id }}\` |"
+            echo "| App ID | \`${APP_ID}\` |"
             echo "| Minicloud environment | \`${MINICLOUD_ENVIRONMENT}\` |"
             echo "| Database | \`${DATABASE}\` |"
             echo "| Customer workflow execution | [${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) |"

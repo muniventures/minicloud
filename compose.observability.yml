@@ -1,0 +1,139 @@
+# Minicloud observability stack for dev/local use (T10).
+#
+# Usage:
+#   docker compose -f compose.dev.yml -f compose.observability.yml up -d loki grafana
+#   curl http://127.0.0.1:3100/ready
+#   curl http://127.0.0.1:3000/api/health
+#   # Grafana UI (dev only): http://localhost:3000 (admin / minicloud-dev-only)
+#
+# Pinned versions (recorded 2026-09-08, see observability/README.md):
+#   Loki  3.5.2  (grafana/loki)
+#   Grafana OSS 11.6.5 (grafana/grafana-oss)
+# Never use `latest` here. Upgrades are a documented procedure with
+# rollback constraints (observability/README.md).
+#
+# Network/port posture mirrors production intent:
+# - Loki and Grafana share a private `observability` network.
+# - Host ports bind to 127.0.0.1 ONLY for local development. Production
+#   (observability.compose.json rendered by remote-deploy.sh) publishes NO
+#   host ports: Loki :3100 and Grafana :3000 stay container-private, and
+#   Caddy may reach only the T20 authentication proxy over loopback.
+# - Configs are read-only bind mounts of the reviewed templates under
+#   ./observability. State lives in named volumes for dev; production
+#   bind-mounts /var/lib/minicloud/observability/{loki,grafana} instead.
+#
+# Resource notes: Loki is the grafana/loki 3.5.2 image (single manifest;
+# amd64-only at this pin, emulated on arm64 dev machines). Starting both
+# services needs ~1.5 GiB free RAM. Do not assume the cheapest staging VPS
+# can run this stack; capacity math lives in observability/README.md.
+
+services:
+  loki:
+    image: grafana/loki:3.5.2@sha256:d0a95e651bb7d0a5a6468035c5b49c52f4678d90d598f853c06716bca102686b
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./observability/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki-data:/loki
+    ports:
+      - "127.0.0.1:3100:3100"
+    networks:
+      - observability
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  grafana:
+    image: grafana/grafana-oss:11.6.5@sha256:d552f949693c54d17c6f867ff6aeb128b021e54e923895dcf9cd6aa8176c0d74
+    restart: unless-stopped
+    depends_on:
+      loki:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      # Dev-only default. Production renders a generated secret per host via
+      # remote-deploy.sh and never commits it.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-minicloud-dev-only}
+    volumes:
+      - ./observability/grafana/grafana.ini:/etc/grafana/grafana.ini:ro
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - observability
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+
+  telemetry:
+    build:
+      context: .
+      dockerfile: modules/telemetry/Dockerfile
+    image: minicloud-telemetry:local
+    restart: unless-stopped
+    depends_on:
+      loki:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      Database__Provider: Sqlite
+      Database__ConnectionString: "Data Source=/var/lib/minicloud/telemetry/telemetry.db"
+      Telemetry__LokiBaseUrl: http://loki:3100
+      Telemetry__GrafanaBaseUrl: http://grafana:3000
+      Telemetry__ManagementApiKey: ${TELEMETRY_MANAGEMENT_KEY:-minicloud-telemetry-management-dev-key}
+      Telemetry__AuthSigningKey: ${TELEMETRY_AUTH_SIGNING_KEY:-minicloud-telemetry-auth-signing-dev-key-must-be-long}
+    volumes:
+      - telemetry-data:/var/lib/minicloud/telemetry
+    ports:
+      - "127.0.0.1:8088:8080"
+    networks:
+      - observability
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.2"
+          memory: 128M
+
+networks:
+  observability:
+    driver: bridge
+
+volumes:
+  loki-data:
+    name: minicloud-loki-dev
+  grafana-data:
+    name: minicloud-grafana-dev
+  telemetry-data:
+    name: minicloud-telemetry-dev

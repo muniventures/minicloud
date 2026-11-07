@@ -1,0 +1,29 @@
+<Solution>
+  <Folder Name="/modules/" />
+  <Folder Name="/modules/contracts/">
+    <Project Path="modules/contracts/Minicloud.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/modules/common/">
+    <Project Path="modules/common/Minicloud.Common.csproj" />
+  </Folder>
+  <Folder Name="/modules/telemetry/">
+    <Project Path="modules/telemetry/Minicloud.Telemetry.csproj" />
+  </Folder>
+  <Folder Name="/modules/api/">
+    <Project Path="modules/api/Minicloud.Api.csproj" />
+  </Folder>
+  <Folder Name="/modules/cli/">
+    <Project Path="modules/cli/Minicloud.Cli.csproj" />
+  </Folder>
+  <Folder Name="/modules/runtime-agent/">
+    <Project Path="modules/runtime-agent/Minicloud.RuntimeAgent.csproj" />
+  </Folder>
+  <Folder Name="/modules/worker/">
+    <Project Path="modules/worker/Minicloud.Worker.csproj" />
+  </Folder>
+  <Folder Name="/modules/tests/">
+    <Project Path="modules/tests/Minicloud.Cli.Tests/Minicloud.Cli.Tests.csproj" />
+    <Project Path="modules/tests/Minicloud.Tests/Minicloud.Tests.csproj" />
+    <Project Path="modules/tests/Minicloud.Worker.Tests/Minicloud.Worker.Tests.csproj" />
+  </Folder>
+</Solution>

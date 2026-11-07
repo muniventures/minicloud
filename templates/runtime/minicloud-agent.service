@@ -1,0 +1,18 @@
+[Unit]
+Description=Minicloud runtime agent
+After=network-online.target docker.service caddy.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=minicloud-agent
+Group=minicloud-agent
+SupplementaryGroups=docker
+ExecStart=/opt/minicloud/agent/minicloud-agent /opt/minicloud/agent/config.json
+Restart=always
+RestartSec=5
+StateDirectory=minicloud-agent
+WorkingDirectory=/var/lib/minicloud-agent
+
+[Install]
+WantedBy=multi-user.target

@@ -2,6 +2,11 @@
 
 Use the reusable Minicloud workflow when you want GitHub Actions to deploy source artifacts through the Minicloud API.
 
+For self-hosting, pass your HTTPS API origin as `minicloud_api_url`. When the
+instance has no managed registry, use `buildMode: source` for source-backed
+services. Pin the reusable workflow to a reviewed commit and set
+`minicloud_version` to an explicit CLI release tag for repeatable installs.
+
 ## Prerequisites
 
 Create a Minicloud API key in the console with these scopes:

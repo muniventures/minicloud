@@ -1,0 +1,102 @@
+x-core-env: &core-env
+  ConnectionStrings__Minicloud: "Host=postgres;Database=minicloud;Username=minicloud;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}"
+  DeploymentArtifacts__RootPath: /var/lib/minicloud/artifacts
+  ManagedDomains__Suffix: ${APP_DOMAIN:?set APP_DOMAIN}
+  OpenBao__Address: ${OPENBAO_ADDRESS:?set OPENBAO_ADDRESS}
+  OpenBao__MountPath: ${OPENBAO_MOUNT_PATH:-minicloud-apps}
+  OpenBao__Token: ${OPENBAO_TOKEN:?set OPENBAO_TOKEN}
+  Secrets__EncryptionKey: ${SECRET_ENCRYPTION_KEY:?set SECRET_ENCRYPTION_KEY}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: minicloud
+      POSTGRES_USER: minicloud
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minicloud -d minicloud"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: modules/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3210:8080"
+    environment:
+      <<: *core-env
+      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      Database__Provider: Postgres
+      Database__RunMigrationsOnStartup: "true"
+      Console__BaseUrl: ${CONSOLE_URL:?set CONSOLE_URL}
+      Cors__AllowedOrigins__0: ${CONSOLE_URL:?set CONSOLE_URL}
+      Firebase__ProjectId: ${FIREBASE_PROJECT_ID:?set FIREBASE_PROJECT_ID}
+      Firebase__AllowedUserIds__0: ${FIREBASE_OPERATOR_UID:?set FIREBASE_OPERATOR_UID}
+    volumes:
+      - artifacts:/var/lib/minicloud/artifacts
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: modules/dashboard/Dockerfile
+      args:
+        VITE_MINICLOUD_API_URL: ${API_URL:?set API_URL}
+        VITE_MINICLOUD_APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN}
+        VITE_MINICLOUD_SOURCE_URL: ${MINICLOUD_SOURCE_URL:-https://github.com/muniventures/minicloud}
+        VITE_FIREBASE_API_KEY: ${FIREBASE_API_KEY:?set FIREBASE_API_KEY}
+        VITE_FIREBASE_AUTH_DOMAIN: ${FIREBASE_AUTH_DOMAIN:?set FIREBASE_AUTH_DOMAIN}
+        VITE_FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:?set FIREBASE_PROJECT_ID}
+        VITE_FIREBASE_STORAGE_BUCKET: ${FIREBASE_STORAGE_BUCKET:-}
+        VITE_FIREBASE_MESSAGING_SENDER_ID: ${FIREBASE_MESSAGING_SENDER_ID:?set FIREBASE_MESSAGING_SENDER_ID}
+        VITE_FIREBASE_APP_ID: ${FIREBASE_APP_ID:?set FIREBASE_APP_ID}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3200:8080"
+
+  worker:
+    build:
+      context: .
+      dockerfile: modules/worker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      <<: *core-env
+      Worker__Pipeline__SshPublicKey: ${DEPLOY_SSH_PUBLIC_KEY:?set DEPLOY_SSH_PUBLIC_KEY}
+      Worker__Pipeline__HetznerRegion: ${HETZNER_REGION:?set HETZNER_REGION}
+      Worker__Pipeline__HetznerSku: ${HETZNER_SKU:?set HETZNER_SKU}
+      Worker__Ssh__PrivateKeyPath: /run/minicloud-ssh/deploy-key
+      Worker__Ssh__HostKeyPinsFile: /run/minicloud-ssh/host-pins
+      Worker__RuntimeAgent__ApiBaseUrl: ${API_URL:?set API_URL}
+      Hetzner__ApiToken: ${HETZNER_API_TOKEN:?set HETZNER_API_TOKEN}
+      Cloudflare__ApiToken: ${CLOUDFLARE_API_TOKEN:?set CLOUDFLARE_API_TOKEN}
+      Cloudflare__ZoneId: ${CLOUDFLARE_ZONE_ID:?set CLOUDFLARE_ZONE_ID}
+    volumes:
+      - artifacts:/var/lib/minicloud/artifacts
+      - type: bind
+        source: ./local/ssh
+        target: /run/minicloud-ssh
+        read_only: true
+        bind:
+          create_host_path: false
+
+volumes:
+  postgres:
+  artifacts:

@@ -1,9 +1,9 @@
-# Public repository instructions
+# Minicloud repository instructions
 
-This repository is generated from the private `minicloud-services` repository.
+This repository contains the Minicloud product source and builds its public CLI releases.
+Keep changes focused. Never push code unless explicitly asked.
 
-- Do not treat this repository as the source of truth for CLI development.
-- Public docs live in `docs/`.
-- The CLI is distributed as release binaries only; install with `install.sh` / `install.ps1` or from GitHub Releases.
-- CLI/Common source, tests, and build workflows live in the private repository only and are never projected here.
-- Reusable customer workflow code lives in `.github/workflows/customer-deploy.yml`.
+- Start with the README and the user documentation under `docs/`.
+- Keep behavior and tests together. Run the affected .NET or dashboard checks from the README.
+- Keep hosted operations and operator credentials out of this repo. Use synthetic fixtures and example configuration.
+- Keep the public installer paths, CLI package names, and reusable deployment workflow compatible with existing callers.

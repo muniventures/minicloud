@@ -1,4 +1,5 @@
 #!/usr/bin/env sh
+# SPDX-License-Identifier: MPL-2.0
 set -eu
 
 repo="${MINICLOUD_REPO:-muniventures/minicloud}"
@@ -31,13 +32,21 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
 if [ "$version" = "latest" ]; then
-  url="https://github.com/${repo}/releases/latest/download/${asset}"
+  release="https://github.com/${repo}/releases/latest/download"
 else
-  url="https://github.com/${repo}/releases/download/${version}/${asset}"
+  release="https://github.com/${repo}/releases/download/${version}"
 fi
 
-echo "Downloading $url"
-curl -fsSL "$url" -o "$tmp_dir/$asset"
+echo "Downloading $release/$asset"
+curl -fsSL "$release/$asset" -o "$tmp_dir/$asset"
+curl -fsSL "$release/checksums.txt" -o "$tmp_dir/checksums.txt"
+awk -v asset="$asset" '$2 == asset && $1 ~ /^[a-fA-F0-9]+$/ && length($1) == 64 { print $1 "  " asset; found++ } END { exit(found != 1) }' \
+  "$tmp_dir/checksums.txt" > "$tmp_dir/checksum"
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$tmp_dir" && sha256sum -c checksum)
+else
+  (cd "$tmp_dir" && shasum -a 256 -c checksum)
+fi
 tar -xzf "$tmp_dir/$asset" -C "$tmp_dir"
 
 if [ ! -x "$tmp_dir/minicloud" ]; then

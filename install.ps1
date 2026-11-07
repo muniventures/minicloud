@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 $ErrorActionPreference = "Stop"
 
 $Repo = if ($env:MINICLOUD_REPO) { $env:MINICLOUD_REPO } else { "muniventures/minicloud" }
@@ -12,9 +13,9 @@ switch ($arch) {
 
 $asset = "minicloud-$rid.zip"
 if ($Version -eq "latest") {
-  $url = "https://github.com/$Repo/releases/latest/download/$asset"
+  $release = "https://github.com/$Repo/releases/latest/download"
 } else {
-  $url = "https://github.com/$Repo/releases/download/$Version/$asset"
+  $release = "https://github.com/$Repo/releases/download/$Version"
 }
 
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("minicloud-install-" + [System.Guid]::NewGuid().ToString("N"))
@@ -22,8 +23,17 @@ New-Item -ItemType Directory -Path $tmp | Out-Null
 
 try {
   $zip = Join-Path $tmp $asset
+  $url = "$release/$asset"
   Write-Host "Downloading $url"
   Invoke-WebRequest -Uri $url -OutFile $zip
+  $checksums = Join-Path $tmp "checksums.txt"
+  Invoke-WebRequest -Uri "$release/checksums.txt" -OutFile $checksums
+  $assetPattern = [regex]::Escape($asset)
+  $matchesForAsset = @(Get-Content $checksums | Select-String -Pattern "^([a-fA-F0-9]{64})\s+$assetPattern$")
+  if ($matchesForAsset.Count -ne 1 -or
+      (Get-FileHash -Algorithm SHA256 -Path $zip).Hash -ne $matchesForAsset[0].Matches[0].Groups[1].Value) {
+    throw "Release archive checksum verification failed: $asset"
+  }
   Expand-Archive -Path $zip -DestinationPath $tmp -Force
 
   $exe = Join-Path $tmp "minicloud.exe"

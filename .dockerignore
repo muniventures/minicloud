@@ -1,0 +1,16 @@
+.git
+.github
+**/bin
+**/obj
+**/node_modules
+**/dist
+**/.vite
+**/.DS_Store
+**/*.db
+**/*.log
+
+**/.env
+**/.env.*
+**/appsettings.Development.json
+.local
+local

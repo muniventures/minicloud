@@ -1,0 +1,74 @@
+# Local dev core services (postgres + openbao).
+#
+# Application-log observability (T10: Loki 3.5.2 + Grafana OSS 11.6.5, pinned
+# with digests in compose.observability.yml) is intentionally NOT defined here
+# so the default `up` stays light. Start it explicitly when needed:
+#   docker compose -f compose.dev.yml -f compose.observability.yml up -d loki grafana
+# Loki :3100 and Grafana :3000 bind to 127.0.0.1 only. See
+# observability/README.md for versions, digests, and upgrade/rollback.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: minicloud
+      POSTGRES_PASSWORD: minicloud
+      POSTGRES_DB: minicloud_dev
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - minicloud-postgres-dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minicloud -d minicloud_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  openbao:
+    image: openbao/openbao:latest
+    restart: unless-stopped
+    cap_add:
+      - IPC_LOCK
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: dev-only-openbao-token
+      BAO_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    command: server -dev
+    ports:
+      - "127.0.0.1:8200:8200"
+    healthcheck:
+      test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  openbao-init:
+    image: openbao/openbao:latest
+    depends_on:
+      openbao:
+        condition: service_healthy
+    environment:
+      BAO_ADDR: http://openbao:8200
+      BAO_TOKEN: dev-only-openbao-token
+    command: sh -c "bao secrets enable -path=minicloud-apps kv-v2 || true"
+
+  worker:
+    build:
+      context: .
+      dockerfile: modules/worker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      openbao:
+        condition: service_healthy
+    environment:
+      - ConnectionStrings__Minicloud=Host=postgres;Port=5432;Database=minicloud_dev;Username=minicloud;Password=minicloud
+      - DeploymentArtifacts__RootPath=/var/lib/minicloud/artifacts
+      - OpenBao__Address=http://openbao:8200
+      - OpenBao__Token=dev-only-openbao-token
+    volumes:
+      - minicloud-artifacts-dev:/var/lib/minicloud/artifacts:rw
+
+volumes:
+  minicloud-postgres-dev:
+  minicloud-artifacts-dev:

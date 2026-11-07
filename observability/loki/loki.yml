@@ -1,0 +1,104 @@
+# Minicloud observability: Loki configuration template (T10).
+#
+# Pinned against grafana/loki:3.5.2 (see observability/README.md for the digest).
+# This file is the dev/local template. Production renders byte-identical content
+# via write_observability_configs() in
+# scripts/github-actions/minicloud-deploy/remote-deploy.sh so the VPS config is
+# always versioned with the deploy script. Keep the two in sync.
+#
+# Design (see features/product/grafana-application-logs/1.grafana-application-logs.md):
+# - Single-binary monolith, colocated beta. Filesystem storage only.
+# - auth_enabled: true, single-tenant queries only. The Minicloud telemetry
+#   gateway (T12) strips client tenant headers and sets X-Scope-OrgID
+#   server-side; Loki trusts only that gateway, never browsers or SDKs.
+# - TSDB schema v13, 24h index period, WAL, compactor, 2-day retention.
+# - deletion_mode filter-and-delete supports the T11/T12 tenant cleanup job
+#   through a private operator path only (customer credentials cannot delete).
+
+auth_enabled: true
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+  # Keep headroom for the 4 MiB decompressed gateway cap (T12) plus framing.
+  grpc_server_max_recv_msg_size: 8388608
+  grpc_server_max_send_msg_size: 8388608
+
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2025-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  tsdb_shipper:
+    active_index_directory: /loki/tsdb-index
+    cache_location: /loki/tsdb-cache
+  filesystem:
+    directory: /loki/chunks
+
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 150
+  delete_request_store: filesystem
+
+limits_config:
+  # Seven-day beta retention. Retention deletion is asynchronous; the T11
+  # cleanup job accounts for the cancellation period and compaction delay.
+  retention_period: 48h
+  # Required for tenant-scoped deletion on app/branch destroy.
+  deletion_mode: filter-and-delete
+  # Required for OTLP structured metadata (trace/span/deployment IDs).
+  allow_structured_metadata: true
+  # Reject samples outside retention instead of silently dropping them.
+  reject_old_samples: true
+  reject_old_samples_max_age: 48h
+  # Beta query bounds; the query gateway (T20) enforces tighter per-app limits.
+  max_query_length: 168h
+  max_entries_limit_per_query: 1000
+  split_queries_by_interval: 15m
+  max_query_parallelism: 8
+  max_cache_freshness_per_query: 10m
+
+querier:
+  # One tenant per query. Cross-app queries are rejected; the gateway resolves
+  # exactly one tenant from server-side state.
+  multi_tenant_queries_enabled: false
+
+ingester:
+  lifecycler:
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+  # WAL enables crash recovery for in-memory chunks (best effort on beta).
+  wal:
+    enabled: true
+    dir: /loki/wal
+  chunk_idle_period: 1h
+  max_chunk_age: 2h
+  chunk_encoding: snappy
+  chunk_target_size: 1572864
+  max_returned_stream_errors: 10
+
+analytics:
+  reporting_enabled: false

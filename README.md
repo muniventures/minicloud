@@ -1,35 +1,28 @@
 # Minicloud
 
-Minicloud deploys containerized apps to managed infrastructure from either the `minicloud` CLI or a GitHub Actions workflow.
+Deploy your apps to your own VPS. Minicloud is a self-hosted deployment platform for individual developers running their own projects.
 
-## How To Use Minicloud
+- [Self-hosting](docs/self-hosting.md)
+- [CLI reference](docs/cli.md)
+- [GitHub Actions](docs/github-actions.md)
+- [Report a vulnerability](SECURITY.md)
+- [Licensing](docs/licensing.md)
 
-- [CLI documentation](docs/cli.md)
-- [GitHub Actions workflow documentation](docs/github-actions.md)
+Minicloud includes a CLI, web dashboard, API, deployment worker and VPS runtime. The worker deploys Docker services, configures routing and HTTPS, and reports deployment status and logs.
 
-## Install CLI
+## Develop from source
 
-macOS and Linux:
+Use .NET 10, Node.js 22, and Docker with Compose. From the repository root:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/muniventures/minicloud/main/install.sh | sh
+```sh
+dotnet test Minicloud.slnx --configuration Release -m:1
+npm --prefix modules/dashboard ci
+npm --prefix modules/dashboard test
+npm --prefix modules/dashboard run build
+dotnet run --project modules/cli -- --help
 ```
 
-Windows PowerShell:
-
-```powershell
-iwr https://raw.githubusercontent.com/muniventures/minicloud/main/install.ps1 -useb | iex
-```
-
-Verify:
-
-```bash
-minicloud --help
-```
-
-Show environment defaults:
-
-```bash
-minicloud --env
-```
-
+Some integration tests require Docker. For local PostgreSQL and OpenBao, use
+`docker compose -f compose.dev.yml up -d postgres openbao openbao-init`.
+This Compose file is for development. Use the self-hosting guide to configure
+a persistent installation.
