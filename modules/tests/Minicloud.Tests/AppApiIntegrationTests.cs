@@ -36,6 +36,20 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Instance_discovery_is_anonymous_and_reports_configured_domain()
+    {
+        using var factory = new AppApiFactory(_connection, "apps.discovery.example");
+        using var client = factory.CreateClient();
+        var response = await client.GetAsync("/v1/instance");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var info = await response.Content.ReadFromJsonAsync<InstanceInfoResponse>();
+        Assert.NotNull(info);
+        Assert.Equal("minicloud", info.Product);
+        Assert.Equal(1, info.ProtocolVersion);
+        Assert.Equal("apps.discovery.example", info.AppDomain);
+    }
+
+    [Fact]
     public async Task StorageAdmissionRejectsOtherProvidersAndPersistsHetznerMounts()
     {
         var seed = await SeedAsync("org_storage", "app_storage", DateTimeOffset.UtcNow);
@@ -711,7 +725,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
 
     private sealed record SeedResult(string OrganizationId, string AppId, string ApiKeyToken);
 
-    private sealed class AppApiFactory(SqliteConnection connection) : WebApplicationFactory<Program>
+    private sealed class AppApiFactory(SqliteConnection connection, string appDomain = "app.muni.dev") : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -721,6 +735,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["Database:Provider"] = "Sqlite",
+                    ["ManagedDomains:Suffix"] = appDomain,
                     ["Firebase:ProjectId"] = "minicloud-test",
                     ["Database:RunMigrationsOnStartup"] = "false",
                     ["ConnectionStrings:Minicloud"] = "Data Source=:memory:"

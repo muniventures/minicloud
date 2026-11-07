@@ -28,6 +28,25 @@ public sealed class MinicloudApiClient
         _httpClient = httpClient;
     }
 
+    public async Task<InstanceInfoResponse> GetInstanceInfoAsync(string apiUrl, CancellationToken ct)
+    {
+        try
+        {
+            // Discovery never sends the current instance's credentials.
+            using var response = await _httpClient.GetAsync(apiUrl + "/v1/instance", ct);
+            if (!response.IsSuccessStatusCode) throw new HttpRequestException($"Instance discovery returned HTTP {(int)response.StatusCode}.");
+            var info = await response.Content.ReadFromJsonAsync<InstanceInfoResponse>(JsonOptions, ct);
+            if (info is null || info.Product != "minicloud" || info.ProtocolVersion != 1 ||
+                string.IsNullOrWhiteSpace(info.AppDomain) || Uri.CheckHostName(info.AppDomain) != UriHostNameType.Dns)
+                throw new JsonException("Invalid Minicloud instance response.");
+            return info;
+        }
+        catch (JsonException)
+        {
+            throw new Commands.CliCommandException(CliExitCodes.ValidationError, $"{apiUrl} did not return valid Minicloud instance information.");
+        }
+    }
+
     public Task<MeResponse> GetMeAsync(CancellationToken cancellationToken) =>
         SendAsync<MeResponse>(HttpMethod.Get, "/v1/me", null, cancellationToken);
 
