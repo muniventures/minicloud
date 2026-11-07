@@ -113,9 +113,7 @@ jobs:
             mv "artifacts/minicloud-${RID}/Minicloud.Cli" "artifacts/minicloud-${RID}/minicloud"
             chmod +x "artifacts/minicloud-${RID}/minicloud"
           fi
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            python scripts/package-cli-notices.py "artifacts/minicloud-${RID}" "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME"
-          fi
+          python scripts/package-cli-notices.py "artifacts/minicloud-${RID}" "$GITHUB_REPOSITORY" "$GITHUB_SHA"
           # Archives must not ship debug symbols.
           find "artifacts/minicloud-${RID}" -iname '*.pdb' -delete
 
