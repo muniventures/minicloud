@@ -36,6 +36,83 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StorageAdmissionRejectsOtherProvidersAndPersistsHetznerMounts()
+    {
+        var seed = await SeedAsync("org_storage", "app_storage", DateTimeOffset.UtcNow);
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var request = new CreateDeploymentRequest(seed.AppId, "none", null,
+            [new DeploymentServiceRequest("api", "example/api:1", 8080, true, "/", "/health",
+                Storage: new Dictionary<string, StorageMountRequest> { ["uploads"] = new(20, "/app/uploads", 1000, 1000) })]);
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+            (await db.Apps.SingleAsync(x => x.Id == seed.AppId)).Plan = AppPlan.P0V0;
+            await db.SaveChangesAsync();
+        }
+        var unsupported = await client.PostAsJsonAsync("/v1/deployments", request);
+        Assert.Equal(HttpStatusCode.BadRequest, unsupported.StatusCode);
+        Assert.Contains("storage_provider_unsupported", await unsupported.Content.ReadAsStringAsync());
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+            Assert.False(await db.Deployments.AnyAsync(x => x.AppId == seed.AppId));
+            (await db.Apps.SingleAsync(x => x.Id == seed.AppId)).Plan = AppPlan.P0H0;
+            await db.SaveChangesAsync();
+        }
+        var accepted = await client.PostAsJsonAsync("/v1/deployments", request);
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+        var created = (await accepted.Content.ReadFromJsonAsync<DeploymentCreateResponse>())!;
+        var saved = await client.GetFromJsonAsync<DeploymentResponse>("/v1/deployments/" + created.Id);
+        Assert.Equal(new StorageMountRequest(20, "/app/uploads", 1000, 1000), Assert.Single(saved!.Services).Storage!["uploads"]);
+    }
+
+    [Fact]
+    public async Task StorageInventoryRequiresAppAccessAndIncludesRetainedDisks()
+    {
+        var seed = await SeedAsync("org_storage_list", "app_storage_list", DateTimeOffset.UtcNow);
+        var other = await SeedAsync("org_storage_other", "app_storage_other", DateTimeOffset.UtcNow);
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+            db.AppStorageVolumes.Add(new AppStorageVolume { Id = "storage_list", AppId = seed.AppId, Name = "uploads", Region = "nbg1", SizeGb = 20, ProviderVolumeId = "901" });
+            await db.SaveChangesAsync();
+        }
+        using var client = _factory!.CreateClient();
+        var url = $"/v1/apps/{seed.AppId}/storage";
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(url)).StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", other.ApiKeyToken);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(url)).StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var volumes = await client.GetFromJsonAsync<AppStorageVolumeResponse[]>(url);
+        Assert.Equal("901", Assert.Single(volumes!).ProviderVolumeId);
+        Assert.Equal("registered", volumes![0].Status);
+    }
+
+    [Fact]
+    public async Task StorageAdmissionRejectsShrinkAndOwnershipChange()
+    {
+        var seed = await SeedAsync("org_storage_resize", "app_storage_resize", DateTimeOffset.UtcNow);
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+            (await db.Apps.SingleAsync(x => x.Id == seed.AppId)).Plan = AppPlan.P0H0;
+            db.AppStorageVolumes.Add(new AppStorageVolume { Id = "storage_resize", AppId = seed.AppId, Name = "uploads", Region = "nbg1", SizeGb = 30, Uid = 1000, Gid = 1000 });
+            await db.SaveChangesAsync();
+        }
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        foreach (var mount in new[] { new StorageMountRequest(20, "/app/data", 1000, 1000), new(30, "/app/data", 0, 0) })
+        {
+            var request = new CreateDeploymentRequest(seed.AppId, "none", null,
+                [new DeploymentServiceRequest("api", "example/api:1", 8080, true, "/", "/health", Storage: new Dictionary<string, StorageMountRequest> { ["uploads"] = mount })]);
+            var response = await client.PostAsJsonAsync("/v1/deployments", request);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains("invalid_storage_change", await response.Content.ReadAsStringAsync());
+        }
+    }
+
+    [Fact]
     public async Task CancelEndpointAuthenticatesAndReturnsDurableAcknowledgement()
     {
         var seed = await SeedAsync("org_cancel_api", "app_cancel_api", DateTimeOffset.UtcNow);

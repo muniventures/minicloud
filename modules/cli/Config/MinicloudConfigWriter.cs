@@ -110,6 +110,18 @@ public static class MinicloudConfigWriter
                     builder.AppendLine($"        protocolVersion: {mount.ProtocolVersion}");
                 }
             }
+            if (service.Storage is { Count: > 0 })
+            {
+                builder.AppendLine("    storage:");
+                foreach (var (volume, mount) in service.Storage)
+                {
+                    builder.AppendLine($"      {Escape(volume)}:");
+                    builder.AppendLine($"        sizeGb: {mount.SizeGb}");
+                    builder.AppendLine($"        mountPath: {Escape(mount.MountPath)}");
+                    builder.AppendLine($"        uid: {mount.Uid}");
+                    builder.AppendLine($"        gid: {mount.Gid}");
+                }
+            }
             builder.AppendLine($"    port: {service.Port}");
             builder.AppendLine($"    public: {service.Public?.ToString().ToLowerInvariant() ?? "true"}");
             builder.AppendLine($"    path: {Escape(service.Path ?? "/")}");

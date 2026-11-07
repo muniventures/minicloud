@@ -61,6 +61,7 @@ public sealed class DeploymentLifecycleService(IIdGenerator ids, TimeProvider ti
         ArtifactId = service.ArtifactId,
         ImagePublicationId = service.ImagePublicationId,
         Sha256 = service.Sha256,
+        StorageJson = service.Storage is { Count: > 0 } ? JsonSerializer.Serialize(service.Storage, JsonOptions) : null,
         AssetMountsJson = service.AssetMounts is { Count: > 0 } ? JsonSerializer.Serialize(service.AssetMounts, JsonOptions) : null,
         Port = service.Port,
         Public = service.Public,

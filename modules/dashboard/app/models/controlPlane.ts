@@ -1,3 +1,5 @@
+export type StorageMount = { sizeGb: number; mountPath: string; uid: number; gid: number };
+
 export type OrganizationSummary = {
   id: string;
   name: string;
@@ -122,6 +124,7 @@ export type CliLoginSessionResponse = {
 };
 
 export type DeploymentServiceResponse = {
+  storage?: Record<string, StorageMount> | null;
   urls?: string[];
   name: string;
   image: string;
@@ -174,6 +177,7 @@ export type RuntimeServiceStatus = {
 };
 
 export type AppServiceInventoryResponse = {
+  storage?: Record<string, StorageMount> | null;
   name: string;
   image: string;
   port: number;
@@ -376,3 +380,5 @@ export type CustomDomainRegistrationResponse = {
   failureMessage: string | null;
   lastCheckedAt: string | null;
 };
+
+export type AppStorageVolume = { name: string; provider: string; providerVolumeId: string | null; region: string; sizeGb: number; uid: number; gid: number; status: "registered" | "creation_unresolved" | "pending" };

@@ -45,8 +45,17 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
     public DbSet<TelemetryAuthorityOutbox> TelemetryAuthorityOutboxes => Set<TelemetryAuthorityOutbox>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
+    public DbSet<AppStorageVolume> AppStorageVolumes => Set<AppStorageVolume>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<AppStorageVolume>(entity =>
+        {
+            entity.ToTable("app_storage_volumes");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.AppId, x.Name }).IsUnique();
+            entity.HasIndex(x => x.ProviderVolumeId).IsUnique();
+        });
         modelBuilder.Entity<ImagePublication>(entity =>
         {
             entity.ToTable("image_publications");

@@ -138,3 +138,7 @@ export function createAppCustomDomain(appId: string, serviceName: string, hostna
 export function verifyAppDomain(appId: string, domainId: string) {
   return apiRequest<DomainBindingResponse>(`/v1/domains/${encodeURIComponent(domainId)}/verify?appId=${encodeURIComponent(appId)}`, { method: "POST" });
 }
+
+export function listAppStorage(appId: string, signal?: AbortSignal) {
+  return apiRequest<import("../models/controlPlane").AppStorageVolume[]>(`/v1/apps/${encodeURIComponent(appId)}/storage`, { signal });
+}

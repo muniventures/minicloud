@@ -97,6 +97,10 @@ public sealed partial class CliApplication
                     ? "domains=-"
                     : $"domains={string.Join(",", service.Domains.OrderBy(x => x.Hostname, StringComparer.Ordinal).Select(FormatDomainSummary))}";
                 _console.WriteLine($"  {service.Name}  {visibility}  port={service.Port}  {runtime}  {domains}");
+                foreach (var (name, mount) in service.Storage ?? new Dictionary<string, StorageMountRequest>())
+                {
+                    _console.WriteLine($"    Storage: {name}  {mount.SizeGb} GB  {mount.MountPath}  uid={mount.Uid} gid={mount.Gid}");
+                }
                 foreach (var domain in service.Domains.Where(x => x.Status != "disabled").OrderBy(x => x.Hostname, StringComparer.Ordinal))
                 {
                     WriteUrlLine($"Service URL ({service.Name})", $"https://{domain.Hostname}");

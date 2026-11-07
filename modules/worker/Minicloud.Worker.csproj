@@ -20,6 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="..\..\scripts\github-actions\minicloud-deploy\storage-volume.py" Link="scripts\github-actions\minicloud-deploy\storage-volume.py" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\scripts\github-actions\minicloud-deploy\runtime-maintenance.py" Link="scripts\github-actions\minicloud-deploy\runtime-maintenance.py" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\scripts\github-actions\minicloud-deploy\asset-release.py" Link="scripts\github-actions\minicloud-deploy\asset-release.py" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\scripts\github-actions\minicloud-deploy\remote-deploy.sh" Link="scripts\github-actions\minicloud-deploy\remote-deploy.sh">

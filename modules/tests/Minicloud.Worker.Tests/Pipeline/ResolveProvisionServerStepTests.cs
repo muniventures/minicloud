@@ -59,6 +59,7 @@ public sealed class ResolveProvisionServerStepTests : IClassFixture<WorkerSqlite
         Assert.Contains("fallocate -l 2G /swapfile", cloudInit);
         Assert.Contains("vm.swappiness=10", cloudInit);
         Assert.Contains("apt-get install -y python3 ca-certificates curl gnupg jq ufw caddy docker.io docker-compose-v2 docker-buildx", cloudInit);
+        Assert.Contains("docker-buildx e2fsprogs util-linux", cloudInit);
         Assert.Contains("usermod -aG docker minicloud", cloudInit);
         Assert.Contains("printf 'import /opt/minicloud/caddy/apps/*.caddy\\n' > /etc/caddy/Caddyfile", cloudInit);
         Assert.Contains("ufw allow OpenSSH", cloudInit);

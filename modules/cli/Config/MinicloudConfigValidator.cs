@@ -16,6 +16,9 @@ public static class MinicloudConfigValidator
     public static IReadOnlyList<ConfigDiagnostic> Validate(MinicloudConfig config)
     {
         var diagnostics = new List<ConfigDiagnostic>();
+        diagnostics.AddRange(Minicloud.Common.Validation.StorageValidation.Validate(config.Services.Select(x =>
+            (x.Key, x.Value.Storage, (IEnumerable<string>)(x.Value.AssetMounts?.Values.Select(m => m.MountPath) ?? []))), config.Database == "sqlite")
+            .Errors.Select(x => new ConfigDiagnostic(x.Field, x.Message)));
         ValidateSlug(diagnostics, config.App, "app", "App is required and must use lowercase letters, numbers, dashes, and underscores.");
 
         if (string.IsNullOrWhiteSpace(config.AppId))

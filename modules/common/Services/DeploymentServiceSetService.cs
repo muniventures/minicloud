@@ -105,7 +105,7 @@ public sealed class DeploymentServiceSetService
             service.ArtifactId,
             service.Sha256 ?? service.Artifact?.Sha256,
             service.AssetMountsJson is null ? null : JsonSerializer.Deserialize<Dictionary<string, AssetMountRequest>>(service.AssetMountsJson, JsonOptions),
-            service.ImagePublicationId);
+            service.ImagePublicationId, StorageMounts.Read(service.StorageJson));
 
     private static IReadOnlyDictionary<string, string>? DeserializeEnv(string? envJson)
     {

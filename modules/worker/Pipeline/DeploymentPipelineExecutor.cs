@@ -241,7 +241,7 @@ public sealed class DeploymentPipelineExecutor : IDeploymentPipelineExecutor
         var names = JsonSerializer.Deserialize<HashSet<string>>(stored.RequestedServiceNamesJson)!;
         var requested = stored.Services.Where(x => names.Contains(x.Name)).ToArray();
         var desired = await new DeploymentServiceSetService().BuildMergedServicesAsync(db, stored.AppId, requested, token);
-        var validation = Minicloud.Common.Validation.ControlPlaneValidation.ValidateMergedDeploymentServices(desired);
+        var validation = Minicloud.Common.Validation.ControlPlaneValidation.ValidateMergedDeploymentServices(desired, stored.Database == DatabaseMode.Sqlite);
         if (!validation.IsValid) { throw new PipelineStepException("invalid_service_set", "Active service set changed incompatibly while deployment was queued."); }
         var retained = stored.Services.Where(x => !names.Contains(x.Name)).ToArray();
         db.DeploymentServices.RemoveRange(retained);

@@ -35,6 +35,8 @@ internal static class ServiceChecksumCalculator
         };
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         hash.AppendData(JsonSerializer.SerializeToUtf8Bytes(configuration));
+        if (service.Storage is { Count: > 0 })
+        { hash.AppendData(JsonSerializer.SerializeToUtf8Bytes(new { storage = Ordered(service.Storage) })); }
         if (hasSource && service.BuildMode == Minicloud.Common.Contracts.ServiceBuildModes.Local)
         {
             if (!Minicloud.Common.Validation.ImagePublicationValidation.IsPlatform(service.BuildPlatform))

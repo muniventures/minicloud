@@ -11,7 +11,7 @@ using System.Net.Http;
 
 namespace Minicloud.Common.Providers.Hetzner;
 
-public sealed class HetznerClient : IVpsProviderClient
+public sealed partial class HetznerClient : IVpsProviderClient
 {
     private readonly HttpClient _httpClient;
     private readonly HetznerOptions _options;

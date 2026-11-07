@@ -24,7 +24,8 @@ public sealed record DeploymentServiceRequest(
     string? ArtifactId = null,
     string? Sha256 = null,
     IReadOnlyDictionary<string, AssetMountRequest>? AssetMounts = null,
-    string? ImagePublicationId = null);
+    string? ImagePublicationId = null,
+    IReadOnlyDictionary<string, StorageMountRequest>? Storage = null);
 
 public sealed record DeploymentCreateResponse(
     string Id,
@@ -62,7 +63,8 @@ public sealed record DeploymentServiceResponse(
     string HealthPath,
     IReadOnlyList<string> Urls,
     string? Sha256 = null,
-    IReadOnlyDictionary<string, AssetMountRequest>? AssetMounts = null);
+    IReadOnlyDictionary<string, AssetMountRequest>? AssetMounts = null,
+    IReadOnlyDictionary<string, StorageMountRequest>? Storage = null);
 
 public sealed record CreateDeploymentArtifactRequest(
     string AppId,

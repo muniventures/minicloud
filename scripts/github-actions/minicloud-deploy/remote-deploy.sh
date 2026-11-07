@@ -249,6 +249,8 @@ on_error() {
   finish_phase failed
   if [ "${CURRENT_PHASE}" = "build_artifacts" ]; then
     failure_code="docker_build_failed"
+  elif [ "${CURRENT_PHASE}" = "storage_mounts" ]; then
+    failure_code="storage_mount_failed"
   elif [ "${CURRENT_PHASE}" = "runtime_agent_install" ]; then
     failure_code="runtime_agent_install_failed"
   elif [ "${CURRENT_PHASE}" = "verify_local_health" ]; then
@@ -682,6 +684,8 @@ render_next_configs() {
           end) end;
 
       def service_volumes($service):
+        (($service.storage_mounts // []) | map({type: "bind", source: ("/var/lib/minicloud/customer-storage/" + .volume_id + "/data"), target: .mount_path, bind: {create_host_path: false}}))
+        +
         (($service.asset_mounts // []) | map({type: "bind", source: ("/opt/minicloud/apps/" + $app + "/assets/" + .name + (if .release_id then "/" + .release_id else "" end)), target: .mount_path, read_only: true, bind: {create_host_path: false}}))
         + (
           if $database == "sqlite" then
@@ -2315,6 +2319,10 @@ main() {
   verify_image_asset_requirements
   if jq -e '[.services[].asset_mounts[]?] | length > 0' "${PAYLOAD_FILE}" >/dev/null; then
     python3 "$(dirname "${PAYLOAD_FILE}")/asset-release.py" verify "${APP_DIR}" "${PAYLOAD_FILE}"
+  fi
+  if jq -e '[.services[].storage_mounts[]?] | length > 0' "${PAYLOAD_FILE}" >/dev/null; then
+    phase "storage_mounts"
+    sudo python3 "$(dirname "${PAYLOAD_FILE}")/storage-volume.py" "${PAYLOAD_FILE}"
   fi
   render_next_configs
   validate_next_configs
