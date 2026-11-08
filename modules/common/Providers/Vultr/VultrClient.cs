@@ -62,8 +62,7 @@ public sealed class VultrClient : IVpsProviderClient
         await EnsureSuccessAsync(response, cancellationToken);
 
         var listResponse = await response.Content.ReadFromJsonAsync<VultrInstanceListResponse>(cancellationToken: cancellationToken);
-        var instance = listResponse?.Instances?.FirstOrDefault(i => string.Equals(i.Label, serverName, StringComparison.OrdinalIgnoreCase))
-                       ?? listResponse?.Instances?.FirstOrDefault();
+        var instance = listResponse?.Instances?.FirstOrDefault(i => string.Equals(i.Label, serverName, StringComparison.OrdinalIgnoreCase));
         if (instance == null)
         {
             return null;

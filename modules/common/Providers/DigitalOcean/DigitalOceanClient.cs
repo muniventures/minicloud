@@ -113,7 +113,17 @@ public sealed class DigitalOceanClient : IVpsProviderClient
 
         if (!string.IsNullOrWhiteSpace(_options.ProjectId))
         {
-            await AssignToProjectAsync(droplet.Id.ToString(), _options.ProjectId, cancellationToken);
+            try
+            {
+                await AssignToProjectAsync(droplet.Id.ToString(), _options.ProjectId, cancellationToken);
+            }
+            catch (ProviderApiException ex)
+            {
+                // Assignment rejection cannot prove the preceding allocation was rejected.
+                throw new ProviderApiException(
+                    $"DigitalOcean droplet {droplet.Id} was created, but project assignment failed. Reconcile the existing droplet before retrying.",
+                    provider: Provider, innerException: ex);
+            }
         }
 
         return MapDropletInfo(droplet);

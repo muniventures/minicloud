@@ -9,6 +9,8 @@ using Minicloud.Common.Providers.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Minicloud.Common.Providers.Common;
 using System.Net;
+using Minicloud.Common.Providers.DigitalOcean;
+using Minicloud.Worker.Tests.Providers;
 
 namespace Minicloud.Worker.Tests.Pipeline;
 
@@ -439,6 +441,48 @@ public sealed class ResolveProvisionServerStepTests : IClassFixture<WorkerSqlite
         { Assert.False((await db.Deployments.SingleAsync(x => x.Id == context.DeploymentId)).ProviderCreationAttempted); }
         await step.ExecuteAsync(context, default);
         Assert.Equal(2, creates);
+        Assert.All(factory.RequestedAccounts, x => Assert.Equal(context.ProviderAccountId, x));
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    public async Task DigitalOceanProjectAssignmentFailureRetainsCreationMarkerAndPreventsAnotherAllocation(HttpStatusCode status)
+    {
+        var context = await SeedCatalogAsync("do-" + (int)status + "-project");
+        await using (var db = _harness.CreateDbContext())
+        {
+            (await db.ProviderAccounts.SingleAsync(x => x.Id == context.ProviderAccountId)).ProviderType = CloudProvider.DigitalOcean;
+            var plan = await db.ProviderPlans.SingleAsync(x => x.Id == context.PlanId);
+            plan.Region = "nyc1";
+            plan.Sku = "s-1vcpu-1gb";
+            var deployment = await db.Deployments.SingleAsync(x => x.Id == context.DeploymentId);
+            deployment.ProviderType = "DigitalOcean";
+            deployment.ProviderRegion = plan.Region;
+            deployment.ProviderSku = plan.Sku;
+            await db.SaveChangesAsync();
+        }
+
+        var handler = new TestHttpMessageHandler();
+        handler.QueueJsonResponse("""{"droplets":[]}""");
+        handler.QueueJsonResponse("""{"droplet":{"id":6002,"name":"created-droplet","status":"new"}}""", HttpStatusCode.Created);
+        handler.QueueJsonResponse("""{"message":"Project assignment rejected"}""", status);
+        handler.QueueJsonResponse("""{"droplets":[]}""");
+        using var http = new HttpClient(handler);
+        var factory = new AccountFactory(new DigitalOceanClient(http, new DigitalOceanOptions
+        {
+            ApiToken = "synthetic-token", ProjectId = "synthetic-project", BaseUrl = "https://api.digitalocean.com/v2/"
+        }));
+        var step = CatalogStep(factory);
+
+        await Assert.ThrowsAsync<PipelineStepException>(() => step.ExecuteAsync(context, default));
+        var retry = await Assert.ThrowsAsync<PipelineStepException>(() => step.ExecuteAsync(context, default));
+
+        Assert.Contains("unresolved", retry.Message);
+        Assert.Single(handler.RecordedRequests, x => x.Method == HttpMethod.Post && x.Uri.EndsWith("/droplets", StringComparison.Ordinal));
+        await using var verify = _harness.CreateDbContext();
+        Assert.True((await verify.Deployments.SingleAsync(x => x.Id == context.DeploymentId)).ProviderCreationAttempted);
         Assert.All(factory.RequestedAccounts, x => Assert.Equal(context.ProviderAccountId, x));
     }
 

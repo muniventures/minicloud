@@ -74,6 +74,14 @@ worker still completing a discovery request with captured credentials. Use a new
 provider entry and plan for an unprovisioned environment, or reconcile a known
 original resource before rotating the existing entry.
 
+If DigitalOcean creates a droplet but then rejects its project assignment, the
+allocation remains unresolved. Minicloud keeps its original account reservation
+and checks that account for the existing droplet before any retry; project errors
+do not permit another allocation or a plan switch.
+
+Vultr discovery returns only a matching server label; unrelated instances in a
+provider response do not count as this application's server.
+
 ## Upgrade from global provider credentials
 
 Stop new admissions and drain active deployments, preparations and deletion
