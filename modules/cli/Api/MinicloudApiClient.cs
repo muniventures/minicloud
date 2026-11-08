@@ -56,6 +56,12 @@ public sealed class MinicloudApiClient
     public Task<IReadOnlyList<AppResponse>> GetAppsAsync(string organizationId, CancellationToken cancellationToken) =>
         SendAsync<IReadOnlyList<AppResponse>>(HttpMethod.Get, $"/v1/apps?organizationId={Uri.EscapeDataString(organizationId)}", null, cancellationToken);
 
+    public Task<AppResponse> CreateEnvironmentAsync(string appId, CreateAppEnvironmentRequest request, CancellationToken cancellationToken) =>
+        SendAsync<AppResponse>(HttpMethod.Post, $"/v1/apps/{Uri.EscapeDataString(appId)}/environments", request, cancellationToken);
+
+    public Task<AppResponse> RenameEnvironmentAsync(string appId, RenameAppEnvironmentRequest request, CancellationToken cancellationToken) =>
+        SendAsync<AppResponse>(HttpMethod.Patch, $"/v1/apps/{Uri.EscapeDataString(appId)}/environment", request, cancellationToken);
+
     public Task<AppResponse> GetAppAsync(string appId, CancellationToken cancellationToken) =>
         SendAsync<AppResponse>(HttpMethod.Get, $"/v1/apps/{Uri.EscapeDataString(appId)}", null, cancellationToken);
 

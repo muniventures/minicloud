@@ -596,3 +596,45 @@ images in the local Docker image store and uploads up to two at a time.
 ## Durable app storage
 
 Hetzner apps can declare named writable volumes under each service’s `storage` mapping. See [configuration, retention and growth](durable-storage.md). Storage changes participate in deployment change detection.
+
+## Named application environments
+
+Available in CLI 3.1.0. Upgrade the API, worker and dashboard and apply the
+`ApplicationEnvironments` database migration before creating named environments.
+
+Each application has one or more environments with user-chosen names. Each
+has its own managed VPS plan and provider, database, secrets, services, storage,
+deployments and domains. New applications default to `production`; choose another
+name in the dashboard when creating the app, or rename it later. Existing apps
+retain their runtime and URLs as their `production` environment.
+
+```sh
+minicloud environments list
+minicloud environments rename production prod
+minicloud environments create staging --plan p0-v-0
+minicloud deploy --environment staging
+minicloud deploy all --environment prod
+minicloud deploy api --environment staging
+```
+
+The plan determines the provider: for example, `p0-v-0` selects Vultr and
+`p0-h-0` selects Hetzner. Plans are selected independently when environments are
+created. Use `--database sqlite|postgres` on `environments create` to override the
+application's database mode. All commands accept `--config path/to/minicloud.yml`.
+The dashboard's Environments panel also creates, renames and switches environments.
+
+Keep the application's root `appId` in your config. With a single environment,
+`minicloud deploy` selects it automatically. With multiple environments,
+`--environment <name>` is required, including when the config points at an
+environment's runtime ID. Unknown names fail before building or uploading.
+Names use 1–63 letters, digits, dashes or underscores, starting with a letter or
+digit; uniqueness and CLI selection ignore case. Public services receive separate subdomains per environment; for example, the
+`web` service in `staging` uses `<org>-<app>-staging-web.<app-domain>`.
+Existing production service subdomains stay unchanged. Names can be renamed without
+changing runtime IDs or existing URLs. New environments start with empty secrets;
+configure secrets and domains using the environment's runtime ID shown by
+`environments list`. Branch previews remain a separate lifecycle and cannot be
+combined with `deploy --environment`.
+
+Deleting the main application deletes all its environments and branch previews.
+Deleting a child environment through its app detail affects only that environment.

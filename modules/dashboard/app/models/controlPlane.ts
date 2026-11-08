@@ -28,7 +28,11 @@ export type LatestDeployment = {
   completedAt?: string | null;
 };
 
+export type AppEnvironmentResponse = { id: string; name: string; plan: AppPlan; database: DatabaseMode; deletionStatus?: string | null };
+
 export type AppResponse = {
+  environmentName?: string | null;
+  environments?: AppEnvironmentResponse[];
   deletionStatus?: string | null;
   deletionError?: string | null;
   id: string;

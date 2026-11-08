@@ -82,7 +82,7 @@ public sealed partial class CliApplication
                 return CliExitCodes.Success;
             }
             if (args[0] == "instance") return await RunInstanceAsync(args.Skip(1).ToArray(), cancellationToken);
-            if (args[0] is "token" or "init" or "add-service" or "login" or "assets" or "deploy" or "branch" or "status" or "logs" or "apps" or "domains" or "secrets")
+            if (args[0] is "token" or "init" or "add-service" or "login" or "assets" or "deploy" or "branch" or "status" or "logs" or "apps" or "domains" or "secrets" or "environments")
                 await EnsureInstanceAsync(cancellationToken);
             return args[0] switch
             {
@@ -92,6 +92,7 @@ public sealed partial class CliApplication
                 "login" => await RunLoginAsync(args.Skip(1).ToArray(), cancellationToken),
                 "assets" => await RunAssetsAsync(args.Skip(1).ToArray(), cancellationToken),
                 "deploy" => await RunDeployAsync(args.Skip(1).ToArray(), cancellationToken),
+                "environments" => await RunEnvironmentsAsync(args.Skip(1).ToArray(), cancellationToken),
                 "branch" => await RunBranchAsync(args.Skip(1).ToArray(), cancellationToken),
                 "status" => await RunStatusAsync(args.Skip(1).ToArray(), cancellationToken),
                 "logs" => await RunLogsAsync(args.Skip(1).ToArray(), cancellationToken),
@@ -178,6 +179,7 @@ public sealed partial class CliApplication
         _console.WriteLine("  init            Initialize a new application and generate minicloud.yml");
         _console.WriteLine("  add-service     Add a new service configuration to an existing application");
         _console.WriteLine("  deploy          Deploy changed services to Minicloud (or 'all' / '--all' to deploy all)");
+        _console.WriteLine("  environments    List, create, or rename application environments");
         _console.WriteLine("  branch          Manage preview environments (deploy branch, branch destroy)");
         _console.WriteLine("  assets          Publish immutable customer assets on the assigned VPS");
         _console.WriteLine("  status          Show deployment status and service URLs (--watch to stream updates)");
@@ -239,6 +241,7 @@ public sealed partial class CliApplication
                 _console.WriteLine("  - Local image builds are the default for sourcePath services; buildMode: source opts into server builds.");
                 _console.WriteLine("  - --build-mode source|local overrides selected services; local requires a local Docker buildx builder.");
                 _console.WriteLine("  - 'minicloud deploy all' or '--all' deploys all configured services unconditionally.");
+                _console.WriteLine("  - --environment <name> selects a named environment; required when more than one exists.");
                 _console.WriteLine("  - 'minicloud deploy branch' deploys all configured services into an isolated preview branch environment.");
                 _console.WriteLine();
                 _console.WriteLine("Options:");
@@ -250,6 +253,11 @@ public sealed partial class CliApplication
                 _console.WriteLine("  --no-publish            Deploy pre-built images without building or publishing");
                 return CliExitCodes.Success;
 
+            case "environments":
+                _console.WriteLine("minicloud environments list [--config path]");
+                _console.WriteLine("minicloud environments create <name> --plan <plan> [--database sqlite|postgres] [--config path]");
+                _console.WriteLine("minicloud environments rename <name> <new-name> [--config path]");
+                return CliExitCodes.Success;
             case "deploy branch":
                 _console.WriteLine("Deploy all services to an isolated branch environment");
                 _console.WriteLine();

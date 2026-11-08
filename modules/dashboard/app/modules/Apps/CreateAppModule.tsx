@@ -12,7 +12,7 @@ import { PageScaffold } from "../../core/components/PageScaffold";
 import { dashboardRoutes } from "../../core/routing/dashboardRoutes";
 import type { AppPlan, DatabaseMode } from "../../models/controlPlane";
 
-const planOptions: { value: AppPlan; label: string; description: string }[] = [
+export const planOptions: { value: AppPlan; label: string; description: string }[] = [
   { value: "p0-h-0", label: "P0-H-0", description: "Hetzner CX23, 2 vCPU, 4 GB RAM" },
   { value: "p0-v-0", label: "P0-V-0", description: "Vultr $2.50 IPv6-only, 1 vCPU, 0.5 GB RAM" },
   { value: "p0-v-1", label: "P0-V-1", description: "Vultr $3.50, 1 vCPU, 0.5 GB RAM" },
@@ -24,6 +24,7 @@ const planOptions: { value: AppPlan; label: string; description: string }[] = [
 
 export function CreateAppModule() {
   const { selectedOrganization } = useAuth();
+  const [environmentName, setEnvironmentName] = useState("production");
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [isSlugEdited, setIsSlugEdited] = useState(false);
@@ -44,6 +45,7 @@ export function CreateAppModule() {
     try {
       const app = await createApp({
         organizationId: selectedOrganization.id,
+        environmentName,
         name,
         slug: slug || slugify(name),
         plan,
@@ -84,6 +86,10 @@ export function CreateAppModule() {
             <div className="grid gap-2">
               <Label htmlFor="slug">Slug</Label>
               <Input id="slug" onChange={(event) => updateSlug(event.target.value)} value={slug} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="environmentName">Environment name</Label>
+              <Input id="environmentName" required maxLength={63} pattern="[A-Za-z0-9][A-Za-z0-9_-]*" value={environmentName} onChange={(event) => setEnvironmentName(event.target.value)} />
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="grid gap-2">

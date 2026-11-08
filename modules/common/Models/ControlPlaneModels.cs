@@ -51,6 +51,9 @@ public sealed class MinicloudApp
     public string? ParentAppId { get; set; }
     public MinicloudApp? ParentApp { get; set; }
     public string? BranchName { get; set; }
+    public string? EnvironmentName { get; set; }
+    // Root app ID + case-folded name enforces uniqueness across root and child environments.
+    public string? EnvironmentKey { get; set; }
     public string? DeletionStatus { get; set; }
     public string? DeletionError { get; set; }
     public AppPlan Plan { get; set; }

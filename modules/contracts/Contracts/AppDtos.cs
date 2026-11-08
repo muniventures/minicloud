@@ -7,7 +7,8 @@ public sealed record CreateAppRequest(
     string Name,
     string Slug,
     string Plan,
-    string Database);
+    string Database,
+    string EnvironmentName = "production");
 
 public sealed record UpdateAppRequest(
     string? Name,
@@ -42,7 +43,9 @@ public sealed record AppResponse(
     IReadOnlyList<AppBranchResponse> Branches,
     LatestDeploymentResponse? LatestDeployment,
     string? DeletionStatus = null,
-    string? DeletionError = null);
+    string? DeletionError = null,
+    string? EnvironmentName = null,
+    IReadOnlyList<AppEnvironmentResponse>? Environments = null);
 
 public sealed record AppDomainResponse(
     string Id,
@@ -56,3 +59,7 @@ public sealed record LatestDeploymentResponse(
     string Status,
     string? WebsiteUrl,
     DateTimeOffset? CompletedAt);
+
+public sealed record CreateAppEnvironmentRequest(string Name, string Plan, string? Database = null);
+public sealed record RenameAppEnvironmentRequest(string Name);
+public sealed record AppEnvironmentResponse(string Id, string Name, string Plan, string Database, string? DeletionStatus);

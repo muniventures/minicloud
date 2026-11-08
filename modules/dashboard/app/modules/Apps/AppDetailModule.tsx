@@ -1,3 +1,4 @@
+import { AppEnvironmentsPanel } from "./AppEnvironmentsPanel";
 import { useAppServiceInventory } from "./useAppServiceInventory";
 import { CollectionToolbar } from "@/core/components/CollectionToolbar";
 import { useRecordCollection } from "@/core/components/useRecordCollection";
@@ -177,6 +178,7 @@ export function AppDetailModule() {
         const exists = remaining.some(
           (item) =>
             item.id === app.id ||
+            item.environments?.some((environment) => environment.id === app.id) ||
             item.branches?.some((branch) => branch.id === app.id),
         );
         if (!exists) {
@@ -534,6 +536,7 @@ export function AppDetailModule() {
               </CardContent>
             </Card>
           </div>
+          {!app.branchName && <AppEnvironmentsPanel app={app} onUpdated={refreshRecord} />}
           {!app.parentAppId ? (
             <Card>
               <CardHeader>

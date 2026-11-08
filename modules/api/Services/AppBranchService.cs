@@ -81,7 +81,7 @@ public sealed class AppBranchService(
 
     public async Task DestroyAsync(MinicloudApp branch, CancellationToken cancellationToken)
     {
-        if (branch.ParentAppId is null)
+        if (branch.ParentAppId is null || branch.BranchName is null)
         {
             throw new AppBranchException("branch_destroy_invalid", "Main apps cannot be destroyed through the branch lifecycle.");
         }

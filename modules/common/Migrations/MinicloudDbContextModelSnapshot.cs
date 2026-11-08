@@ -1456,6 +1456,15 @@ namespace Minicloud.Common.Migrations
                         .HasColumnType("text")
                         .HasColumnName("deletion_status");
 
+                    b.Property<string>("EnvironmentKey")
+                        .HasColumnType("text")
+                        .HasColumnName("environment_key");
+
+                    b.Property<string>("EnvironmentName")
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("environment_name");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text")
@@ -1485,6 +1494,9 @@ namespace Minicloud.Common.Migrations
                         .HasColumnName("updated_at");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("EnvironmentKey")
+                        .IsUnique();
 
                     b.HasIndex("OrganizationId", "Slug")
                         .IsUnique();
