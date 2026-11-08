@@ -57,6 +57,8 @@ public sealed class MinicloudApp
     public string? DeletionStatus { get; set; }
     public string? DeletionError { get; set; }
     public AppPlan Plan { get; set; }
+    public string? PlanId { get; set; }
+    public ProviderPlan? SelectedPlan { get; set; }
     public DatabaseMode Database { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
@@ -154,6 +156,15 @@ public sealed class CliLoginSession
 
 public sealed class Deployment
 {
+    public string? PlanId { get; set; }
+    public long? PlanRevision { get; set; }
+    public string? ProviderAccountId { get; set; }
+    public string? ProviderType { get; set; }
+    public string? ProviderRegion { get; set; }
+    public string? ProviderSku { get; set; }
+    public string? ProviderImage { get; set; }
+    public string? ProviderBuildPlatform { get; set; }
+    public bool ProviderCreationAttempted { get; set; }
     public DateTimeOffset? CancellationRequestedAt { get; set; }
     public string? CancellationRequestedBy { get; set; }
     public string? RequestedServiceNamesJson { get; set; }
@@ -263,6 +274,10 @@ public sealed class DeploymentArtifact
 
 public sealed class ServerInstance
 {
+    public string? ProviderAccountId { get; set; }
+    public string? PlanId { get; set; }
+    public string? Sku { get; set; }
+    public string? Image { get; set; }
     public string? BuildPlatform { get; set; }
     public DateTimeOffset? BuildPlatformObservedAt { get; set; }
     [Key]

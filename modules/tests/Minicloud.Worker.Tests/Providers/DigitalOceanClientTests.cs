@@ -213,6 +213,10 @@ public class DigitalOceanClientTests
         var ex = await Assert.ThrowsAsync<ProviderApiException>(() => client.FindServerAsync("test"));
         Assert.Equal(HttpStatusCode.Forbidden, ex.StatusCode);
         Assert.DoesNotContain("dop_v1_secret_token_abcdef123456", ex.Message);
-        Assert.Contains("[REDACTED]", ex.Message);
+        Assert.Equal("DigitalOcean API request failed with HTTP 403.", ex.Message);
+        Assert.DoesNotContain("Invalid token", ex.Message);
+        Assert.NotNull(ex.ResponseBody);
+        Assert.DoesNotContain("dop_v1_secret_token_abcdef123456", ex.ResponseBody);
+        Assert.Contains("[REDACTED]", ex.ResponseBody);
     }
 }

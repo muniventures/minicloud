@@ -13,6 +13,7 @@ public static class MinicloudCommonExtensions
     public static IServiceCollection AddMinicloudCommon(this IServiceCollection services)
     {
         services.AddSingleton<Services.IIdGenerator, Services.IdGenerator>();
+        services.AddScoped<Services.ProviderCatalogService>();
         return services;
     }
 

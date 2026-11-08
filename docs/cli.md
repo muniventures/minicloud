@@ -104,9 +104,63 @@ minicloud deploy --config path/to/minicloud.yml
 
 ## Managed VPS Plans
 
-The CLI deploys to the app identified by `appId` in `minicloud.yml`. The app's managed VPS plan is selected in the Minicloud control plane.
+The CLI deploys to the app identified by `appId` in `minicloud.yml`. Configure provider accounts and their plan mappings in the portal's **Providers** section. An organization can have multiple accounts of the same provider. Each plan selects one account, region and provider SKU; the CLI only needs the plan's name.
 
-Current plan codes:
+New plans start with a UUID name and can be renamed. Names are unique within the organization, including across provider accounts. Discover the current names with:
+
+```sh
+minicloud plans list
+minicloud plans list --organization org_example
+```
+
+Select a plan with optional top-level YAML `plan` or `--plan`:
+
+```yaml
+app: my-api
+appId: app_example
+plan: "Hetzner secondary small"
+services:
+  api:
+    image: example/api:1
+    port: 8080
+    public: true
+    path: /
+    healthPath: /health
+```
+
+```sh
+minicloud deploy --plan "Hetzner secondary small"
+minicloud deploy --environment staging --plan "Hetzner secondary small"
+minicloud environments create staging --plan "Hetzner secondary small"
+```
+
+The command flag overrides YAML; YAML overrides the selected environment's saved plan. Omitting both keeps that saved plan. The environment is selected before resolving its plan name. Do not put cloud API credentials or provider selectors in the YAML.
+
+Selecting a different plan is supported before an environment has resources or a provisioning reservation. A regular deploy does not move or resize an existing server. There is no automatic account fallback on quota failure. Renaming a plan preserves existing app bindings, but commands and YAML must use the current name; retired names cannot select another plan.
+
+Operators can add an account using an existing environment token, then import explicitly listed legacy resource bindings:
+
+```sh
+minicloud providers add --organization org_example --name "Hetzner primary" --provider hetzner
+minicloud providers import-legacy --manifest legacy-bindings.json
+```
+
+Use an organization API key with `providers:write` for these operator commands; ordinary login/deployment keys do not grant credential management. `providers add` reads `HCLOUD_TOKEN`/`HETZNER_API_TOKEN`, `DIGITALOCEAN_ACCESS_TOKEN`/`DIGITALOCEAN_TOKEN`, or `VULTR_API_KEY`/`VULTR_KEY` according to the selected type. Credentials are sent directly to the authenticated API for storage in OpenBao. Do not pass them as command arguments or put them in the import manifest. DigitalOcean supports `--project-id` (or `DIGITALOCEAN_PROJECT_ID`); Vultr supports `--os-id`.
+
+The import manifest is non-secret JSON. Both resource lists must be supplied explicitly, including empty arrays:
+
+```json
+{
+  "organizationId": "org_example",
+  "providerAccountId": "provider_example",
+  "appBindings": [{ "appId": "app_example", "planName": "Legacy small", "buildPlatform": "linux/amd64" }],
+  "retainedVolumeIds": []
+}
+```
+
+Use the account and organization that actually own those resources. Set each binding's `buildPlatform` to its verified `linux/amd64` or `linux/arm64` architecture when the server has no recorded platform observation. The API verifies the selected provider scope and refuses unresolved ownership; it does not create replacement resources or select another account. Run imports after pausing legacy admissions and draining active work.
+
+Legacy installations may retain these imported plan names during migration. They are no longer the catalog of all available plans; imported mappings preserve each installation's effective configuration:
 
 | Plan | Provider | Region | Provider SKU | Provider cost basis |
 | --- | --- | --- | --- | --- |
@@ -114,9 +168,9 @@ Current plan codes:
 | `P0-V-0` | Vultr | `ewr` | `vc2-1c-0.5gb-v6` | $2.50/month, IPv6-only |
 | `P0-V-1` | Vultr | `ewr` | `vc2-1c-0.5gb` | $3.50/month |
 | `P0-V-2` | Vultr | `ewr` | `vc2-1c-1gb` | $5.00/month |
-| `P0-D-0` | DigitalOcean | `nyc1` | `s-1vcpu-512mb-10gb` | $4.00/month |
-| `P0-D-1` | DigitalOcean | `nyc1` | `s-1vcpu-1gb` | $6.00/month |
-| `P0-D-2` | DigitalOcean | `nyc1` | `s-1vcpu-2gb` | $12.00/month |
+| `P0-D-0` | DigitalOcean | `nyc3` | `s-1vcpu-512mb-10gb` | $4.00/month |
+| `P0-D-1` | DigitalOcean | `nyc3` | `s-1vcpu-1gb` | $6.00/month |
+| `P0-D-2` | DigitalOcean | `nyc3` | `s-1vcpu-2gb` | $12.00/month |
 
 ## Branch Deployments
 
@@ -127,7 +181,7 @@ minicloud deploy branch
 ```
 
 Minicloud creates or reuses a child environment under the configured main app.
-Each branch environment has its own `P0-V-0` Vultr VPS, runtime, database,
+Each new branch inherits its parent's plan unless `--plan` or YAML `plan` selects another one. Each branch environment has its own VPS, runtime, database,
 deployments, and domains. The main app's secrets are copied when the branch is
 first created. A branch such as `feature/cart` is normalized to `feature-cart`;
 its public service hostname ends in `-feature-cart.app.muni.dev`.
@@ -638,3 +692,7 @@ combined with `deploy --environment`.
 
 Deleting the main application deletes all its environments and branch previews.
 Deleting a child environment through its app detail affects only that environment.
+If provisioning failed before a server was registered, deletion checks the deployment's
+provider account for an unregistered server before removing the environment. Provider
+lookup failures or discovered servers block deletion until infrastructure is reconciled.
+A successful deployment without its server registration also requires reconciliation.

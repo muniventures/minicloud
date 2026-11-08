@@ -40,9 +40,9 @@ public sealed class DomainDnsReconciler(
                 continue;
             }
             var server = servers[0];
-            if (await db.ServerInstances.AnyAsync(s => s.Provider == server.Provider && s.ProviderServerId == server.ProviderServerId &&
+            if (await db.ServerInstances.AnyAsync(s => s.ProviderAccountId == server.ProviderAccountId && s.Provider.ToLower() == server.Provider.ToLower() && s.ProviderServerId == server.ProviderServerId &&
                 (s.AppId != domain.AppId || s.OrganizationId != domain.OrganizationId), cancellationToken) ||
-                await db.RuntimeServers.AnyAsync(s => s.Provider == server.Provider && s.ProviderServerId == server.ProviderServerId &&
+                await db.RuntimeServers.AnyAsync(s => s.ProviderAccountId == server.ProviderAccountId && s.Provider.ToLower() == server.Provider.ToLower() && s.ProviderServerId == server.ProviderServerId &&
                 (s.AppId != domain.AppId || s.OrganizationId != domain.OrganizationId), cancellationToken))
             {
                 continue;
@@ -68,7 +68,7 @@ public sealed class DomainDnsReconciler(
                 }
                 if (await db.Deployments.AnyAsync(d => d.AppId == domain.AppId && d.OwnershipToken != null, cancellationToken) ||
                     !await db.ServerInstances.AnyAsync(s => s.Id == server.Id && s.AppId == domain.AppId &&
-                        s.OrganizationId == domain.OrganizationId && s.IpAddress == server.IpAddress, cancellationToken))
+                        s.OrganizationId == domain.OrganizationId && s.ProviderAccountId == server.ProviderAccountId && s.ProviderServerId == server.ProviderServerId && s.IpAddress == server.IpAddress, cancellationToken))
                 {
                     continue;
                 }

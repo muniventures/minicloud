@@ -4,23 +4,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-import { FormEvent, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { FormEvent, useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { createApp } from "../../api/appsApi";
 import { useAuth } from "../../core/auth/AuthProvider";
 import { PageScaffold } from "../../core/components/PageScaffold";
 import { dashboardRoutes } from "../../core/routing/dashboardRoutes";
-import type { AppPlan, DatabaseMode } from "../../models/controlPlane";
-
-export const planOptions: { value: AppPlan; label: string; description: string }[] = [
-  { value: "p0-h-0", label: "P0-H-0", description: "Hetzner CX23, 2 vCPU, 4 GB RAM" },
-  { value: "p0-v-0", label: "P0-V-0", description: "Vultr $2.50 IPv6-only, 1 vCPU, 0.5 GB RAM" },
-  { value: "p0-v-1", label: "P0-V-1", description: "Vultr $3.50, 1 vCPU, 0.5 GB RAM" },
-  { value: "p0-v-2", label: "P0-V-2", description: "Vultr $5.00, 1 vCPU, 1 GB RAM" },
-  { value: "p0-d-0", label: "P0-D-0", description: "DigitalOcean $4, 1 vCPU, 512 MiB RAM" },
-  { value: "p0-d-1", label: "P0-D-1", description: "DigitalOcean $6, 1 vCPU, 1 GiB RAM" },
-  { value: "p0-d-2", label: "P0-D-2", description: "DigitalOcean $12, 1 vCPU, 2 GiB RAM" }
-];
+import type { DatabaseMode } from "../../models/controlPlane";
+import { planDescription, usePlanCatalog } from "../Providers/usePlanCatalog";
 
 export function CreateAppModule() {
   const { selectedOrganization } = useAuth();
@@ -28,7 +19,9 @@ export function CreateAppModule() {
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [isSlugEdited, setIsSlugEdited] = useState(false);
-  const [plan, setPlan] = useState<AppPlan>("p0-h-0");
+  const [plan, setPlan] = useState("");
+  const catalog = usePlanCatalog(selectedOrganization?.id);
+  useEffect(() => { setPlan(""); }, [selectedOrganization?.id]);
   const [database, setDatabase] = useState<DatabaseMode>("sqlite");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -36,7 +29,7 @@ export function CreateAppModule() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!selectedOrganization) {
+    if (!selectedOrganization || !catalog.plans.some(item => item.name === plan)) {
       return;
     }
 
@@ -93,22 +86,13 @@ export function CreateAppModule() {
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="grid gap-2">
-                <Label>Plan</Label>
-                <Select onValueChange={(value) => setPlan(value as AppPlan)} value={plan}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {planOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        <span className="flex flex-col">
-                          <span>{option.label}</span>
-                          <span className="text-xs text-muted-foreground">{option.description}</span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="app-plan">Plan</Label>
+                <select id="app-plan" className="h-10 rounded-md border bg-background px-3 text-sm" required disabled={catalog.loading} value={plan} onChange={event => setPlan(event.target.value)}>
+                  <option value="">{catalog.loading ? "Loading plans…" : "Select a plan"}</option>
+                  {catalog.plans.map(option => <option key={option.id} value={option.name}>{option.name} — {planDescription(option)}</option>)}
+                </select>
+                {catalog.error && <p role="alert" className="text-sm text-destructive">{catalog.error}</p>}
+                {!catalog.loading && !catalog.error && !catalog.plans.length && <p className="text-sm text-muted-foreground">No enabled plans. <Link className="underline" to={dashboardRoutes.providers.path}>Configure a provider and plan</Link> first.</p>}
               </div>
               <div className="grid gap-2">
                 <Label>Database</Label>
@@ -124,7 +108,7 @@ export function CreateAppModule() {
               </div>
             </div>
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
-            <Button className="w-fit" disabled={isSubmitting} type="submit">
+            <Button className="w-fit" disabled={isSubmitting || catalog.loading || !catalog.plans.some(item => item.name === plan)} type="submit">
               {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Create app
             </Button>

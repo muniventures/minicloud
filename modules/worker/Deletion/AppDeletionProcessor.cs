@@ -6,13 +6,15 @@ using Minicloud.Common.Models;
 using Minicloud.Common.Services;
 using Minicloud.Common.Providers;
 using Minicloud.Common.Providers.Dns;
+using Minicloud.Worker.Pipeline.Steps;
 using static Minicloud.Common.Providers.ProviderServiceCollectionExtensions;
 
 namespace Minicloud.Worker.Deletion;
 
 public sealed class AppDeletionProcessor(
     MinicloudDbContext db, VpsProviderClientResolver providers,
-    ICloudflareDnsClient dns, ILogger<AppDeletionProcessor> logger, IOptions<ManagedDomainOptions>? managedDomains = null)
+    ICloudflareDnsClient dns, ILogger<AppDeletionProcessor> logger, IOptions<ManagedDomainOptions>? managedDomains = null,
+    ProviderAccountClientFactory? accountClients = null)
 {
     private readonly ManagedDomainOptions _managedDomains = managedDomains?.Value ?? new();
     public async Task<bool> ProcessNextAsync(CancellationToken ct)
@@ -100,9 +102,9 @@ public sealed class AppDeletionProcessor(
     {
         var servers = await db.ServerInstances.Where(x => x.AppId == app.Id).ToListAsync(ct);
         var runtimes = await db.RuntimeServers.Where(x => x.AppId == app.Id).ToListAsync(ct);
-        var registrations = servers.Select(x => (x.OrganizationId, x.Provider, x.ProviderServerId))
-            .Concat(runtimes.Select(x => (x.OrganizationId, x.Provider, x.ProviderServerId))).ToList();
-        var targets = new HashSet<(CloudProvider Provider, string Id)>();
+        var registrations = servers.Select(x => (x.OrganizationId, x.ProviderAccountId, x.Provider, x.ProviderServerId))
+            .Concat(runtimes.Select(x => (x.OrganizationId, x.ProviderAccountId, x.Provider, x.ProviderServerId))).ToList();
+        var targets = new HashSet<(string? AccountId, CloudProvider Provider, string Id)>();
         foreach (var registration in registrations)
         {
             if (registration.OrganizationId != app.OrganizationId || string.IsNullOrWhiteSpace(registration.ProviderServerId) ||
@@ -110,20 +112,20 @@ public sealed class AppDeletionProcessor(
             {
                 throw new InvalidOperationException("Invalid server ownership or identity.");
             }
-            targets.Add((provider, registration.ProviderServerId));
+            targets.Add((registration.ProviderAccountId, provider, registration.ProviderServerId));
         }
         if (targets.Count > 1)
         {
             throw new InvalidOperationException("Conflicting server registrations require reconciliation.");
         }
-        if (targets.Count == 0 && await db.Deployments.AnyAsync(x => x.AppId == app.Id && x.Status != DeploymentStatus.Canceled && x.Status != DeploymentStatus.Queued, ct))
+        if (targets.Count == 0)
         {
-            throw new InvalidOperationException("Deployed application has no verifiable server registration. Reconcile infrastructure before deletion.");
+            await VerifyNoUnregisteredServerAsync(app, ct);
         }
         foreach (var target in targets)
         {
-            if (await db.ServerInstances.AnyAsync(x => x.AppId != app.Id && x.Provider.ToLower() == target.Provider.ToString().ToLower() && x.ProviderServerId == target.Id, ct) ||
-                await db.RuntimeServers.AnyAsync(x => x.AppId != app.Id && x.Provider.ToLower() == target.Provider.ToString().ToLower() && x.ProviderServerId == target.Id, ct))
+            if (await db.ServerInstances.AnyAsync(x => x.AppId != app.Id && x.ProviderAccountId == target.AccountId && x.Provider.ToLower() == target.Provider.ToString().ToLower() && x.ProviderServerId == target.Id, ct) ||
+                await db.RuntimeServers.AnyAsync(x => x.AppId != app.Id && x.ProviderAccountId == target.AccountId && x.Provider.ToLower() == target.Provider.ToString().ToLower() && x.ProviderServerId == target.Id, ct))
             {
                 throw new InvalidOperationException("Server is registered to another application.");
             }
@@ -139,13 +141,68 @@ public sealed class AppDeletionProcessor(
         }
         foreach (var target in targets)
         {
-            await providers(target.Provider).DeleteServerAsync(target.Id, ct);
+            if (app.PlanId is not null && target.AccountId is null)
+            { throw new InvalidOperationException("Registered server has no provider account; reconcile ownership before deletion."); }
+            var client = target.AccountId is null ? providers(target.Provider) :
+                await (accountClients ?? throw new InvalidOperationException("Account client resolution is unavailable."))
+                    .CreateAsync(app.OrganizationId, target.AccountId, ct);
+            if (client.Provider != target.Provider) { throw new InvalidOperationException("Registered provider type does not match its account."); }
+            try { await client.DeleteServerAsync(target.Id, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            { throw new InvalidOperationException("Provider server deletion failed. Check the registered account and retry cleanup."); }
         }
         foreach (var domain in domains)
         {
             if (domain.Kind == DomainBindingService.KindMinicloudSubdomain && _managedDomains.ManageDnsRecords)
             {
                 await dns.DeleteDnsRecordsAsync(domain.Hostname, ct);
+            }
+        }
+    }
+
+    private async Task VerifyNoUnregisteredServerAsync(MinicloudApp app, CancellationToken ct)
+    {
+        var deployments = await db.Deployments.Where(x => x.AppId == app.Id).ToListAsync(ct);
+        if (app.PlanId is null && deployments.All(x => x.ProviderAccountId is null && !x.ProviderCreationAttempted))
+        {
+            if (deployments.Any(x => x.Status != DeploymentStatus.Canceled && x.Status != DeploymentStatus.Queued))
+            { throw new InvalidOperationException("Deployed application has no verifiable server registration. Reconcile infrastructure before deletion."); }
+            return;
+        }
+        if (deployments.Any(x => x.Status == DeploymentStatus.Succeeded))
+        {
+            throw new InvalidOperationException("Deployed application has no verifiable server registration. Reconcile infrastructure before deletion.");
+        }
+        if (deployments.Any(x => x.ProviderCreationAttempted))
+        {
+            // Empty discovery is not proof that an ambiguous allocation failed.
+            // Retain the reservation until the original scope is reconciled.
+            throw new InvalidOperationException("A server allocation is unresolved. Reconcile its original provider account before deleting the application.");
+        }
+        var attempts = deployments.Where(x => x.Status != DeploymentStatus.Queued &&
+            (x.Status != DeploymentStatus.Canceled || x.StartedAt != null || x.ProviderCreationAttempted)).ToList();
+        if (attempts.Count == 0) { return; }
+
+        var organizationSlug = await db.Organizations.Where(x => x.Id == app.OrganizationId).Select(x => x.Slug).SingleAsync(ct);
+        var serverName = ResolveProvisionServerStep.BuildServerName(organizationSlug, app.Slug);
+        var placements = attempts.Select(x => (x.ProviderAccountId, x.ProviderType)).Distinct();
+        foreach (var placement in placements)
+        {
+            IVpsProviderClient client;
+            if (placement.ProviderAccountId is not null)
+            {
+                if (!Enum.TryParse<CloudProvider>(placement.ProviderType, true, out var provider) || !Enum.IsDefined(provider))
+                { throw new InvalidOperationException("Deployment provider identity requires reconciliation before deletion."); }
+                client = await (accountClients ?? throw new InvalidOperationException("Account client resolution is unavailable."))
+                    .CreateAsync(app.OrganizationId, placement.ProviderAccountId, ct);
+                if (client.Provider != provider)
+                { throw new InvalidOperationException("Deployment provider type does not match its account."); }
+            }
+            else
+            { throw new InvalidOperationException("Deployment has no provider account; reconcile ownership before deletion."); }
+            if (await client.FindServerAsync(serverName, ct) is not null)
+            {
+                throw new InvalidOperationException("Unregistered server exists for this application. Reconcile infrastructure before deletion.");
             }
         }
     }

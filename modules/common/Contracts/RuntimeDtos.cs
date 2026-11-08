@@ -6,7 +6,8 @@ public sealed record CreateRuntimeServerRequest(
     string Provider,
     string? ProviderServerId,
     string? Hostname,
-    string? AgentVersion);
+    string? AgentVersion,
+    string? ProviderAccountId = null);
 
 public sealed record RuntimeServerCreateResponse(
     string Id,

@@ -36,6 +36,9 @@ services:
       Firebase__ProjectId: minicloud-test
       Database__Provider: Postgres
       Database__RunMigrationsOnStartup: "true"
+      # This fixture deliberately seeds the pre-catalog schema/plan contract.
+      # Account-aware admission is qualified by ProviderCatalogApi/PostgresTests.
+      Providers__AllowLegacyConfiguration: "true"
       ConnectionStrings__Minicloud: Host=postgres;Port=5432;Database=minicloud_test;Username=minicloud;Password=${TEST_POSTGRES_PASSWORD:?}
       OpenBao__Address: http://openbao:8200
       OpenBao__Token: ${TEST_BAO_TOKEN:?}
@@ -50,6 +53,7 @@ services:
       Database__Provider: Postgres
       ConnectionStrings__Minicloud: Host=postgres;Port=5432;Database=minicloud_test;Username=minicloud;Password=${TEST_POSTGRES_PASSWORD:?}
       Worker__PollingInterval: 00:00:01
+      Providers__AllowLegacyConfiguration: "true"
       Hetzner__ApiToken: component-test-token
       Hetzner__BaseUrl: http://postgres:5432/
       OpenBao__Address: http://openbao:8200

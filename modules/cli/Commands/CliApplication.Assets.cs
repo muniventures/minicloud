@@ -17,6 +17,10 @@ public sealed partial class CliApplication
         if (!config.Assets.TryGetValue(args[1], out var asset))
         { throw new CliCommandException(CliExitCodes.ValidationError, "Asset is not declared in minicloud.yml."); }
         var app = await _apiClient.GetAppAsync(config.AppId!, ct);
+        var plan = GetOption(args, "--plan") ?? config.Plan;
+        if (args.Any(x => x == "--plan" || x.StartsWith("--plan=", StringComparison.Ordinal)) && string.IsNullOrWhiteSpace(GetOption(args, "--plan")))
+            throw new CliCommandException(CliExitCodes.ValidationError, "--plan requires a plan name.");
+        if (plan is not null || app.PlanId is not null) app = await _apiClient.SelectPlanAsync(app.Id, plan ?? app.Plan, ct);
         var source = new MinicloudServiceConfig(asset.SourcePath, asset.Dockerfile, null, 1, false, "/", "/",
             Env: new Dictionary<string, string> { ["outputPath"] = asset.OutputPath, ["protocolVersion"] = "1" },
             BuildMode: ServiceBuildModes.Source);

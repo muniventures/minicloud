@@ -4,6 +4,7 @@ using System.Net;
 using Minicloud.Common.Contracts;
 using Minicloud.Common.Providers;
 using Minicloud.Common.Services;
+using Minicloud.Common.Models;
 
 namespace Minicloud.Worker.Tests;
 
@@ -95,6 +96,45 @@ public sealed class AppStorageServiceTests : IClassFixture<WorkerSqliteTestHarne
 
     [Fact]
     public void BranchAppsUseDifferentDiskIdentities() => Assert.NotEqual(AppStorageService.VolumeName("app_main", "uploads"), AppStorageService.VolumeName("app_branch", "uploads"));
+
+    [Fact]
+    public async Task RetainedVolumeCannotBeReboundToAnotherAccount()
+    {
+        var (org, app) = await _harness.SeedOrgAndAppAsync("storage-account-binding");
+        await using var db = _harness.CreateDbContext();
+        db.ProviderAccounts.Add(Account("storage-account-a", org.Id));
+        await db.SaveChangesAsync();
+        var first = new FakeProvider();
+        await new AppStorageService(db, first).EnsureAsync(app.Id, "uploads", new(20, "/data"), "123", "nbg1", default,
+            org.Id, "storage-account-a");
+        var other = new FakeProvider();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new AppStorageService(db, other)
+            .EnsureAsync(app.Id, "uploads", new(20, "/data"), "123", "nbg1", default, org.Id, "storage-account-b"));
+        Assert.Equal(0, other.Creates);
+        var retained = await db.AppStorageVolumes.SingleAsync(x => x.AppId == app.Id);
+        Assert.Equal(org.Id, retained.OrganizationId);
+        Assert.Equal("storage-account-a", retained.ProviderAccountId);
+    }
+
+    [Fact]
+    public async Task DisabledAccountCanReuseExistingDiskButCannotAllocateAnother()
+    {
+        var provider = new FakeProvider();
+        var app = "app_" + Guid.NewGuid().ToString("N");
+        await using var db = _harness.CreateDbContext();
+        var service = new AppStorageService(db, provider);
+        await service.EnsureAsync(app, "uploads", new(20, "/data"), "123", "nbg1", default);
+        await service.EnsureAsync(app, "uploads", new(20, "/data"), "123", "nbg1", default, allowAllocation: false);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.EnsureAsync(app, "other", new(20, "/other"), "123", "nbg1", default, allowAllocation: false));
+        Assert.Equal(1, provider.Creates);
+        Assert.Single(await db.AppStorageVolumes.Where(x => x.AppId == app).ToListAsync());
+    }
+
+    private static ProviderAccount Account(string id, string org) => new()
+    {
+        Id = id, OrganizationId = org, Name = id, ProviderType = CloudProvider.Hetzner,
+        CredentialPath = "synthetic/path", CredentialGeneration = "test"
+    };
 
     private sealed class FakeProvider : IStorageVolumeProvider
     {

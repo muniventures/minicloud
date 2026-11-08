@@ -241,6 +241,10 @@ public class HetznerClientTests
         var ex = await Assert.ThrowsAsync<ProviderApiException>(() => client.FindServerAsync("test"));
         Assert.Equal(HttpStatusCode.Unauthorized, ex.StatusCode);
         Assert.DoesNotContain("hcloud-secret-token-12345", ex.Message);
-        Assert.Contains("[REDACTED]", ex.Message);
+        Assert.Equal("Hetzner API request failed with HTTP 401.", ex.Message);
+        Assert.DoesNotContain("Invalid token", ex.Message);
+        Assert.NotNull(ex.ResponseBody);
+        Assert.DoesNotContain("hcloud-secret-token-12345", ex.ResponseBody);
+        Assert.Contains("[REDACTED]", ex.ResponseBody);
     }
 }

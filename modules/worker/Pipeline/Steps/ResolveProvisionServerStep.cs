@@ -9,6 +9,9 @@ using Minicloud.Common.Models;
 using Minicloud.Worker.Pipeline;
 using Minicloud.Common.Providers;
 using Minicloud.Common.Providers.Models;
+using Minicloud.Common.Services;
+using Minicloud.Common.Providers.Common;
+using System.Net;
 using static Minicloud.Common.Providers.ProviderServiceCollectionExtensions;
 
 namespace Minicloud.Worker.Pipeline.Steps;
@@ -68,11 +71,10 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        var (orgSlug, appSlug, plan) = await LoadAppScopeAsync(context, cancellationToken);
+        var (orgSlug, appSlug, mapping) = await LoadAppScopeAsync(context, cancellationToken);
         context.OrganizationSlug = orgSlug;
         context.AppSlug = appSlug;
 
-        var mapping = PlanMapping.FromAppPlan(plan, _options);
         context.Provider = mapping.Provider;
 
         var existing = await FindExistingServerAsync(context, cancellationToken);
@@ -85,12 +87,17 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
 
             mapping = mapping with { Provider = registeredProvider, Region = existing.Region };
             context.Provider = registeredProvider;
+            if (context.ProviderAccountId != existing.ProviderAccountId)
+            {
+                throw new PipelineStepException(FailureCode, "Registered server account differs from the reserved placement; refusing migration.");
+            }
             if (string.IsNullOrWhiteSpace(existing.ProviderServerId))
             {
                 throw new PipelineStepException(FailureCode, "Registered server has no provider ID; refusing replacement provisioning.");
             }
 
-            var status = await _providerResolver(registeredProvider)
+            var registeredClient = await ResolveClientAsync(context, registeredProvider, cancellationToken);
+            var status = await registeredClient
                 .GetServerStatusAsync(existing.ProviderServerId, cancellationToken);
             if (!status.IsRunning || string.IsNullOrWhiteSpace(status.Ipv4Address))
             {
@@ -105,7 +112,7 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
             return;
         }
 
-        var client = _providerResolver(mapping.Provider);
+        var client = await ResolveClientAsync(context, mapping.Provider, cancellationToken);
         var serverName = BuildServerName(orgSlug, appSlug);
 
         ProviderServerInfo server;
@@ -124,12 +131,21 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
                 {
                     throw new PipelineStepException(FailureCode, "Discovered server identity does not match this app; refusing deployment.");
                 }
+                if (context.ProviderAccountId is not null)
+                {
+                    // A discovered resource is real even if readiness/SSH later
+                    // fails or the caller is canceled. Preserve its original scope.
+                    using var registration = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                    await MarkDiscoveredServerAsync(context, registration.Token);
+                    await SaveServerInstanceAsync(context, mapping, found, registration.Token, ready: false);
+                }
                 server = found;
                 _logger?.LogInformation("Found provider server {Name} ({Id})", serverName, found.Id);
             }
             else
             {
                 await EnsureNewAppAsync(context, cancellationToken);
+                await EnsureAllocationEnabledAsync(context, cancellationToken);
                 _logger?.LogInformation(
                     "Provisioning new {Provider} server {Name} (plan {Plan}, region {Region})",
                     mapping.Provider, serverName, mapping.Sku, mapping.Region);
@@ -137,7 +153,10 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
                     $"Provisioning new {mapping.Provider} server {serverName} (plan {mapping.Sku}, region {mapping.Region}).",
                     cancellationToken);
 
-                server = await client.CreateServerAsync(new CreateServerRequest(
+                await MarkCreationAttemptAsync(context, cancellationToken);
+                try
+                {
+                    server = await client.CreateServerAsync(new CreateServerRequest(
                     serverName,
                     mapping.Sku,
                     mapping.Region,
@@ -151,8 +170,17 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
                         ["app"] = appSlug,
                         ["env"] = "production",
                     },
-                    [$"minicloud-customer-{orgSlug}", $"minicloud-app-{appSlug}", "minicloud-env-production"]),
-                    cancellationToken);
+                    [$"minicloud-customer-{orgSlug}", $"minicloud-app-{appSlug}", "minicloud-env-production"],
+                    Image: context.ProviderImage),
+                        cancellationToken);
+                }
+                catch (ProviderApiException ex) when (ex.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized or
+                    HttpStatusCode.Forbidden or HttpStatusCode.UnprocessableEntity or HttpStatusCode.TooManyRequests)
+                {
+                    // A definite rejection did not allocate a server. Transport/5xx outcomes remain unresolved.
+                    await ClearRejectedCreationAsync(context);
+                    throw;
+                }
                 // Preserve the provider identity even when the deployment is canceled while waiting for readiness.
                 using (var registration = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
                 {
@@ -170,7 +198,7 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             throw new PipelineStepException(FailureCode,
-                $"VPS provisioning failed for server {serverName}: {ex.Message}", ex);
+                $"VPS provisioning failed for server {serverName}. Check the selected provider account and quota.");
         }
 
         var instanceId = await SaveServerInstanceAsync(context, mapping, server, cancellationToken);
@@ -180,7 +208,7 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
             $"Server ready: {server.Id} ({server.Ipv4Address}).", cancellationToken);
     }
 
-    private async Task<(string OrgSlug, string AppSlug, AppPlan Plan)> LoadAppScopeAsync(
+    private async Task<(string OrgSlug, string AppSlug, PlanMapping Mapping)> LoadAppScopeAsync(
         PipelineStepContext context, CancellationToken cancellationToken)
     {
         await using var scope = _scopeFactory.CreateAsyncScope();
@@ -200,8 +228,81 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
                 $"App {context.AppId} does not belong to organization {context.OrganizationId}.");
         }
 
-        return (app.Organization.Slug, app.Slug, app.Plan);
+        context.PlanId = app.PlanId;
+        if (app.PlanId is null)
+        {
+            return (app.Organization.Slug, app.Slug, PlanMapping.FromAppPlan(app.Plan, _options));
+        }
+        var deployment = await db.Deployments.AsNoTracking().SingleOrDefaultAsync(d => d.Id == context.DeploymentId &&
+            d.AppId == app.Id && d.OrganizationId == app.OrganizationId, cancellationToken);
+        if (deployment?.PlanId != app.PlanId || string.IsNullOrWhiteSpace(deployment.ProviderAccountId) ||
+            !Enum.TryParse<CloudProvider>(deployment.ProviderType, true, out var provider) || !Enum.IsDefined(provider) ||
+            string.IsNullOrWhiteSpace(deployment.ProviderRegion) || string.IsNullOrWhiteSpace(deployment.ProviderSku))
+        {
+            throw new PipelineStepException(FailureCode, "Deployment has no complete provider-account reservation; refusing default-account provisioning.");
+        }
+        context.ProviderAccountId = deployment.ProviderAccountId;
+        context.ProviderImage = deployment.ProviderImage;
+        return (app.Organization.Slug, app.Slug, new PlanMapping(provider, deployment.ProviderRegion, deployment.ProviderSku));
     }
+
+    private async Task<IVpsProviderClient> ResolveClientAsync(PipelineStepContext context, CloudProvider provider, CancellationToken ct)
+    {
+        if (context.ProviderAccountId is null) { return _providerResolver(provider); }
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var client = await scope.ServiceProvider.GetRequiredService<ProviderAccountClientFactory>()
+            .CreateAsync(context.OrganizationId, context.ProviderAccountId, ct);
+        if (client.Provider != provider) { throw new PipelineStepException(FailureCode, "Reserved provider type does not match its account."); }
+        return client;
+    }
+
+    private async Task EnsureAllocationEnabledAsync(PipelineStepContext context, CancellationToken ct)
+    {
+        if (context.ProviderAccountId is null) { return; }
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+        if (!await db.ProviderAccounts.AnyAsync(x => x.Id == context.ProviderAccountId && x.OrganizationId == context.OrganizationId && x.Enabled, ct) ||
+            !await db.ProviderPlans.AnyAsync(x => x.Id == context.PlanId && x.OrganizationId == context.OrganizationId && x.ProviderAccountId == context.ProviderAccountId && x.Enabled, ct))
+        { throw new PipelineStepException(FailureCode, "The selected provider account or plan is disabled for allocation."); }
+    }
+
+    private async Task MarkCreationAttemptAsync(PipelineStepContext context, CancellationToken ct)
+    {
+        if (context.ProviderAccountId is null) { return; }
+        await PipelineDb.ExecuteInTransactionAsync(_scopeFactory, async (db, token) =>
+        {
+            if (db.Database.IsNpgsql())
+            { await db.Apps.FromSqlInterpolated($"SELECT * FROM apps WHERE id = {context.AppId} FOR UPDATE").AsNoTracking().SingleAsync(token); }
+            if (await db.Deployments.AnyAsync(x => x.AppId == context.AppId && x.ProviderCreationAttempted, token))
+            { throw new PipelineStepException(FailureCode, "A prior server allocation is unresolved; reconcile the original provider account before retrying creation."); }
+            var deployment = await db.Deployments.SingleAsync(x => x.Id == context.DeploymentId && x.AppId == context.AppId &&
+                x.OrganizationId == context.OrganizationId && x.ProviderAccountId == context.ProviderAccountId, token);
+            if (deployment.CancellationRequestedAt is not null ||
+                (!string.IsNullOrEmpty(context.OwnershipToken) && deployment.OwnershipToken != context.OwnershipToken))
+            { throw new PipelineStepException(FailureCode, "Deployment no longer owns server provisioning."); }
+            deployment.ProviderCreationAttempted = true;
+        }, ct);
+    }
+
+    private async Task ClearRejectedCreationAsync(PipelineStepContext context)
+    {
+        if (context.ProviderAccountId is null) { return; }
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await PipelineDb.ExecuteInTransactionAsync(_scopeFactory, async (db, ct) =>
+        {
+            var deployment = await db.Deployments.SingleAsync(x => x.Id == context.DeploymentId && x.AppId == context.AppId &&
+                x.OrganizationId == context.OrganizationId && x.ProviderAccountId == context.ProviderAccountId, ct);
+            deployment.ProviderCreationAttempted = false;
+        }, timeout.Token);
+    }
+
+    private Task MarkDiscoveredServerAsync(PipelineStepContext context, CancellationToken ct) =>
+        PipelineDb.ExecuteInTransactionAsync(_scopeFactory, async (db, token) =>
+        {
+            var deployment = await db.Deployments.SingleAsync(x => x.Id == context.DeploymentId && x.AppId == context.AppId &&
+                x.OrganizationId == context.OrganizationId && x.ProviderAccountId == context.ProviderAccountId, token);
+            deployment.ProviderCreationAttempted = true;
+        }, ct);
 
     private async Task<ServerInstance?> FindExistingServerAsync(
         PipelineStepContext context, CancellationToken cancellationToken)
@@ -216,10 +317,12 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
         var runtimes = await db.RuntimeServers.AsNoTracking()
             .Where(s => s.OrganizationId == context.OrganizationId && s.AppId == context.AppId)
             .ToListAsync(cancellationToken);
-        var identities = servers.Select(s => (s.Provider.ToLowerInvariant(), s.ProviderServerId))
-            .Concat(runtimes.Select(s => (s.Provider.ToLowerInvariant(), s.ProviderServerId)))
+        if (context.PlanId is not null && servers.Count == 0 && runtimes.Count > 0)
+        { throw new PipelineStepException(FailureCode, "Registered server placement is missing; reconcile the provider account and region before deploying."); }
+        var identities = servers.Select(s => (s.ProviderAccountId, s.Provider.ToLowerInvariant(), s.ProviderServerId))
+            .Concat(runtimes.Select(s => (s.ProviderAccountId, s.Provider.ToLowerInvariant(), s.ProviderServerId)))
             .Distinct().ToList();
-        if (identities.Count > 1 || identities.Any(x => string.IsNullOrWhiteSpace(x.Item2)))
+        if (identities.Count > 1 || identities.Any(x => string.IsNullOrWhiteSpace(x.Item3)))
         {
             throw new PipelineStepException(FailureCode,
                 "Server registrations conflict or lack a provider ID; reconcile the app's server association before deploying.");
@@ -232,10 +335,10 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
 
         var identity = identities.FirstOrDefault();
         if (identities.Count == 1 && (await db.ServerInstances.AnyAsync(s =>
-                s.Provider == identity.Item1 && s.ProviderServerId == identity.Item2 &&
+                s.ProviderAccountId == identity.Item1 && s.Provider.ToLower() == identity.Item2 && s.ProviderServerId == identity.Item3 &&
                 (s.OrganizationId != context.OrganizationId || s.AppId != context.AppId), cancellationToken) ||
             await db.RuntimeServers.AnyAsync(s =>
-                s.Provider == identity.Item1 && s.ProviderServerId == identity.Item2 &&
+                s.ProviderAccountId == identity.Item1 && s.Provider.ToLower() == identity.Item2 && s.ProviderServerId == identity.Item3 &&
                 (s.OrganizationId != context.OrganizationId || s.AppId != context.AppId), cancellationToken)))
         {
             throw new PipelineStepException(FailureCode, "Registered provider server belongs to another app; refusing deployment.");
@@ -243,6 +346,7 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
 
         return servers.SingleOrDefault() ?? runtimes.Select(s => new ServerInstance
         {
+            ProviderAccountId = s.ProviderAccountId,
             Provider = s.Provider,
             ProviderServerId = s.ProviderServerId,
             Region = ""
@@ -358,9 +462,9 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
         var instanceId = string.Empty;
         await PipelineDb.ExecuteInTransactionAsync(_scopeFactory, async (db, ct) =>
         {
-            if (await db.ServerInstances.AnyAsync(s => s.Provider == mapping.Provider.ToString().ToLowerInvariant() &&
+            if (await db.ServerInstances.AnyAsync(s => s.ProviderAccountId == context.ProviderAccountId && s.Provider.ToLower() == mapping.Provider.ToString().ToLowerInvariant() &&
                     s.ProviderServerId == server.Id && (s.AppId != context.AppId || s.OrganizationId != context.OrganizationId), ct) ||
-                await db.RuntimeServers.AnyAsync(s => s.Provider == mapping.Provider.ToString().ToLowerInvariant() &&
+                await db.RuntimeServers.AnyAsync(s => s.ProviderAccountId == context.ProviderAccountId && s.Provider.ToLower() == mapping.Provider.ToString().ToLowerInvariant() &&
                     s.ProviderServerId == server.Id && (s.AppId != context.AppId || s.OrganizationId != context.OrganizationId), ct))
             {
                 throw new PipelineStepException(FailureCode, "Provider server belongs to another app; refusing deployment.");
@@ -373,6 +477,12 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
                 .FirstOrDefault();
             if (existing is not null)
             {
+                if (existing.ProviderAccountId != context.ProviderAccountId || existing.ProviderServerId != server.Id)
+                { throw new PipelineStepException(FailureCode, "Server identity changed during provisioning; refusing replacement."); }
+                existing.ProviderAccountId = context.ProviderAccountId;
+                existing.PlanId = context.PlanId;
+                existing.Sku ??= mapping.Sku;
+                existing.Image ??= context.ProviderImage;
                 existing.Provider = mapping.Provider.ToString().ToLowerInvariant();
                 existing.ProviderServerId = server.Id;
                 existing.IpAddress = server.Ipv4Address;
@@ -389,6 +499,10 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
                     Id = Guid.NewGuid().ToString("N"),
                     OrganizationId = context.OrganizationId,
                     AppId = context.AppId,
+                    ProviderAccountId = context.ProviderAccountId,
+                    PlanId = context.PlanId,
+                    Sku = mapping.Sku,
+                    Image = context.ProviderImage,
                     Provider = mapping.Provider.ToString().ToLowerInvariant(),
                     ProviderServerId = server.Id,
                     IpAddress = server.Ipv4Address,

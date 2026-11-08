@@ -24,6 +24,12 @@ public sealed class PipelineStepContext
 
     public CloudProvider Provider { get; set; } = CloudProvider.Hetzner;
 
+    public string? PlanId { get; set; }
+
+    public string? ProviderAccountId { get; set; }
+
+    public string? ProviderImage { get; set; }
+
     public string ServerInstanceId { get; set; } = string.Empty;
 
     public string ServerIp { get; set; } = string.Empty;

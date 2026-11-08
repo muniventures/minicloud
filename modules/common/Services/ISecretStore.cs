@@ -12,7 +12,12 @@ public sealed record SecretStoreWriteRequest(
     string AppId,
     string ServiceName,
     string Name,
-    string Value);
+    string Value)
+{
+    // Organization infrastructure credentials use their own namespace, never a synthetic app.
+    public string? ProviderAccountId { get; init; }
+    public string? CredentialGeneration { get; init; }
+}
 
 public sealed record StoredSecretReference(
     string Provider,

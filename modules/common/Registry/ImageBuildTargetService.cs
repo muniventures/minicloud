@@ -24,14 +24,14 @@ public sealed class ImageBuildTargetService(MinicloudDbContext db, IOptions<Regi
         if (servers.Count > 0 || runtimes.Count > 0)
         {
             if (servers.Count != 1 || string.IsNullOrWhiteSpace(servers[0].ProviderServerId) ||
-                runtimes.Any(x => !string.Equals(x.Provider, servers[0].Provider, StringComparison.OrdinalIgnoreCase) || x.ProviderServerId != servers[0].ProviderServerId) ||
+                runtimes.Any(x => x.ProviderAccountId != servers[0].ProviderAccountId || !string.Equals(x.Provider, servers[0].Provider, StringComparison.OrdinalIgnoreCase) || x.ProviderServerId != servers[0].ProviderServerId) ||
                 servers[0].BuildPlatformObservedAt is null)
             {
                 throw new RegistryImageValidationException(ImagePublicationErrors.PlatformUnknown, "Server platform is not verified; deploy source once to record the target architecture.");
             }
             var server = servers[0];
             platform = server.BuildPlatform;
-            identity = new { version = 1, app.Id, app.OrganizationId, app.Plan, serverId = server.Id, server.Provider, server.ProviderServerId, server.Region, platform };
+            identity = new { version = 1, app.Id, app.OrganizationId, app.Plan, app.PlanId, serverId = server.Id, server.ProviderAccountId, server.Provider, server.ProviderServerId, server.Region, platform };
         }
         else
         {
@@ -39,9 +39,24 @@ public sealed class ImageBuildTargetService(MinicloudDbContext db, IOptions<Regi
             {
                 throw new RegistryImageValidationException(ImagePublicationErrors.PlatformUnknown, "Existing deployment has no verified server registration.");
             }
-            var mapping = ProviderPlanMapping.FromAppPlan(app.Plan, plans.Value);
-            registry.Value.PlannedPlatforms.TryGetValue($"{mapping.Provider}_{mapping.Sku}", out platform);
-            identity = new { version = 1, app.Id, app.OrganizationId, app.Plan, mapping.Provider, mapping.Region, mapping.Sku, platform };
+            if (app.PlanId is not null)
+            {
+                var plan = await db.ProviderPlans.AsNoTracking().Include(x => x.ProviderAccount)
+                    .SingleOrDefaultAsync(x => x.Id == app.PlanId && x.OrganizationId == app.OrganizationId, ct);
+                if (plan is null || plan.ProviderAccount.OrganizationId != app.OrganizationId || !plan.Enabled || !plan.ProviderAccount.Enabled)
+                {
+                    throw new RegistryImageValidationException(ImagePublicationErrors.PlatformUnknown, "The selected plan or provider account is unavailable.");
+                }
+                platform = plan.BuildPlatform;
+                identity = new { version = 2, app.Id, app.OrganizationId, app.PlanId,
+                    plan.ProviderAccountId, plan.ProviderAccount.ProviderType, plan.Region, plan.Sku, plan.Image, platform };
+            }
+            else
+            {
+                var mapping = ProviderPlanMapping.FromAppPlan(app.Plan, plans.Value);
+                registry.Value.PlannedPlatforms.TryGetValue($"{mapping.Provider}_{mapping.Sku}", out platform);
+                identity = new { version = 1, app.Id, app.OrganizationId, app.Plan, mapping.Provider, mapping.Region, mapping.Sku, platform };
+            }
         }
         if (!ImagePublicationValidation.IsPlatform(platform))
         {

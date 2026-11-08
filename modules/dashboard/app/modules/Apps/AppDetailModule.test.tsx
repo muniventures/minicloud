@@ -312,7 +312,7 @@ describe("AppDetailModule", () => {
     );
 
     expect(await screen.findByText("feature-cart")).toBeInTheDocument();
-    expect(screen.getByText("P0-V-0")).toBeInTheDocument();
+    expect(screen.getByText("p0-v-0")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "https://org-demo-api-feature-cart.app.muni.dev" })).toBeInTheDocument();
     expect(screen.queryByText("https://old-main.example")).not.toBeInTheDocument();
     expect(screen.getByText("https://org-demo-web-feature-cart.app.muni.dev")).toBeInTheDocument();

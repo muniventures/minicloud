@@ -12,6 +12,10 @@ public static class ApiKeyScopes
     public const string SecretsWrite = "secrets:write";
     public const string LogsRead = "logs:read";
     public const string TelemetryManage = "telemetry:manage";
+    public const string ProvidersRead = "providers:read";
+    public const string ProvidersWrite = "providers:write";
+    public const string PlansRead = "plans:read";
+    public const string PlansWrite = "plans:write";
 
     public static readonly IReadOnlyList<string> CliLoginDefault =
     [
@@ -21,7 +25,8 @@ public static class ApiKeyScopes
         DeploymentsRead,
         SecretsRead,
         SecretsWrite,
-        LogsRead
+        LogsRead,
+        PlansRead
     ];
 
     public static readonly ISet<string> All = new HashSet<string>(StringComparer.Ordinal)
@@ -35,6 +40,10 @@ public static class ApiKeyScopes
         SecretsRead,
         SecretsWrite,
         LogsRead,
-        TelemetryManage
+        TelemetryManage,
+        ProvidersRead,
+        ProvidersWrite,
+        PlansRead,
+        PlansWrite
     };
 }

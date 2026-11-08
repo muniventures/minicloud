@@ -76,20 +76,20 @@ public sealed class RuntimeAgentDeployment(
             }
             var server = await db.ServerInstances.SingleOrDefaultAsync(s => s.Id == context.ServerInstanceId &&
                 s.AppId == context.AppId && s.OrganizationId == context.OrganizationId, ct);
-            if (server is null || string.IsNullOrWhiteSpace(server.ProviderServerId) || server.IpAddress != context.ServerIp)
+            if (server is null || server.ProviderAccountId != context.ProviderAccountId || string.IsNullOrWhiteSpace(server.ProviderServerId) || server.IpAddress != context.ServerIp)
             {
                 throw new PipelineStepException("runtime_agent_install_failed", "Runtime server identity does not match the deployment target.");
             }
-            if (await db.ServerInstances.AnyAsync(s => s.Provider == server.Provider && s.ProviderServerId == server.ProviderServerId &&
+            if (await db.ServerInstances.AnyAsync(s => s.ProviderAccountId == server.ProviderAccountId && s.Provider.ToLower() == server.Provider.ToLower() && s.ProviderServerId == server.ProviderServerId &&
                 (s.AppId != context.AppId || s.OrganizationId != context.OrganizationId), ct) ||
-                await db.RuntimeServers.AnyAsync(s => s.Provider == server.Provider && s.ProviderServerId == server.ProviderServerId &&
+                await db.RuntimeServers.AnyAsync(s => s.ProviderAccountId == server.ProviderAccountId && s.Provider.ToLower() == server.Provider.ToLower() && s.ProviderServerId == server.ProviderServerId &&
                 (s.AppId != context.AppId || s.OrganizationId != context.OrganizationId), ct))
             {
                 throw new PipelineStepException("runtime_agent_install_failed", "Runtime server belongs to another app.");
             }
             var now = timeProvider.GetUtcNow();
             var runtime = await db.RuntimeServers.SingleOrDefaultAsync(s => s.AppId == context.AppId &&
-                s.Provider == server.Provider && s.ProviderServerId == server.ProviderServerId, ct);
+                s.ProviderAccountId == server.ProviderAccountId && s.Provider.ToLower() == server.Provider.ToLower() && s.ProviderServerId == server.ProviderServerId, ct);
             if (runtime is null)
             {
                 runtime = new RuntimeServer
@@ -97,6 +97,7 @@ public sealed class RuntimeAgentDeployment(
                     Id = $"rtsrv_{Guid.NewGuid():N}",
                     OrganizationId = context.OrganizationId,
                     AppId = context.AppId,
+                    ProviderAccountId = server.ProviderAccountId,
                     Provider = server.Provider,
                     ProviderServerId = server.ProviderServerId,
                     CreatedAt = now
@@ -128,7 +129,7 @@ public sealed class RuntimeAgentDeployment(
             if (!await db.Deployments.AnyAsync(d => d.Id == context.DeploymentId && d.AppId == context.AppId &&
                 d.OrganizationId == context.OrganizationId && d.OwnershipToken == context.OwnershipToken && d.Status == DeploymentStatus.Deploying, ct) ||
                 !await db.ServerInstances.AnyAsync(s => s.Id == context.ServerInstanceId && s.AppId == context.AppId &&
-                    s.OrganizationId == context.OrganizationId && s.Provider == server.Provider && s.ProviderServerId == server.ProviderServerId && s.IpAddress == context.ServerIp, ct))
+                    s.OrganizationId == context.OrganizationId && s.ProviderAccountId == server.ProviderAccountId && s.Provider.ToLower() == server.Provider.ToLower() && s.ProviderServerId == server.ProviderServerId && s.IpAddress == context.ServerIp, ct))
             { throw new PipelineStepException("runtime_agent_install_failed", "Deployment target or ownership changed during agent observation."); }
             var fresh = previous is not null && previous.LastUsedAt >= now.AddMinutes(-2) &&
                 runtime.LastSeenAt >= now.AddMinutes(-2) && previous.LastUsedAt <= now.AddSeconds(30) && runtime.LastSeenAt <= now.AddSeconds(30) && (previous.ExpiresAt is null || previous.ExpiresAt > now.AddDays(1));
@@ -189,7 +190,7 @@ public sealed class RuntimeAgentDeployment(
                 (contacted.ExpiresAt is null || contacted.ExpiresAt > now) && contacted.LastUsedAt >= now.AddMinutes(-2) &&
                 (package.ContactAfter is null || contacted.LastUsedAt >= package.ContactAfter) &&
                 contacted.RuntimeServer.AppId == context.AppId && contacted.RuntimeServer.OrganizationId == context.OrganizationId &&
-                contacted.RuntimeServer.Provider == target.Provider && contacted.RuntimeServer.ProviderServerId == target.ProviderServerId &&
+                contacted.RuntimeServer.ProviderAccountId == target.ProviderAccountId && contacted.RuntimeServer.Provider == target.Provider && contacted.RuntimeServer.ProviderServerId == target.ProviderServerId &&
                 target.IpAddress == context.ServerIp && contacted.RuntimeServer.LastSeenAt >= now.AddMinutes(-2))
             {
                 break;

@@ -79,6 +79,18 @@ public sealed class MinicloudApiClient
     public Task<AppResponse> CreateAppAsync(CreateAppRequest request, CancellationToken cancellationToken) =>
         SendAsync<AppResponse>(HttpMethod.Post, "/v1/apps", request, cancellationToken);
 
+    public Task<AppResponse> SelectPlanAsync(string appId, string plan, CancellationToken cancellationToken) =>
+        SendAsync<AppResponse>(HttpMethod.Post, $"/v1/apps/{Uri.EscapeDataString(appId)}/plan", new SelectAppPlanRequest(plan), cancellationToken);
+
+    public Task<IReadOnlyList<ProviderPlanResponse>> GetPlansAsync(string organizationId, CancellationToken cancellationToken) =>
+        SendAsync<IReadOnlyList<ProviderPlanResponse>>(HttpMethod.Get, $"/v1/plans?organizationId={Uri.EscapeDataString(organizationId)}", null, cancellationToken);
+
+    public Task<ProviderAccountResponse> CreateProviderAsync(CreateProviderRequest request, CancellationToken ct) =>
+        SendAsync<ProviderAccountResponse>(HttpMethod.Post, "/v1/providers", request, ct);
+
+    public Task<ProviderLegacyImportResult> ImportProviderLegacyAsync(ProviderLegacyImportRequest request, CancellationToken ct) =>
+        SendAsync<ProviderLegacyImportResult>(HttpMethod.Post, $"/v1/providers/{Uri.EscapeDataString(request.ProviderAccountId)}/import-legacy", request, ct);
+
     public Task<AppResponse> EnsureBranchAsync(string appId, EnsureAppBranchRequest request, CancellationToken cancellationToken) =>
         SendAsync<AppResponse>(HttpMethod.Post, $"/v1/apps/{Uri.EscapeDataString(appId)}/branches", request, cancellationToken);
 

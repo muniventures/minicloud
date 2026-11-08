@@ -122,12 +122,121 @@ public sealed class AppDeletionTests
         Assert.Empty(await db.Apps.ToListAsync());
     }
 
+    [Fact]
+    public async Task DeletesOnlyRegisteredAccountWhenAnotherAccountHasTheSameExternalId()
+    {
+        await using var harness = new WorkerSqliteTestHarness();
+        await harness.InitializeAsync();
+        var (org, app) = await harness.SeedOrgAndAppAsync("account-delete");
+        var (otherOrg, other) = await harness.SeedOrgAndAppAsync("account-other");
+        await using var db = harness.CreateDbContext();
+        foreach (var pair in new[] { (org, app), (otherOrg, other) })
+        {
+            db.ProviderAccounts.Add(new ProviderAccount { Id = pair.Item2.Id + "-account", OrganizationId = pair.Item1.Id,
+                Name = "Hetzner", ProviderType = CloudProvider.Hetzner, CredentialPath = "synthetic/path", CredentialGeneration = "test" });
+            db.ServerInstances.Add(new ServerInstance { Id = pair.Item2.Id, AppId = pair.Item2.Id, OrganizationId = pair.Item1.Id,
+                ProviderAccountId = pair.Item2.Id + "-account", Provider = "hetzner", ProviderServerId = "same-id",
+                Region = "nbg1", Status = "active", BootstrapStatus = "ready" });
+        }
+        await db.SaveChangesAsync();
+        var provider = new FakeProvider();
+        var factory = new AccountFactory(provider);
+        var processor = new AppDeletionProcessor(db, _ => throw new Exception("Must not use global credentials."), new Dns(),
+            NullLogger<AppDeletionProcessor>.Instance, accountClients: factory);
+        await processor.DeleteInfrastructureAsync(app, default);
+        Assert.Equal([app.Id + "-account"], factory.Accounts);
+        Assert.Equal(["same-id"], provider.Deleted);
+    }
+
+    [Theory]
+    [InlineData(false, false, false, true)]
+    [InlineData(false, true, false, false)]
+    [InlineData(true, true, false, false)]
+    [InlineData(false, false, true, false)]
+    public async Task UnregisteredAccountPlacementUsesReservedAccountOrFailsClosed(
+        bool canceledAttempt, bool serverExists, bool missingAccount, bool deleted)
+    {
+        await using var harness = new WorkerSqliteTestHarness();
+        await harness.InitializeAsync();
+        var (org, app) = await harness.SeedOrgAndAppAsync();
+        await using var db = harness.CreateDbContext();
+        var account = new ProviderAccount { Id = "reserved", OrganizationId = org.Id, Name = "Hetzner",
+            ProviderType = CloudProvider.Hetzner, CredentialPath = "synthetic/path", CredentialGeneration = "test" };
+        db.ProviderPlans.Add(new ProviderPlan { Id = "plan", ProviderAccount = account, ProviderAccountId = account.Id,
+            OrganizationId = org.Id, Name = "Small", NormalizedName = "small", Region = "nbg1", Sku = "cx23" });
+        app = await db.Apps.SingleAsync();
+        app.PlanId = "plan";
+        app.DeletionStatus = "queued";
+        db.Deployments.Add(new Deployment { Id = "attempt", AppId = app.Id, OrganizationId = org.Id, PlanId = "plan",
+            ProviderAccountId = missingAccount ? null : account.Id, ProviderType = "Hetzner",
+            Status = canceledAttempt ? DeploymentStatus.Canceled : DeploymentStatus.Failed,
+            ProviderCreationAttempted = canceledAttempt });
+        await db.SaveChangesAsync();
+        var provider = new FakeProvider { FoundServer = serverExists ? new("unregistered", "name", "192.0.2.1", "active") : null };
+        var factory = new AccountFactory(provider);
+        var processor = new AppDeletionProcessor(db, _ => throw new Exception("Must not use global credentials"),
+            new Dns(), NullLogger<AppDeletionProcessor>.Instance, accountClients: factory);
+        Assert.True(await processor.ProcessNextAsync(default));
+        var canDiscover = !canceledAttempt && !missingAccount;
+        Assert.Equal(canDiscover ? new[] { account.Id } : [], factory.Accounts);
+        Assert.Empty(provider.Deleted);
+        if (deleted) { Assert.Empty(await db.Apps.ToListAsync()); }
+        else { Assert.Equal("failed", (await db.Apps.SingleAsync()).DeletionStatus); }
+        Assert.Equal(canDiscover ? new[] { $"minicloud-{org.Slug}-production-{app.Slug}" } : [], provider.Lookups);
+        if (canceledAttempt)
+        {
+            Assert.True((await db.Deployments.SingleAsync()).ProviderCreationAttempted);
+            Assert.True(await db.Apps.AnyAsync(x => x.Id == app.Id));
+        }
+    }
+
+    [Fact]
+    public async Task AmbiguousAllocationReservationSurvivesAppDeletionEvenWithoutDiscovery()
+    {
+        await using var harness = new WorkerSqliteTestHarness();
+        await harness.InitializeAsync();
+        var (org, app) = await harness.SeedOrgAndAppAsync("unresolved-allocation");
+        await using var db = harness.CreateDbContext();
+        db.ProviderAccounts.Add(new ProviderAccount { Id = "unresolved-account", OrganizationId = org.Id,
+            Name = "Original", ProviderType = CloudProvider.Hetzner, CredentialPath = "synthetic/path", CredentialGeneration = "test" });
+        db.Deployments.Add(new Deployment { Id = "unresolved-attempt", AppId = app.Id, OrganizationId = org.Id,
+            ProviderAccountId = "unresolved-account", ProviderType = "Hetzner", ProviderCreationAttempted = true,
+            Status = DeploymentStatus.Failed });
+        await db.SaveChangesAsync();
+        var provider = new FakeProvider();
+        var factory = new AccountFactory(provider);
+        var processor = new AppDeletionProcessor(db, _ => throw new Exception("Must not use global credentials."), new Dns(),
+            NullLogger<AppDeletionProcessor>.Instance, accountClients: factory);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => processor.DeleteInfrastructureAsync(app, default));
+        Assert.Contains("unresolved", error.Message);
+        Assert.Empty(factory.Accounts);
+        Assert.Empty(provider.Deleted);
+        Assert.True(await db.Apps.AnyAsync(x => x.Id == app.Id));
+        Assert.True((await db.Deployments.SingleAsync()).ProviderCreationAttempted);
+    }
+
+    private sealed class AccountFactory(IVpsProviderClient client) : ProviderAccountClientFactory(null!, null!, null!, null!, null!, null!, null!)
+    {
+        public List<string> Accounts { get; } = [];
+        public override Task<IVpsProviderClient> CreateAsync(string organizationId, string providerAccountId, CancellationToken ct, bool allowDisabled = true)
+        {
+            Accounts.Add(providerAccountId);
+            return Task.FromResult(client);
+        }
+    }
+
     private sealed class FakeProvider : IVpsProviderClient
     {
         public List<string> Deleted { get; } = [];
+        public List<string> Lookups { get; } = [];
+        public ProviderServerInfo? FoundServer { get; set; }
         public CloudProvider Provider => CloudProvider.Hetzner;
         public Task DeleteServerAsync(string id, CancellationToken cancellationToken = default) { Deleted.Add(id); return Task.CompletedTask; }
-        public Task<ProviderServerInfo?> FindServerAsync(string name, CancellationToken cancellationToken = default) => Task.FromResult<ProviderServerInfo?>(null);
+        public Task<ProviderServerInfo?> FindServerAsync(string name, CancellationToken cancellationToken = default)
+        {
+            Lookups.Add(name);
+            return Task.FromResult(FoundServer);
+        }
         public Task<ProviderServerInfo> CreateServerAsync(CreateServerRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<ProviderServerStatus> GetServerStatusAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }

@@ -16,17 +16,22 @@ public sealed class AppStorageService(MinicloudDbContext db, IStorageVolumeProvi
 {
     public static string VolumeName(string appId, string name) => "mc-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(appId + ":" + name)))[..32].ToLowerInvariant();
 
-    public async Task<RuntimeStorageMount> EnsureAsync(string appId, string name, StorageMountRequest mount, string serverId, string region, CancellationToken ct)
+    public async Task<RuntimeStorageMount> EnsureAsync(string appId, string name, StorageMountRequest mount, string serverId, string region, CancellationToken ct,
+        string? organizationId = null, string? providerAccountId = null, bool allowAllocation = true)
     {
         var identity = VolumeName(appId, name);
         var labels = new Dictionary<string, string> { ["managed-by"] = "minicloud", ["app-id"] = appId, ["storage-name"] = name, ["purpose"] = "customer-storage" };
         var stored = await db.AppStorageVolumes.SingleOrDefaultAsync(x => x.AppId == appId && x.Name == name, ct);
         if (stored is null)
         {
-            stored = new AppStorageVolume { Id = identity, AppId = appId, Name = name, Region = region, SizeGb = mount.SizeGb, Uid = mount.Uid, Gid = mount.Gid };
+            if (!allowAllocation) { throw new InvalidOperationException("The provider account is disabled for new storage allocation."); }
+            stored = new AppStorageVolume { Id = identity, AppId = appId, OrganizationId = organizationId, ProviderAccountId = providerAccountId,
+                Name = name, Region = region, SizeGb = mount.SizeGb, Uid = mount.Uid, Gid = mount.Gid };
             db.AppStorageVolumes.Add(stored);
             await db.SaveChangesAsync(ct);
         }
+        if (stored.ProviderAccountId != providerAccountId || stored.OrganizationId != organizationId)
+        { throw new InvalidOperationException("Storage belongs to a different organization or provider account; automatic migration is not supported."); }
         if (stored.Region != region) { throw new InvalidOperationException("Storage is in a different region; automatic migration is not supported."); }
         if (stored.Uid != mount.Uid || stored.Gid != mount.Gid) { throw new InvalidOperationException("Existing storage ownership cannot change automatically."); }
         var volume = stored.ProviderVolumeId is null ? await provider.FindVolumeAsync(identity, ct) : await provider.GetVolumeAsync(stored.ProviderVolumeId, ct);
@@ -34,6 +39,7 @@ public sealed class AppStorageService(MinicloudDbContext db, IStorageVolumeProvi
         {
             if (stored.ProviderVolumeId is not null || stored.CreationAttempted)
             { throw new InvalidOperationException("Expected storage volume is missing or creation is unresolved; refusing to replace it with an empty disk. Inspect the Hetzner volume before retrying."); }
+            if (!allowAllocation) { throw new InvalidOperationException("The provider account is disabled for new storage allocation."); }
             stored.CreationAttempted = true;
             await db.SaveChangesAsync(ct);
             try { volume = await provider.CreateVolumeAsync(identity, mount.SizeGb, region, labels, ct); }

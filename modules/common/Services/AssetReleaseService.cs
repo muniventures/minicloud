@@ -8,7 +8,8 @@ using Minicloud.Common.Validation;
 
 namespace Minicloud.Common.Services;
 
-public sealed class AssetReleaseService(MinicloudDbContext db, DeploymentLifecycleService lifecycle, IIdGenerator ids, TimeProvider timeProvider)
+public sealed class AssetReleaseService(MinicloudDbContext db, DeploymentLifecycleService lifecycle, IIdGenerator ids, TimeProvider timeProvider,
+    ProviderCatalogService? catalog = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     public async Task<(AssetRelease Release, Deployment Deployment)> PublishAsync(MinicloudApp app, PublishAssetRequest request, CancellationToken ct)
@@ -31,6 +32,7 @@ public sealed class AssetReleaseService(MinicloudDbContext db, DeploymentLifecyc
             CreatedAt = timeProvider.GetUtcNow()
         };
         var deployment = lifecycle.CreateQueued(app, new CreateDeploymentRequest(app.Id, "none", null, []));
+        if (catalog is not null) await catalog.ReserveAsync(app, deployment, ct);
         deployment.AssetRelease = release;
         deployment.AssetReleaseId = release.Id;
         db.AssetReleases.Add(release);

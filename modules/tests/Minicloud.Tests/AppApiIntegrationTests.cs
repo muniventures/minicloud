@@ -86,6 +86,47 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task NamedPlanSelectionUsesDeploymentPermissionAndFreezesPlacementAtAdmission()
+    {
+        var seed = await SeedAsync("org_plan_selection", "app_plan_selection", DateTimeOffset.UtcNow);
+        string planId;
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+            var key = await db.ApiKeys.SingleAsync(x => x.OrganizationId == seed.OrganizationId);
+            key.ScopesJson = JsonSerializer.Serialize(new[] { ApiKeyScopes.AppsRead, ApiKeyScopes.DeploymentsCreate });
+            var catalog = scope.ServiceProvider.GetRequiredService<ProviderCatalogService>();
+            planId = (await catalog.CreateAsync(new(seed.OrganizationId, $"provider_{seed.OrganizationId}_Hetzner", "nbg1", "cx23", "Produção econômica"), default)).Id;
+            await db.SaveChangesAsync();
+        }
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var route = $"/v1/apps/{seed.AppId}/plan";
+        var selected = await client.PostAsJsonAsync(route, new SelectAppPlanRequest("Produção econômica"));
+        Assert.Equal(HttpStatusCode.OK, selected.StatusCode);
+        var app = (await selected.Content.ReadFromJsonAsync<AppResponse>())!;
+        Assert.Equal(planId, app.PlanId);
+        Assert.Equal("Produção econômica", app.Plan);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync($"/v1/apps/{seed.AppId}", new UpdateAppRequest("unauthorized rename", null, null))).StatusCode);
+        var invalid = await client.PostAsJsonAsync(route, new SelectAppPlanRequest("missing"));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.Contains("plan_not_found", await invalid.Content.ReadAsStringAsync());
+        var deployment = await client.PostAsJsonAsync("/v1/deployments", new CreateDeploymentRequest(seed.AppId, "none", null,
+            [new("web", "example/web:1", 8080, true, "/", "/health")], Plan: "Produção econômica"));
+        Assert.Equal(HttpStatusCode.Created, deployment.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(route, new SelectAppPlanRequest("p0"))).StatusCode);
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+            var saved = await db.Deployments.SingleAsync(x => x.AppId == seed.AppId);
+            Assert.Equal(planId, saved.PlanId);
+            Assert.Equal($"provider_{seed.OrganizationId}_Hetzner", saved.ProviderAccountId);
+            Assert.Equal("cx23", saved.ProviderSku);
+            Assert.NotNull((await db.ProviderPlans.SingleAsync(x => x.Id == planId)).ProvisioningLockedAt);
+        }
+    }
+
+    [Fact]
     public async Task StorageAdmissionRejectsOtherProvidersAndPersistsHetznerMounts()
     {
         var seed = await SeedAsync("org_storage", "app_storage", DateTimeOffset.UtcNow);
@@ -442,6 +483,8 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         await using (var scope = _factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+            var app = await db.Apps.SingleAsync(x => x.Id == seed.AppId);
+            await scope.ServiceProvider.GetRequiredService<ProviderCatalogService>().BindAsync(app, "p0", default);
             db.DeploymentArtifacts.Add(new DeploymentArtifact
             {
                 Id = "art_asset",
@@ -471,6 +514,9 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
             var deployment = await db.Deployments.Include(d => d.Services).SingleAsync(d => d.Id == release.DeploymentId);
             Assert.Empty(deployment.Services);
             Assert.Equal(release.Id, deployment.AssetReleaseId);
+            Assert.NotNull(deployment.PlanId);
+            Assert.Equal($"provider_{seed.OrganizationId}_Hetzner", deployment.ProviderAccountId);
+            Assert.Equal("Hetzner", deployment.ProviderType);
             Assert.Null(deployment.Domain);
             Assert.Empty(await new DeploymentServiceSetService().BuildActiveServicesAsync(db, seed.AppId, default));
         }
@@ -509,7 +555,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         Assert.Equal(first!.Id, second!.Id);
         Assert.Equal(seed.AppId, first.ParentAppId);
         Assert.Equal("feature-checkout", first.BranchName);
-        Assert.Equal("p0-v-0", first.Plan);
+        Assert.Equal("p0", first.Plan);
 
         var main = await client.GetFromJsonAsync<AppResponse>($"/v1/apps/{seed.AppId}");
         var branch = Assert.Single(main!.Branches);
@@ -756,6 +802,24 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         });
         await db.SaveChangesAsync();
 
+        // A migrated installation has organization-owned rows for its legacy plan names.
+        var catalog = scope.ServiceProvider.GetRequiredService<ProviderCatalogService>();
+        foreach (var type in Enum.GetValues<Minicloud.Common.Providers.CloudProvider>())
+        {
+            var account = new ProviderAccount { Id = $"provider_{organizationId}_{type}", OrganizationId = organizationId,
+                Name = type.ToString(), ProviderType = type, CredentialPath = $"fixtures/{organizationId}/{type}", CredentialGeneration = "1" };
+            db.ProviderAccounts.Add(account);
+            await db.SaveChangesAsync();
+            foreach (var plan in Enum.GetValues<AppPlan>())
+            {
+                var mapping = ProviderPlanMapping.FromAppPlan(plan, new ProviderPlanOptions());
+                if (mapping.Provider != type) continue;
+                await catalog.CreateAsync(new(organizationId, account.Id, mapping.Region, mapping.Sku,
+                    Minicloud.Common.Validation.ControlPlaneValidation.ToWireValue(plan)), default);
+            }
+            await db.SaveChangesAsync();
+        }
+
         return new SeedResult(organizationId, appId, apiKeyToken.Token);
     }
 
@@ -771,6 +835,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["Database:Provider"] = "Sqlite",
+                    ["Providers:AllowLegacyConfiguration"] = "true",
                     ["ManagedDomains:Suffix"] = appDomain,
                     ["Firebase:ProjectId"] = "minicloud-test",
                     ["Database:RunMigrationsOnStartup"] = "false",
@@ -783,7 +848,17 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
                 services.RemoveAll<DbContextOptions<MinicloudDbContext>>();
                 services.RemoveAll<Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptionsConfiguration<MinicloudDbContext>>();
                 services.AddDbContext<MinicloudDbContext>(options => options.UseSqlite(connection));
+                services.RemoveAll<ISecretStore>();
+                services.AddSingleton<ISecretStore, FixtureSecretStore>();
             });
         }
+    }
+
+    private sealed class FixtureSecretStore : ISecretStore
+    {
+        public Task<StoredSecretReference> PutAsync(SecretStoreWriteRequest request, CancellationToken ct) =>
+            Task.FromResult(new StoredSecretReference("fixture", "fixture/secret", "1"));
+        public Task<string> GetAsync(StoredSecretReference reference, CancellationToken ct) => Task.FromResult("synthetic-provider-token");
+        public Task DeleteAsync(StoredSecretReference reference, CancellationToken ct) => Task.CompletedTask;
     }
 }

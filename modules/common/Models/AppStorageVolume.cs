@@ -5,6 +5,9 @@ public sealed class AppStorageVolume
 {
     public string Id { get; set; } = default!;
     public string AppId { get; set; } = default!;
+    public string? OrganizationId { get; set; }
+    public string? ProviderAccountId { get; set; }
+    public string Provider { get; set; } = "hetzner";
     public string Name { get; set; } = default!;
     public string Region { get; set; } = default!;
     public string? ProviderVolumeId { get; set; }

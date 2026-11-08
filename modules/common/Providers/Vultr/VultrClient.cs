@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using Minicloud.Common.Providers.Common;
 using Minicloud.Common.Providers.Models;
 using System.Net.Http;
+using System.Globalization;
 
 namespace Minicloud.Common.Providers.Vultr;
 
@@ -78,7 +79,16 @@ public sealed class VultrClient : IVpsProviderClient
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Plan);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Region);
 
-        var osId = await ResolveOsIdAsync(cancellationToken);
+        int osId;
+        if (request.Image is not null)
+        {
+            if (!int.TryParse(request.Image, NumberStyles.None, CultureInfo.InvariantCulture, out osId) || osId <= 0)
+            { throw new ArgumentException("Vultr image must be a positive numeric OS ID.", nameof(request.Image)); }
+        }
+        else
+        {
+            osId = await ResolveOsIdAsync(cancellationToken);
+        }
         var base64UserData = Convert.ToBase64String(Encoding.UTF8.GetBytes(request.UserDataCloudInit ?? string.Empty));
 
         var tags = new List<string> { "minicloud" };
@@ -227,7 +237,7 @@ public sealed class VultrClient : IVpsProviderClient
             }
 
             var redactedBody = TokenRedactor.Redact(body, _options.ApiKey);
-            var message = $"Vultr API request failed with HTTP {(int)response.StatusCode}: {redactedBody}";
+            var message = $"Vultr API request failed with HTTP {(int)response.StatusCode}.";
             _logger?.LogError("Vultr API call failed: {Message}", message);
             throw new ProviderApiException(message, response.StatusCode, Provider, redactedBody);
         }

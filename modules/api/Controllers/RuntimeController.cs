@@ -164,7 +164,7 @@ public sealed class RuntimeController : ControllerBase
                 (x.Kind == DomainBindingService.KindMinicloudSubdomain ||
                     (x.Kind == DomainBindingService.KindCustomDomain && x.DnsStatus == DomainBindingService.DnsVerified &&
                         db.ServerInstances.Any(s => s.AppId == auth.Server.AppId && s.OrganizationId == auth.Server.OrganizationId &&
-                            s.Provider == auth.Server.Provider && s.ProviderServerId == auth.Server.ProviderServerId && s.IpAddress == x.TargetIp))) &&
+                            s.ProviderAccountId == auth.Server.ProviderAccountId && s.Provider.ToLower() == auth.Server.Provider.ToLower() && s.ProviderServerId == auth.Server.ProviderServerId && s.IpAddress == x.TargetIp))) &&
                 x.Status != DomainBindingService.StatusDisabled &&
                 serviceNames.Contains(x.ServiceName))
             .OrderBy(x => x.Hostname)
@@ -251,11 +251,39 @@ public sealed class RuntimeController : ControllerBase
             ])));
         }
 
+        var accountId = request.ProviderAccountId;
+        if (appRecord.PlanId is not null)
+        {
+            var selectedPlan = await db.ProviderPlans.AsNoTracking().Include(x => x.ProviderAccount)
+                .SingleOrDefaultAsync(x => x.Id == appRecord.PlanId && x.OrganizationId == appRecord.OrganizationId, cancellationToken);
+            accountId ??= selectedPlan?.ProviderAccountId;
+            if (selectedPlan is null || selectedPlan.ProviderAccountId != accountId ||
+                !string.Equals(selectedPlan.ProviderAccount.ProviderType.ToString(), request.Provider, StringComparison.OrdinalIgnoreCase))
+            { return EndpointResults.Conflict("runtime_account_conflict", "Runtime provider account does not match the app plan."); }
+            if (string.IsNullOrWhiteSpace(request.ProviderServerId) || !await db.ServerInstances.AnyAsync(x =>
+                x.AppId == appId && x.OrganizationId == appRecord.OrganizationId && x.ProviderAccountId == accountId &&
+                x.Provider.ToLower() == request.Provider.ToLower() && x.ProviderServerId == request.ProviderServerId, cancellationToken))
+            { return EndpointResults.Conflict("runtime_server_conflict", "Register the exact managed server saved for this environment."); }
+        }
+        else if (accountId is not null)
+        { return EndpointResults.Conflict("runtime_account_conflict", "Select an organization plan and register its managed server before using a provider account."); }
+        if (accountId is not null)
+        {
+            var account = await db.ProviderAccounts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == accountId && x.OrganizationId == appRecord.OrganizationId, cancellationToken);
+            if (account is null || !string.Equals(account.ProviderType.ToString(), request.Provider, StringComparison.OrdinalIgnoreCase))
+            { return EndpointResults.Conflict("runtime_account_conflict", "Runtime provider account does not belong to this organization or provider type."); }
+        }
+        if (await db.ServerInstances.AnyAsync(x => x.ProviderAccountId == accountId && x.Provider.ToLower() == request.Provider.ToLower() &&
+                x.ProviderServerId == request.ProviderServerId && (x.AppId != appId || x.OrganizationId != appRecord.OrganizationId), cancellationToken) ||
+            await db.RuntimeServers.AnyAsync(x => x.ProviderAccountId == accountId && x.Provider.ToLower() == request.Provider.ToLower() &&
+                x.ProviderServerId == request.ProviderServerId && (x.AppId != appId || x.OrganizationId != appRecord.OrganizationId), cancellationToken))
+        { return EndpointResults.Conflict("runtime_server_conflict", "Runtime server is registered to another application."); }
         var now = timeProvider.GetUtcNow();
         var runtimeServer = await db.RuntimeServers
             .SingleOrDefaultAsync(x =>
                 x.AppId == appId &&
-                x.Provider == request.Provider &&
+                x.ProviderAccountId == accountId &&
+                x.Provider.ToLower() == request.Provider.ToLower() &&
                 x.ProviderServerId == request.ProviderServerId,
                 cancellationToken);
 
@@ -266,7 +294,8 @@ public sealed class RuntimeController : ControllerBase
                 Id = ids.NewId("rtsrv"),
                 OrganizationId = appRecord.OrganizationId,
                 AppId = appRecord.Id,
-                Provider = request.Provider,
+                ProviderAccountId = accountId,
+                Provider = request.Provider.ToLowerInvariant(),
                 ProviderServerId = request.ProviderServerId,
                 Hostname = request.Hostname,
                 AgentVersion = request.AgentVersion,

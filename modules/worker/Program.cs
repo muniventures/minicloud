@@ -172,6 +172,13 @@ builder.Services.AddSingleton<IArtifactRetriever>(sp => sp.GetRequiredService<Lo
 
 // Pipeline Executor (T40 full pipeline)
 builder.Services.AddMinicloudProviders(builder.Configuration);
+if (!builder.Configuration.GetValue<bool>("Providers:AllowLegacyConfiguration"))
+{
+    // A type-only resolver cannot identify an account. Keep legacy dispatch an
+    // explicit, temporary upgrade option rather than silently using global keys.
+    builder.Services.AddScoped<ProviderServiceCollectionExtensions.VpsProviderClientResolver>(sp => provider =>
+        throw new ProviderCatalogException("legacy_provider_import_required", "Import legacy resources into organization provider accounts before resuming cloud operations."));
+}
 builder.Services.AddHttpClient("pipeline-health");
 builder.Services.AddScoped<ResolveProvisionServerStep>();
 builder.Services.Configure<ManagedDomainOptions>(builder.Configuration.GetSection(ManagedDomainOptions.SectionName));

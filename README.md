@@ -4,6 +4,7 @@ Deploy your apps to your own VPS. Minicloud is a self-hosted deployment platform
 
 - [Self-hosting](docs/self-hosting.md)
 - [CLI reference](docs/cli.md)
+- [Providers and plans](docs/providers.md)
 - [Durable app storage](docs/durable-storage.md)
 - [GitHub Actions](docs/github-actions.md)
 - [Report a vulnerability](SECURITY.md)

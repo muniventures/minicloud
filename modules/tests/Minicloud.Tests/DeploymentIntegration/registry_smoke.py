@@ -386,7 +386,11 @@ services:
         finally:
             for name in reversed(extras):
                 component.run("docker", "rm", "-f", name, check=False)
-            compose("down", "--volumes", "--remove-orphans", timeout=120, check=False)
+            cleanup = compose("down", "--volumes", "--remove-orphans", "--rmi", "local", timeout=180, check=False)
+            images_gone = all(component.run("docker", "image", "inspect", f"{component.PROJECT}-{service}:latest",
+                                           check=False).returncode != 0 for service in ("api", "worker"))
+            if cleanup.returncode != 0 or not images_gone:
+                raise RuntimeError("isolated registry Docker cleanup failed")
 
 
 if __name__ == "__main__":

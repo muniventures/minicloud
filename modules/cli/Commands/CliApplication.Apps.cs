@@ -177,11 +177,15 @@ public sealed partial class CliApplication
         CancellationToken cancellationToken)
     {
         var createSlug = appSlug.ToLowerInvariant();
+        var plans = (await _apiClient.GetPlansAsync(organization.Id, cancellationToken)).Where(x => x.Enabled && x.AccountEnabled).ToArray();
+        if (plans.Length == 0)
+            throw new CliCommandException(CliExitCodes.ValidationError, "No enabled plans are available. Add a provider account and plan in the portal first.");
+        var selectedPlan = PromptSingleSelect("Plan", plans.Select(x => (Value: x.Name, Label: $"{x.Name} ({x.Region}, {x.Sku})")).ToArray(), plans[0].Name);
         var request = new CreateAppRequest(
             organization.Id,
             DisplayNameFromSlug(createSlug),
             createSlug,
-            "p0",
+            selectedPlan,
             database);
 
         _console.WriteLine($"Creating app '{createSlug}' in organization '{organization.Name}'...");

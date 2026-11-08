@@ -6,6 +6,9 @@ using Minicloud.Worker.Pipeline;
 using Minicloud.Worker.Pipeline.Steps;
 using Minicloud.Common.Providers;
 using Minicloud.Common.Providers.Models;
+using Microsoft.Extensions.DependencyInjection;
+using Minicloud.Common.Providers.Common;
+using System.Net;
 
 namespace Minicloud.Worker.Tests.Pipeline;
 
@@ -353,6 +356,174 @@ public sealed class ResolveProvisionServerStepTests : IClassFixture<WorkerSqlite
             Assert.Equal("192.0.2.44", context.ServerIp);
         }
         Assert.Equal(expectedName, client.RequestedName);
+    }
+
+    [Fact]
+    public async Task CatalogPlanWithoutReservationNeverUsesGlobalProviderCredentials()
+    {
+        var (org, app) = await _harness.SeedOrgAndAppAsync("missing-reservation");
+        await using (var db = _harness.CreateDbContext())
+        {
+            var account = new ProviderAccount { Id = "missing-reservation-account", OrganizationId = org.Id,
+                Name = "secondary", ProviderType = CloudProvider.Hetzner,
+                CredentialPath = "synthetic/path", CredentialGeneration = "test" };
+            var plan = new ProviderPlan { Id = "missing-reservation-plan", OrganizationId = org.Id,
+                ProviderAccount = account, ProviderAccountId = account.Id, Name = "secondary small", NormalizedName = "SECONDARY SMALL",
+                Region = "nbg1", Sku = "cx23" };
+            db.ProviderPlans.Add(plan);
+            (await db.Apps.SingleAsync(x => x.Id == app.Id)).PlanId = plan.Id;
+            db.Deployments.Add(new Deployment { Id = "missing-reservation-deployment", AppId = app.Id, OrganizationId = org.Id,
+                PlanId = plan.Id, Status = DeploymentStatus.Provisioning });
+            await db.SaveChangesAsync();
+        }
+        var globalCalled = false;
+        var step = new ResolveProvisionServerStep(_harness.CreateScopeFactory(), _ =>
+        {
+            globalCalled = true;
+            throw new InvalidOperationException("Global credentials must not be used.");
+        }, new DeploymentPipelineOptions(), TimeProvider.System);
+        var error = await Assert.ThrowsAsync<PipelineStepException>(() => step.ExecuteAsync(new PipelineStepContext
+        { AppId = app.Id, OrganizationId = org.Id, DeploymentId = "missing-reservation-deployment" }, default));
+        Assert.Contains("reservation", error.Message);
+        Assert.False(globalCalled);
+    }
+
+    [Fact]
+    public async Task CatalogProvisioningUsesReservedAccountAndPersistsIt()
+    {
+        var context = await SeedCatalogAsync("catalog-provision");
+        var factory = new AccountFactory(new MockVpsProviderClient());
+        var step = CatalogStep(factory);
+        await step.ExecuteAsync(context, default);
+        Assert.Equal([context.ProviderAccountId!], factory.RequestedAccounts);
+        await using var db = _harness.CreateDbContext();
+        var server = await db.ServerInstances.SingleAsync(x => x.AppId == context.AppId);
+        Assert.Equal(context.ProviderAccountId, server.ProviderAccountId);
+        Assert.Equal(context.PlanId, server.PlanId);
+        Assert.Equal("cx23", server.Sku);
+    }
+
+    [Fact]
+    public async Task AmbiguousCatalogCreateCannotIssueAnotherCreateWhenDiscoveryIsEmpty()
+    {
+        var context = await SeedCatalogAsync("catalog-ambiguous");
+        var creates = 0;
+        var factory = new AccountFactory(new MockVpsProviderClient(createServer: _ =>
+        {
+            creates++;
+            throw new HttpRequestException("Response lost.");
+        }));
+        var step = CatalogStep(factory);
+        await Assert.ThrowsAsync<PipelineStepException>(() => step.ExecuteAsync(context, default));
+        var retry = await Assert.ThrowsAsync<PipelineStepException>(() => step.ExecuteAsync(context, default));
+        Assert.Contains("unresolved", retry.Message);
+        Assert.Equal(1, creates);
+        await using var db = _harness.CreateDbContext();
+        Assert.True((await db.Deployments.SingleAsync(x => x.Id == context.DeploymentId)).ProviderCreationAttempted);
+        Assert.All(factory.RequestedAccounts, x => Assert.Equal(context.ProviderAccountId, x));
+    }
+
+    [Fact]
+    public async Task DefiniteCatalogQuotaRejectionCanRetryOnlyTheReservedAccount()
+    {
+        var context = await SeedCatalogAsync("catalog-quota");
+        var creates = 0;
+        var factory = new AccountFactory(new MockVpsProviderClient(createServer: request =>
+        {
+            if (++creates == 1) { throw new ProviderApiException("quota", HttpStatusCode.TooManyRequests); }
+            return Task.FromResult(new ProviderServerInfo("quota-retry-server", request.Name, "192.0.2.25", "running"));
+        }));
+        var step = CatalogStep(factory);
+        await Assert.ThrowsAsync<PipelineStepException>(() => step.ExecuteAsync(context, default));
+        await using (var db = _harness.CreateDbContext())
+        { Assert.False((await db.Deployments.SingleAsync(x => x.Id == context.DeploymentId)).ProviderCreationAttempted); }
+        await step.ExecuteAsync(context, default);
+        Assert.Equal(2, creates);
+        Assert.All(factory.RequestedAccounts, x => Assert.Equal(context.ProviderAccountId, x));
+    }
+
+    [Fact]
+    public async Task DisabledCatalogAccountReusesItsRegisteredServerDespiteExternalIdInAnotherAccount()
+    {
+        var context = await SeedCatalogAsync("catalog-reuse");
+        var (otherOrg, otherApp) = await _harness.SeedOrgAndAppAsync("catalog-reuse-other");
+        await using (var db = _harness.CreateDbContext())
+        {
+            var original = await db.ProviderAccounts.SingleAsync(x => x.Id == context.ProviderAccountId);
+            original.Enabled = false;
+            db.ProviderAccounts.Add(new ProviderAccount { Id = "reuse-other-account", OrganizationId = otherOrg.Id,
+                Name = "Other scope", ProviderType = CloudProvider.Hetzner, CredentialPath = "synthetic/other", CredentialGeneration = "test" });
+            db.ServerInstances.AddRange(new ServerInstance { Id = "reuse-original-server", AppId = context.AppId, OrganizationId = context.OrganizationId,
+                ProviderAccountId = context.ProviderAccountId, PlanId = context.PlanId, Provider = "hetzner", ProviderServerId = "same-id",
+                Region = "nbg1", Status = "active", BootstrapStatus = "ready" },
+                new ServerInstance { Id = "reuse-other-server", AppId = otherApp.Id, OrganizationId = otherOrg.Id,
+                    ProviderAccountId = "reuse-other-account", Provider = "hetzner", ProviderServerId = "same-id",
+                    Region = "nbg1", Status = "active", BootstrapStatus = "ready" });
+            await db.SaveChangesAsync();
+        }
+        var factory = new AccountFactory(new MockVpsProviderClient(findServer: () => throw new Exception("Registered server must not use discovery.")));
+        await CatalogStep(factory).ExecuteAsync(context, default);
+        Assert.Equal([context.ProviderAccountId!], factory.RequestedAccounts);
+        Assert.Equal("127.0.0.1", context.ServerIp);
+    }
+
+    [Fact]
+    public async Task DiscoveredCatalogResourceKeepsOriginalScopeWhenReadinessFails()
+    {
+        var context = await SeedCatalogAsync("catalog-discovered");
+        ProviderServerInfo found;
+        await using (var db = _harness.CreateDbContext())
+        {
+            var app = await db.Apps.Include(x => x.Organization).SingleAsync(x => x.Id == context.AppId);
+            found = new ProviderServerInfo("discovered-id", ResolveProvisionServerStep.BuildServerName(app.Organization.Slug, app.Slug), "", "starting",
+                Labels: new Dictionary<string, string> { ["managed-by"] = "minicloud", ["customer"] = app.Organization.Slug,
+                    ["app"] = app.Slug, ["env"] = "production" });
+        }
+        var factory = new AccountFactory(new MockVpsProviderClient(findServer: () => Task.FromResult<ProviderServerInfo?>(found),
+            createServer: _ => throw new Exception("Must not create after discovery.")));
+        var step = new ResolveProvisionServerStep(
+            _harness.CreateScopeFactory(services => services.AddSingleton<ProviderAccountClientFactory>(factory)),
+            _ => throw new Exception("Must not use global credentials."),
+            new DeploymentPipelineOptions { SshReadyTimeout = TimeSpan.Zero, ProvisionTimeout = TimeSpan.Zero }, TimeProvider.System);
+        await Assert.ThrowsAsync<PipelineStepException>(() => step.ExecuteAsync(context, default));
+        await using var verify = _harness.CreateDbContext();
+        Assert.True((await verify.Deployments.SingleAsync(x => x.Id == context.DeploymentId)).ProviderCreationAttempted);
+        var saved = await verify.ServerInstances.SingleAsync(x => x.AppId == context.AppId);
+        Assert.Equal(context.ProviderAccountId, saved.ProviderAccountId);
+        Assert.Equal("discovered-id", saved.ProviderServerId);
+    }
+
+    private ResolveProvisionServerStep CatalogStep(AccountFactory factory) => new(
+        _harness.CreateScopeFactory(services => services.AddSingleton<ProviderAccountClientFactory>(factory)),
+        _ => throw new InvalidOperationException("Catalog plan cannot use global provider credentials."),
+        new DeploymentPipelineOptions { SshReadyTimeout = TimeSpan.Zero }, TimeProvider.System);
+
+    private async Task<PipelineStepContext> SeedCatalogAsync(string name)
+    {
+        var (org, app) = await _harness.SeedOrgAndAppAsync(name);
+        var account = new ProviderAccount { Id = name + "-account", OrganizationId = org.Id,
+            Name = name, ProviderType = CloudProvider.Hetzner, CredentialPath = "synthetic/" + name, CredentialGeneration = "test" };
+        var plan = new ProviderPlan { Id = name + "-plan", OrganizationId = org.Id, ProviderAccount = account,
+            ProviderAccountId = account.Id, Name = name, NormalizedName = name.ToUpperInvariant(), Region = "nbg1", Sku = "cx23" };
+        await using var db = _harness.CreateDbContext();
+        db.ProviderPlans.Add(plan);
+        (await db.Apps.SingleAsync(x => x.Id == app.Id)).PlanId = plan.Id;
+        db.Deployments.Add(new Deployment { Id = name + "-deployment", AppId = app.Id, OrganizationId = org.Id,
+            Status = DeploymentStatus.Provisioning, PlanId = plan.Id, ProviderAccountId = account.Id,
+            ProviderType = "Hetzner", ProviderRegion = "nbg1", ProviderSku = "cx23" });
+        await db.SaveChangesAsync();
+        return new PipelineStepContext { AppId = app.Id, OrganizationId = org.Id, DeploymentId = name + "-deployment",
+            PlanId = plan.Id, ProviderAccountId = account.Id };
+    }
+
+    private sealed class AccountFactory(IVpsProviderClient client) : ProviderAccountClientFactory(null!, null!, null!, null!, null!, null!, null!)
+    {
+        public List<string> RequestedAccounts { get; } = [];
+        public override Task<IVpsProviderClient> CreateAsync(string organizationId, string providerAccountId, CancellationToken ct, bool allowDisabled = true)
+        {
+            RequestedAccounts.Add(providerAccountId);
+            return Task.FromResult(client);
+        }
     }
 
     private sealed class MockVpsProviderClient(

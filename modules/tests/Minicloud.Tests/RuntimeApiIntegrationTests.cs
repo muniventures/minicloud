@@ -413,6 +413,49 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
         Assert.Empty((await client.GetFromJsonAsync<Minicloud.Common.Contracts.RuntimeDesiredRoutingResponse>("/v1/runtime/routing"))!.Routes);
     }
 
+    [Fact]
+    public async Task CatalogRuntimeRegistrationRequiresTheSavedManagedServerIdentity()
+    {
+        var seed = await SeedAsync("org_runtime_catalog", "app_runtime_catalog", DateTimeOffset.UtcNow);
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+            var account = new ProviderAccount { Id = "runtime-catalog-account", OrganizationId = seed.OrganizationId,
+                Name = "Original", ProviderType = Minicloud.Common.Providers.CloudProvider.Hetzner,
+                CredentialPath = "synthetic/path", CredentialGeneration = "test" };
+            var plan = new ProviderPlan { Id = "runtime-catalog-plan", OrganizationId = seed.OrganizationId,
+                ProviderAccountId = account.Id, ProviderAccount = account, Name = "Runtime small", NormalizedName = "RUNTIME SMALL",
+                Region = "nbg1", Sku = "cx23" };
+            db.ProviderPlans.Add(plan);
+            (await db.Apps.SingleAsync(x => x.Id == seed.AppId)).PlanId = plan.Id;
+            db.ServerInstances.Add(new ServerInstance { Id = "runtime-saved-server", OrganizationId = seed.OrganizationId,
+                AppId = seed.AppId, ProviderAccountId = account.Id, PlanId = plan.Id, Provider = "hetzner",
+                ProviderServerId = "owned-resource", Region = "nbg1", Status = "ready", BootstrapStatus = "ready" });
+            var key = await db.ApiKeys.SingleAsync(x => x.OrganizationId == seed.OrganizationId);
+            key.ScopesJson = JsonSerializer.Serialize(new[] { ApiKeyScopes.DeploymentsRead, ApiKeyScopes.DeploymentsCreate });
+            await db.SaveChangesAsync();
+        }
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var forged = await client.PostAsJsonAsync($"/v1/runtime/servers?appId={seed.AppId}",
+            new { provider = "hetzner", providerAccountId = "runtime-catalog-account", providerServerId = "another-account-resource" });
+        Assert.Equal(HttpStatusCode.Conflict, forged.StatusCode);
+        Assert.Contains("runtime_server_conflict", await forged.Content.ReadAsStringAsync());
+        var valid = await client.PostAsJsonAsync($"/v1/runtime/servers?appId={seed.AppId}",
+            new { provider = "hetzner", providerAccountId = "runtime-catalog-account", providerServerId = "owned-resource" });
+        Assert.Equal(HttpStatusCode.Created, valid.StatusCode);
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+            (await db.Apps.SingleAsync(x => x.Id == seed.AppId)).PlanId = null;
+            await db.SaveChangesAsync();
+        }
+        var legacyAccountInjection = await client.PostAsJsonAsync($"/v1/runtime/servers?appId={seed.AppId}",
+            new { provider = "hetzner", providerAccountId = "runtime-catalog-account", providerServerId = "owned-resource" });
+        Assert.Equal(HttpStatusCode.Conflict, legacyAccountInjection.StatusCode);
+        Assert.Contains("runtime_account_conflict", await legacyAccountInjection.Content.ReadAsStringAsync());
+    }
+
     private async Task<SeedResult> SeedAsync(string organizationId, string appId, DateTimeOffset now, bool revoked = false)
     {
         await using var scope = _factory!.Services.CreateAsyncScope();
