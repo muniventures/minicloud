@@ -66,6 +66,29 @@ public class VultrClientTests
     }
 
     [Fact]
+    public async Task FindServerAsync_WhenOnlyUnrelatedInstancesAreReturned_ReturnsNull()
+    {
+        _handler.QueueJsonResponse("""{"instances":[{"id":"unrelated-id","label":"another-app","status":"active","main_ip":"192.0.2.1"}]}""");
+
+        var result = await CreateClient().FindServerAsync("requested-app");
+
+        Assert.Null(result);
+        Assert.Single(_handler.RecordedRequests);
+    }
+
+    [Fact]
+    public async Task FindServerAsync_WhenUnrelatedInstancePrecedesMatchingLabel_ReturnsOnlyMatch()
+    {
+        _handler.QueueJsonResponse("""{"instances":[{"id":"unrelated-id","label":"another-app","status":"active"},{"id":"matching-id","label":"Requested-App","status":"active","main_ip":"192.0.2.2"}]}""");
+
+        var result = await CreateClient().FindServerAsync("requested-app");
+
+        Assert.NotNull(result);
+        Assert.Equal("matching-id", result.Id);
+        Assert.Equal("Requested-App", result.Name);
+    }
+
+    [Fact]
     public async Task CreateServerAsync_Base64EncodesUserData_AndParsesResponse()
     {
         // Arrange

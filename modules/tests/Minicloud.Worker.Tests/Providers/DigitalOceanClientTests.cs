@@ -146,6 +146,49 @@ public class DigitalOceanClientTests
         Assert.Contains("\"do:droplet:6002\"", assignReq.Body);
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.UnprocessableEntity)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    public async Task CreateServerAsync_ProjectAssignmentRejectionIsNotAnAllocationRejection(HttpStatusCode status)
+    {
+        _handler.QueueJsonResponse("""{"droplet":{"id":6002,"name":"minicloud-do-app","status":"new"}}""", HttpStatusCode.Created);
+        _handler.QueueJsonResponse("""{"message":"Invalid token dop_v1_secret_token_abcdef123456"}""", status);
+
+        var error = await Assert.ThrowsAsync<ProviderApiException>(() => CreateClient().CreateServerAsync(
+            new CreateServerRequest("minicloud-do-app", "s-1vcpu-1gb", "nyc1", "", "#cloud-config")));
+
+        Assert.Null(error.StatusCode);
+        Assert.Equal(Minicloud.Common.Providers.CloudProvider.DigitalOcean, error.Provider);
+        Assert.Contains("droplet 6002 was created", error.Message);
+        var assignmentError = Assert.IsType<ProviderApiException>(error.InnerException);
+        Assert.Equal(status, assignmentError.StatusCode);
+        Assert.DoesNotContain(_options.ApiToken, error.ToString());
+        Assert.DoesNotContain(_options.ApiToken, assignmentError.ResponseBody!);
+        Assert.Equal(2, _handler.RecordedRequests.Count);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.UnprocessableEntity)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    public async Task CreateServerAsync_InitialAllocationRejectionPreservesStatus(HttpStatusCode status)
+    {
+        _handler.QueueJsonResponse("""{"message":"Droplet creation rejected"}""", status);
+
+        var error = await Assert.ThrowsAsync<ProviderApiException>(() => CreateClient().CreateServerAsync(
+            new CreateServerRequest("minicloud-do-app", "s-1vcpu-1gb", "nyc1", "", "#cloud-config")));
+
+        Assert.Equal(status, error.StatusCode);
+        Assert.Null(error.InnerException);
+        var request = Assert.Single(_handler.RecordedRequests);
+        Assert.EndsWith("/droplets", request.Uri);
+    }
+
     [Fact]
     public async Task GetServerStatusAsync_WhenActive_ReturnsRunningStatus()
     {
