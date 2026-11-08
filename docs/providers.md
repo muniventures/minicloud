@@ -27,6 +27,12 @@ is a UUID; replace it with a name you want to use. Names may contain spaces and
 Unicode and must be unique across the organization's accounts, ignoring case
 and canonical Unicode differences.
 
+Choose an image that fits the plan's memory requirements. Managed Debian images
+install Docker Engine, Compose and Buildx from Docker's signed Debian repository;
+Ubuntu images retain their distribution packages.
+Fresh-server deployments wait for cloud-init and activate Docker group membership
+before using the Docker socket. A fatal bootstrap failure stops deployment.
+
 ```yaml
 app: example-api
 appId: app_example

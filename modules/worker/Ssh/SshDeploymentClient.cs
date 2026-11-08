@@ -58,12 +58,24 @@ public sealed class SshDeploymentClient : ISshDeploymentClient
         if (buildPayload.RootElement.TryGetProperty("build_artifacts", out var buildArtifacts) &&
             buildArtifacts.ValueKind == JsonValueKind.Array && buildArtifacts.GetArrayLength() > 0)
         {
-            const string builderPreflight = """
+            const string bootstrapWait = """
                 bash -c 'set -euo pipefail
                 if command -v cloud-init >/dev/null 2>&1; then
                   status=0; timeout 600 sudo -n cloud-init status --wait >/dev/null 2>&1 || status=$?
                   case "$status" in 0|2) ;; *) exit 41 ;; esac
-                fi
+                fi'
+                """;
+            var bootstrapExit = await ExecuteCommandAsync(request.Host, request.Username,
+                request.PrivateKeyContent, bootstrapWait, (_, _) => Task.CompletedTask, cancellationToken);
+            if (bootstrapExit != 0)
+            {
+                throw new InvalidOperationException("buildkit_unavailable: runtime bootstrap or local BuildKit preflight failed before artifact transfer; use the documented existing-server upgrade.");
+            }
+
+            // Bootstrap can update account groups after its SSH session opens.
+            // ExecuteCommandAsync opens a fresh connection for the Docker checks.
+            const string builderPreflight = """
+                bash -c 'set -euo pipefail
                 docker buildx version >/dev/null 2>&1
                 docker buildx inspect --builder "$(docker context show)" | grep -E "^Driver:[[:space:]]+docker$" >/dev/null'
                 """;

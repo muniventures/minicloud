@@ -35,6 +35,24 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
+# cloud-init may add this account to docker after the SSH session starts.
+# Refresh only that authorized membership before using the Docker socket.
+if [[ " $(id -nG) " != *" docker "* ]] && [[ " $(id -nG "$(id -un)") " == *" docker "* ]]; then
+  if [[ "${MINICLOUD_DOCKER_GROUP_REFRESHED:-}" == 1 ]] || ! command -v sg >/dev/null 2>&1; then
+    echo "__MINICLOUD_DEPLOY_FAILURE__=bootstrap_failed"
+    echo "ERROR: runtime bootstrap could not activate Docker group membership." >&2
+    exit 1
+  fi
+  echo "Refreshing Docker group membership after runtime bootstrap..."
+  refresh_command="exec bash"
+  shell_quote_escape="'\\''"
+  for refresh_arg in "${BASH_SOURCE[0]}" "$@"; do
+    refresh_command+=" '${refresh_arg//\'/$shell_quote_escape}'"
+  done
+  export MINICLOUD_DOCKER_GROUP_REFRESHED=1
+  exec sg docker -c "$refresh_command"
+fi
+
 payload_string() {
   jq -r "$1 // \"\"" "${PAYLOAD_FILE}"
 }
