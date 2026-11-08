@@ -16,6 +16,7 @@ export type CreateAppRequest = {
   slug: string;
   plan: AppPlan;
   database: DatabaseMode;
+  environmentName?: string;
 };
 
 export function listApps(organizationId: string, signal?: AbortSignal, includeBranches = false) {
@@ -141,4 +142,11 @@ export function verifyAppDomain(appId: string, domainId: string) {
 
 export function listAppStorage(appId: string, signal?: AbortSignal) {
   return apiRequest<import("../models/controlPlane").AppStorageVolume[]>(`/v1/apps/${encodeURIComponent(appId)}/storage`, { signal });
+}
+
+export function createAppEnvironment(appId: string, name: string, plan: AppPlan) {
+  return apiRequest<AppResponse>(`/v1/apps/${encodeURIComponent(appId)}/environments`, { method: "POST", body: { name, plan } });
+}
+export function renameAppEnvironment(appId: string, name: string) {
+  return apiRequest<AppResponse>(`/v1/apps/${encodeURIComponent(appId)}/environment`, { method: "PATCH", body: { name } });
 }

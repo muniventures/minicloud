@@ -36,6 +36,42 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task NamedEnvironmentsHaveIndependentPlansDomainsAndTenantAuthorization()
+    {
+        var seed = await SeedAsync("org_environments", "app_environments", DateTimeOffset.UtcNow);
+        var foreign = await SeedAsync("org_env_foreign", "app_env_foreign", DateTimeOffset.UtcNow);
+        using var client = _factory!.CreateClient();
+        var url = $"/v1/apps/{seed.AppId}/environments";
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync(url, new CreateAppEnvironmentRequest("staging", "p0-v-0"))).StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", foreign.ApiKeyToken);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(url, new CreateAppEnvironmentRequest("staging", "p0-v-0"))).StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var response = await client.PostAsJsonAsync(url, new CreateAppEnvironmentRequest("staging", "p0-v-0"));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var staging = (await response.Content.ReadFromJsonAsync<AppResponse>())!;
+        Assert.Equal("p0-v-0", staging.Plan);
+        Assert.Equal("staging", staging.EnvironmentName);
+        var main = (await client.GetFromJsonAsync<AppResponse>($"/v1/apps/{seed.AppId}"))!;
+        Assert.Equal(2, main.Environments!.Count);
+        Assert.Empty(main.Branches);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(url, new CreateAppEnvironmentRequest("STAGING", "p0-h-0"))).StatusCode);
+        var service = new DeploymentServiceRequest("web", "example/web:1", 8080, true, "/", "/health");
+        foreach (var id in new[] { main.Id, staging.Id })
+            Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/v1/deployments", new CreateDeploymentRequest(id, "sqlite", null, [service]))).StatusCode);
+        main = (await client.GetFromJsonAsync<AppResponse>($"/v1/apps/{main.Id}"))!;
+        staging = (await client.GetFromJsonAsync<AppResponse>($"/v1/apps/{staging.Id}"))!;
+        Assert.NotEqual(Assert.Single(main.Domains).Hostname, Assert.Single(staging.Domains).Hostname);
+        var renamed = await client.PatchAsJsonAsync($"/v1/apps/{staging.Id}/environment", new RenameAppEnvironmentRequest("qa"));
+        Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
+        var afterRename = (await client.GetFromJsonAsync<AppResponse>($"/v1/apps/{staging.Id}"))!;
+        Assert.Equal("qa", afterRename.EnvironmentName);
+        Assert.Equal(staging.Domains[0].Hostname, afterRename.Domains[0].Hostname);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/v1/apps/{main.Id}/branches/{staging.Id}")).StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", foreign.ApiKeyToken);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync($"/v1/apps/{staging.Id}/environment", new RenameAppEnvironmentRequest("other"))).StatusCode);
+    }
+
+    [Fact]
     public async Task Instance_discovery_is_anonymous_and_reports_configured_domain()
     {
         using var factory = new AppApiFactory(_connection, "apps.discovery.example");

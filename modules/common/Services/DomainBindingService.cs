@@ -64,9 +64,9 @@ public sealed class DomainBindingService(
                 continue;
             }
 
-            var hostname = parentSlug is null
+            var hostname = app.BranchName is null
                 ? DefaultHostname(organization.Slug, app.Slug, service.Name, _managedDomains.Suffix)
-                : DefaultBranchHostname(organization.Slug, parentSlug, service.Name, app.BranchName!, _managedDomains.Suffix);
+                : DefaultBranchHostname(organization.Slug, parentSlug!, service.Name, app.BranchName!, _managedDomains.Suffix);
             if (await db.Domains.AnyAsync(x => x.Hostname == hostname, cancellationToken))
             {
                 throw new DomainBindingConflictException("domain_hostname_taken", "Default service subdomain is already assigned.");

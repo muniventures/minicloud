@@ -144,6 +144,7 @@ public static class MinicloudApiServiceCollectionExtensions
         services.AddScoped<CustomDomainVerificationService>();
         services.AddScoped<CustomDomainRegistrationService>();
         services.AddScoped<AppBranchService>();
+        services.AddScoped<AppEnvironmentService>();
         services.AddScoped<AppDeletionService>();
         services.AddScoped<DeploymentOrchestrator>();
         services.AddScoped<IAppSecretService, AppSecretService>();

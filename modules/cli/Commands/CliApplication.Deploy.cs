@@ -109,6 +109,35 @@ public sealed partial class CliApplication
             return CliExitCodes.AuthError;
         }
 
+        var environmentName = GetOption(args, "--environment");
+        if (args.Any(x => x == "--environment" || x.StartsWith("--environment=", StringComparison.Ordinal)) && string.IsNullOrWhiteSpace(environmentName))
+            throw new CliCommandException(CliExitCodes.ValidationError, "--environment requires an environment name.");
+        if (branchDeploy && environmentName is not null)
+            throw new CliCommandException(CliExitCodes.ValidationError, "--environment cannot be combined with deploy branch.");
+        if (!branchDeploy && app.BranchName is null)
+        {
+            // Resolve from the application root even when a config points at an environment runtime.
+            if (app.ParentAppId is not null) app = await _apiClient.GetAppAsync(app.ParentAppId, cancellationToken);
+            var environments = app.Environments ?? [new AppEnvironmentResponse(app.Id, app.EnvironmentName ?? "production", app.Plan, app.Database, app.DeletionStatus)];
+            AppEnvironmentResponse? selected;
+            if (environmentName is null)
+            {
+                if (environments.Count != 1)
+                    throw new CliCommandException(CliExitCodes.ValidationError, $"Choose an environment with --environment <name>. Available: {string.Join(", ", environments.Select(x => x.Name))}");
+                selected = environments[0];
+            }
+            else selected = environments.SingleOrDefault(x => string.Equals(x.Name, environmentName, StringComparison.OrdinalIgnoreCase));
+            if (selected is null)
+                throw new CliCommandException(CliExitCodes.ValidationError, $"Unknown environment '{environmentName}'. Available: {string.Join(", ", environments.Select(x => x.Name))}");
+            if (selected.DeletionStatus is not null)
+                throw new CliCommandException(CliExitCodes.ValidationError, $"Environment '{selected.Name}' is being deleted.");
+            if (selected.Id != app.Id) app = await _apiClient.GetAppAsync(selected.Id, cancellationToken);
+            config = config with { AppId = app.Id };
+            _console.WriteLine($"Environment: {selected.Name} ({selected.Plan})");
+        }
+        else if (environmentName is not null)
+            throw new CliCommandException(CliExitCodes.ValidationError, "Named environment selection requires a main application config.");
+
         if (branchDeploy)
         {
             var gitBranch = CurrentGitBranch(Environment.CurrentDirectory);
@@ -418,7 +447,8 @@ public sealed partial class CliApplication
             "--pgpassword",
             "--tag",
             "--build-mode",
-            "--build-jobs"
+            "--build-jobs",
+            "--environment"
         };
 
         for (var i = 0; i < args.Count; i++)

@@ -145,6 +145,9 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
             entity.Property(x => x.OrganizationId).HasColumnName("organization_id");
             entity.Property(x => x.ParentAppId).HasColumnName("parent_app_id");
             entity.Property(x => x.BranchName).HasColumnName("branch_name");
+            entity.Property(x => x.EnvironmentName).HasColumnName("environment_name").HasMaxLength(63);
+            entity.Property(x => x.EnvironmentKey).HasColumnName("environment_key");
+            entity.HasIndex(x => x.EnvironmentKey).IsUnique();
             entity.Property(x => x.Plan).HasConversion<string>().HasColumnName("plan");
             entity.Property(x => x.Database).HasConversion<string>().HasColumnName("database");
             entity.Property(x => x.CreatedAt).HasColumnName("created_at");

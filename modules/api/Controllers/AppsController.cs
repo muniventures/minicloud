@@ -46,6 +46,8 @@ public sealed class AppsController : ControllerBase
     public async Task<IResult> CreateApp([FromBody] CreateAppRequest request, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] IIdGenerator ids, [FromServices] TimeProvider timeProvider, CancellationToken cancellationToken)
     {
         var principal = RequirePrincipal(HttpContext);
+        if (!AppEnvironmentService.IsValidName(request.EnvironmentName))
+            return Results.BadRequest(new ErrorResponse(new ErrorBody("environment_name_invalid", "Environment names must contain 1 to 63 letters, numbers, dashes or underscores.", [])));
         var validation = ControlPlaneValidation.ValidateApp(request);
         if (!validation.IsValid)
         {
@@ -74,11 +76,13 @@ public sealed class AppsController : ControllerBase
             Organization = organization,
             Name = request.Name,
             Slug = request.Slug,
+            EnvironmentName = request.EnvironmentName.Trim(),
             Plan = plan,
             Database = database,
             CreatedAt = now,
             UpdatedAt = now
         };
+        app.EnvironmentKey = $"{app.Id}:{app.EnvironmentName!.ToLowerInvariant()}";
         db.Apps.Add(app);
         await db.SaveChangesAsync(cancellationToken);
         return Results.Created($"/v1/apps/{app.Id}", app.ToResponse());
@@ -103,6 +107,50 @@ public sealed class AppsController : ControllerBase
             .ThenInclude(x => x.Domains)
             .SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
         return app is null ? EndpointResults.NotFound("app_not_found", "App was not found.") : Results.Ok(app.ToResponse());
+    }
+
+    [HttpPost("{appId}/environments")]
+    public async Task<IResult> CreateEnvironment(string appId, CreateAppEnvironmentRequest request,
+        [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization,
+        [FromServices] AppEnvironmentService environments, CancellationToken cancellationToken)
+    {
+        var principal = RequirePrincipal(HttpContext);
+        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), appId, OrganizationAction.WriteApps, cancellationToken))
+            return EndpointResults.Forbidden();
+        var parent = await db.Apps.Include(x => x.Organization).SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
+        if (parent is null) return EndpointResults.NotFound("app_not_found", "App was not found.");
+        try
+        {
+            var environment = await environments.CreateAsync(parent, request, cancellationToken);
+            return Results.Created($"/v1/apps/{environment.Id}", environment.ToResponse());
+        }
+        catch (AppEnvironmentException ex)
+        { return Results.BadRequest(new ErrorResponse(new ErrorBody(ex.Code, ex.Message, []))); }
+        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: "23505" }
+            or Microsoft.Data.Sqlite.SqliteException { SqliteExtendedErrorCode: 2067 or 1555 })
+        { return EndpointResults.Conflict("environment_conflict", "An environment or app with this name already exists."); }
+    }
+
+    [HttpPatch("{appId}/environment")]
+    public async Task<IResult> RenameEnvironment(string appId, RenameAppEnvironmentRequest request,
+        [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization,
+        [FromServices] AppEnvironmentService environments, CancellationToken cancellationToken)
+    {
+        var principal = RequirePrincipal(HttpContext);
+        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), appId, OrganizationAction.WriteApps, cancellationToken))
+            return EndpointResults.Forbidden();
+        var app = await db.Apps.SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
+        if (app is null) return EndpointResults.NotFound("app_not_found", "App was not found.");
+        try
+        {
+            await environments.RenameAsync(app, request.Name, cancellationToken);
+            return Results.Ok(app.ToResponse());
+        }
+        catch (AppEnvironmentException ex)
+        { return Results.BadRequest(new ErrorResponse(new ErrorBody(ex.Code, ex.Message, []))); }
+        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: "23505" }
+            or Microsoft.Data.Sqlite.SqliteException { SqliteExtendedErrorCode: 2067 or 1555 })
+        { return EndpointResults.Conflict("environment_conflict", "An environment with this name already exists."); }
     }
 
     [HttpPost("{appId}/branches")]
@@ -161,7 +209,7 @@ public sealed class AppsController : ControllerBase
         var branch = await db.Apps
             .Include(x => x.Organization)
             .Include(x => x.Domains)
-            .SingleOrDefaultAsync(x => x.Id == branchAppId && x.ParentAppId == appId, cancellationToken);
+            .SingleOrDefaultAsync(x => x.Id == branchAppId && x.ParentAppId == appId && x.BranchName != null, cancellationToken);
         if (branch is null)
         {
             return EndpointResults.NotFound("branch_not_found", "Branch deployment was not found.");

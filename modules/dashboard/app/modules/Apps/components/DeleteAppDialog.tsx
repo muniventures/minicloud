@@ -45,7 +45,7 @@ export function DeleteAppDialog({ app, onRequested, open: controlledOpen, onOpen
         <DialogHeader>
           <DialogTitle>Delete {app.name}?</DialogTitle>
           <DialogDescription>
-            This permanently deletes this application and all its branch apps, servers, databases, domains and secrets. This cannot be undone. Durable storage volumes are retained in Hetzner and continue to incur charges until you delete them there.
+            This permanently deletes this application and all its environments, branch apps, servers, databases, domains and secrets. This cannot be undone. Durable storage volumes are retained in Hetzner and continue to incur charges until you delete them there.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">

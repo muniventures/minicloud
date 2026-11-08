@@ -29,6 +29,7 @@ public static class DtoMapping
             .ToList();
 
         var branches = app.Branches
+            .Where(x => x.BranchName is not null)
             .OrderBy(x => x.BranchName, StringComparer.Ordinal)
             .Select(x => new AppBranchResponse(
                 x.Id,
@@ -57,7 +58,12 @@ public static class DtoMapping
             branches,
             latestDeployment,
             app.DeletionStatus,
-            app.DeletionError);
+            app.DeletionError,
+            app.EnvironmentName ?? (app.ParentAppId is null ? "production" : null),
+            app.BranchName is not null ? [] : new[] { app }.Concat(app.Branches.Where(x => x.EnvironmentName is not null))
+                .Select(x => new AppEnvironmentResponse(x.Id, x.EnvironmentName ?? "production",
+                    ControlPlaneValidation.ToWireValue(x.Plan), ControlPlaneValidation.ToWireValue(x.Database), x.DeletionStatus))
+                .OrderBy(x => x.Name, StringComparer.Ordinal).ToArray());
     }
 
     public static ApiKeyResponse ToResponse(this ApiKey apiKey)
