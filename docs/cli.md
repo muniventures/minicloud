@@ -38,6 +38,11 @@ Create an API key in the Minicloud console with these scopes:
 - `apps:write`
 - `deployments:create`
 - `deployments:read`
+- `plans:read`
+
+Existing API keys retain their original scopes. Named-plan listing and the
+new-app wizard require `plans:read`; log in again with `minicloud login` or use
+an appropriately scoped key when upgrading from an older CLI login.
 
 Then log in:
 

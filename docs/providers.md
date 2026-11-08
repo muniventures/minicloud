@@ -4,6 +4,11 @@ Each organization owns its provider accounts and named plans. You can connect
 multiple Hetzner, DigitalOcean, and Vultr accounts at the same time, including
 several accounts of one provider.
 
+CLI plan listing and app creation require an API key with `plans:read`.
+Existing keys do not gain new permissions automatically. Refresh an older CLI
+login with `minicloud login` or use a key with the required scope. Managing
+provider credentials requires the separate `providers:write` operator scope.
+
 ## Configure an account
 
 Open **Providers** in the dashboard. Add an account name, select a supported
