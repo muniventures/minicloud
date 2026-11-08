@@ -9,6 +9,7 @@ public sealed record MinicloudConfig(
     IReadOnlyDictionary<string, MinicloudServiceConfig> Services)
 {
     public string? AppId { get; init; }
+    public string? Plan { get; init; }
     public int? BuildJobs { get; init; }
     public IReadOnlyDictionary<string, MinicloudAssetConfig> Assets { get; init; } = new Dictionary<string, MinicloudAssetConfig>();
 }

@@ -10,6 +10,7 @@ public sealed class RuntimeServer
     public Organization Organization { get; set; } = default!;
     public string AppId { get; set; } = default!;
     public MinicloudApp App { get; set; } = default!;
+    public string? ProviderAccountId { get; set; }
     public string Provider { get; set; } = default!;
     public string? ProviderServerId { get; set; }
     public string? Hostname { get; set; }

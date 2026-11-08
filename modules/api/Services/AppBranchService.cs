@@ -12,9 +12,10 @@ public sealed class AppBranchService(
     AppServiceSecretService serviceSecrets,
     IIdGenerator ids,
     TimeProvider timeProvider,
-    TelemetryService? telemetry = null)
+    TelemetryService? telemetry = null,
+    ProviderCatalogService? catalog = null)
 {
-    public async Task<MinicloudApp> EnsureAsync(MinicloudApp parent, string branchName, CancellationToken cancellationToken)
+    public async Task<MinicloudApp> EnsureAsync(MinicloudApp parent, string branchName, CancellationToken cancellationToken, string? planName = null)
     {
         if (parent.ParentAppId is not null)
         {
@@ -23,13 +24,39 @@ public sealed class AppBranchService(
 
         var normalized = NormalizeBranchName(branchName);
         var existing = await db.Apps
+            .Include(x => x.SelectedPlan)
             .Include(x => x.Organization)
             .Include(x => x.Deployments)
             .Include(x => x.Domains)
             .SingleOrDefaultAsync(x => x.ParentAppId == parent.Id && x.BranchName == normalized, cancellationToken);
         if (existing is not null)
         {
+            if (planName is not null && catalog is not null)
+            {
+                if (db.Database.IsNpgsql() && db.Database.CurrentTransaction is not null)
+                {
+                    await db.Apps.FromSqlInterpolated($"SELECT * FROM apps WHERE id = {existing.Id} FOR UPDATE")
+                        .AsNoTracking().SingleAsync(cancellationToken);
+                    await db.Entry(existing).ReloadAsync(cancellationToken);
+                }
+                try { await catalog.BindAsync(existing, planName, cancellationToken); }
+                catch (ProviderCatalogException ex) { throw new AppBranchException(ex.Code, ex.Message); }
+                await db.SaveChangesAsync(cancellationToken);
+            }
             return existing;
+        }
+
+        ProviderPlan? selectedPlan = null;
+        if (catalog is not null)
+        {
+            try
+            {
+                if (planName is null && parent.PlanId is not null)
+                    await db.Entry(parent).Reference(x => x.SelectedPlan).LoadAsync(cancellationToken);
+                selectedPlan = await catalog.ResolveAsync(parent.OrganizationId, planName ?? parent.SelectedPlan?.Name
+                    ?? Minicloud.Common.Validation.ControlPlaneValidation.ToWireValue(parent.Plan), cancellationToken);
+            }
+            catch (ProviderCatalogException ex) { throw new AppBranchException(ex.Code, ex.Message); }
         }
 
         var now = timeProvider.GetUtcNow();
@@ -44,7 +71,9 @@ public sealed class AppBranchService(
             BranchName = normalized,
             Name = $"{parent.Name} ({normalized})",
             Slug = slug,
-            Plan = AppPlan.P0V0,
+            Plan = parent.Plan,
+            PlanId = selectedPlan?.Id ?? parent.PlanId,
+            SelectedPlan = selectedPlan ?? parent.SelectedPlan,
             Database = parent.Database,
             CreatedAt = now,
             UpdatedAt = now

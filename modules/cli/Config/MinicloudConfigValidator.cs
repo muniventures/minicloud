@@ -36,6 +36,11 @@ public static class MinicloudConfigValidator
             diagnostics.Add(new ConfigDiagnostic("buildJobs", $"Build jobs must be from 1 to {MaxDeploymentServices}."));
         }
 
+        if (config.Plan is not null && (string.IsNullOrWhiteSpace(config.Plan) || config.Plan.Trim().Length > 128 || config.Plan.Any(char.IsControl)))
+        {
+            diagnostics.Add(new ConfigDiagnostic("plan", "Plan must be a non-empty name of at most 128 characters without control characters."));
+        }
+
         if (config.Services.Count == 0)
         {
             diagnostics.Add(new ConfigDiagnostic("services", "At least one service is required."));

@@ -1,13 +1,13 @@
 # Self-hosting Minicloud
 
-The Compose setup runs the control plane on one Linux host and provisions an application VPS in your Hetzner account. Use a single Firebase operator account and domains you control. DNS records can be created manually with any provider; Cloudflare automation is optional. The setup uses source builds on the application VPS. The CLI's local image build mode requires a separately configured registry.
+The Compose setup runs the control plane on one Linux host and provisions application VPSs in your configured Hetzner, DigitalOcean, or Vultr accounts. Use a single Firebase operator account and domains you control. DNS records can be created manually with any provider; Cloudflare automation is optional. The setup uses source builds on the application VPS. The CLI's local image build mode requires a separately configured registry.
 
 ## Prepare the control plane
 
 1. Choose a main service hostname for the dashboard (for example `cloud.example.com`) and its API hostname (`api.cloud.example.com`), and an application subdomain suffix inside your DNS zone. Set API_HOSTNAME and CONSOLE_HOSTNAME to the hostnames in API_URL and CONSOLE_URL. Set the API and dashboard DNS records to the control-plane host. Configure a reverse proxy there to terminate TLS and forward to loopback ports 3210 and 3200, respectively.
 2. Create a Firebase project and web app, enable your sign-in method, and authorize the dashboard hostname. Create an operator account and copy its Firebase user ID. The API admits only the configured operator ID in this setup.
 3. Prepare a persistent OpenBao instance reachable from the containers. Enable KV v2 at your chosen mount path. Supply a scoped renewable token with access to Minicloud's paths and permission to renew itself. Back up the database, OpenBao data, artifact volume, and stable encryption key together.
-4. Create a dedicated deployment SSH key under `local/ssh/deploy-key`, restrict it to its owner, and create an empty `local/ssh/host-pins` file. Supply the matching public key and a dedicated Hetzner provider token. Supply DNS tokens only if using Cloudflare automation. The provisioned deploy user can administer Docker and the server, so protect its private key as a root credential.
+4. Create a dedicated deployment SSH key under `local/ssh/deploy-key`, restrict it to its owner, and create an empty `local/ssh/host-pins` file. Supply the matching public key. Add cloud provider credentials through the dashboard after startup; they are stored in OpenBao rather than installation-global provider token settings. Supply DNS tokens only if using Cloudflare automation. The provisioned deploy user can administer Docker and the server, so protect its private key as a root credential.
 5. Copy `.env.example` to `.env` and fill in the settings. Use a random database password and a separate stable encryption key. Keep `.env` and `local/ssh/` on the control-plane host.
 
 ```sh
@@ -19,7 +19,10 @@ curl --fail https://api.cloud.example.com/health
 
 ## Deploy an app
 
-Sign in to the dashboard and create an app on the Hetzner plan. Point the CLI at
+Sign in to the dashboard, open **Providers**, add an account and a named plan,
+then create an app using that plan. Several accounts of the same provider can
+coexist. See [Providers and plans](providers.md), including the explicit import
+procedure for existing installations. Point the CLI at
 the main service hostname; it derives the API by prefixing `api.` and validates
 `GET /v1/instance` before saving the instance. The API returns the installation's
 application domain, so the CLI does not need a separate domain setting.

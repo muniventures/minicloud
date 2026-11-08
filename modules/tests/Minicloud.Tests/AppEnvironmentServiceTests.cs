@@ -60,6 +60,42 @@ public sealed class AppEnvironmentServiceTests : IClassFixture<SqliteTestHarness
     public void Environment_names_are_user_chosen_and_validated(string name, bool valid) =>
         Assert.Equal(valid, AppEnvironmentService.IsValidName(name));
 
+    [Fact]
+    public async Task Named_catalog_plans_select_their_own_account_and_survive_rename()
+    {
+        await using var db = harness.CreateDbContext();
+        var ids = new Ids();
+        var organization = new Organization { Id = "org_named_environment", Name = "Named", Slug = "named-env" };
+        var first = new ProviderAccount { Id = "provider_env_first", Organization = organization, OrganizationId = organization.Id,
+            Name = "First", CredentialPath = "fixture/first", CredentialGeneration = "1" };
+        var second = new ProviderAccount { Id = "provider_env_second", Organization = organization, OrganizationId = organization.Id,
+            Name = "Second", CredentialPath = "fixture/second", CredentialGeneration = "1" };
+        db.ProviderAccounts.AddRange(first, second);
+        var parent = new MinicloudApp { Id = "app_named_env", Organization = organization, OrganizationId = organization.Id,
+            Name = "Shop", Slug = "named-shop", Database = DatabaseMode.None, EnvironmentName = "production" };
+        db.Apps.Add(parent);
+        await db.SaveChangesAsync();
+        var catalog = new ProviderCatalogService(db, ids, TimeProvider.System);
+        var primary = await catalog.CreateAsync(new(organization.Id, first.Id, "nbg1", "cx23", "Primary"), default);
+        var secondary = await catalog.CreateAsync(new(organization.Id, second.Id, "nbg1", "cx23", "Produção econômica"), default);
+        await db.SaveChangesAsync();
+        await catalog.BindAsync(parent, primary.Name, default);
+        await db.SaveChangesAsync();
+        var service = new AppEnvironmentService(db, ids, TimeProvider.System, catalog);
+        var staging = await service.CreateAsync(parent, new("staging", "Produção econômica"), default);
+        Assert.Equal(secondary.Id, staging.PlanId);
+        Assert.Equal(second.Id, staging.SelectedPlan!.ProviderAccountId);
+        Assert.Equal(primary.Id, parent.PlanId);
+        Assert.Equal("Produção econômica", staging.ToResponse().Plan);
+        await catalog.UpdateAsync(secondary, new(secondary.Revision, Name: "Secondary renamed"), default);
+        await db.SaveChangesAsync();
+        Assert.Equal(secondary.Id, staging.ToResponse().PlanId);
+        Assert.Equal("Secondary renamed", staging.ToResponse().Plan);
+        var invalid = await Assert.ThrowsAsync<AppEnvironmentException>(() => service.CreateAsync(parent, new("invalid-plan", "missing"), default));
+        Assert.Equal("plan_not_found", invalid.Code);
+        Assert.DoesNotContain(db.Apps, x => x.EnvironmentName == "invalid-plan");
+    }
+
     private sealed class Ids : IIdGenerator
     {
         public string NewId(string prefix) => $"{prefix}_{Guid.NewGuid():N}";

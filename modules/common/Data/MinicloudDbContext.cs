@@ -46,15 +46,66 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     public DbSet<AppStorageVolume> AppStorageVolumes => Set<AppStorageVolume>();
+    public DbSet<ProviderAccount> ProviderAccounts => Set<ProviderAccount>();
+    public DbSet<ProviderPlan> ProviderPlans => Set<ProviderPlan>();
+    public DbSet<ProviderPlanName> ProviderPlanNames => Set<ProviderPlanName>();
+    public DbSet<ProviderCredentialCleanup> ProviderCredentialCleanups => Set<ProviderCredentialCleanup>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<ProviderAccount>(entity =>
+        {
+            entity.ToTable("provider_accounts");
+            entity.HasKey(x => x.Id);
+            entity.HasAlternateKey(x => new { x.OrganizationId, x.Id });
+            entity.Property(x => x.ProviderType).HasConversion<string>();
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+            entity.Property(x => x.Name).HasMaxLength(128);
+            entity.HasOne(x => x.Organization).WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ProviderPlan>(entity =>
+        {
+            entity.ToTable("provider_plans");
+            entity.HasKey(x => x.Id);
+            entity.HasAlternateKey(x => new { x.OrganizationId, x.Id });
+            entity.HasIndex(x => new { x.OrganizationId, x.NormalizedName }).IsUnique();
+            entity.Property(x => x.Name).HasMaxLength(128);
+            entity.Property(x => x.NormalizedName).HasMaxLength(256);
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+            entity.HasOne(x => x.ProviderAccount).WithMany(x => x.Plans)
+                .HasForeignKey(x => new { x.OrganizationId, x.ProviderAccountId })
+                .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ProviderPlanName>(entity =>
+        {
+            entity.ToTable("provider_plan_names");
+            entity.HasKey(x => new { x.OrganizationId, x.NormalizedName });
+            entity.Property(x => x.NormalizedName).HasMaxLength(256);
+            // No plan FK: claims intentionally outlive deleted plans.
+        });
+        modelBuilder.Entity<ProviderCredentialCleanup>(entity =>
+        {
+            entity.ToTable("provider_credential_cleanups");
+            entity.HasKey(x => x.Id);
+        });
+        modelBuilder.Entity<MinicloudApp>().HasOne(x => x.SelectedPlan).WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, x.PlanId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Deployment>().HasOne<ProviderAccount>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, x.ProviderAccountId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ServerInstance>().HasOne<ProviderAccount>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, x.ProviderAccountId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<AppStorageVolume>(entity =>
         {
             entity.ToTable("app_storage_volumes");
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.AppId, x.Name }).IsUnique();
-            entity.HasIndex(x => x.ProviderVolumeId).IsUnique();
+            entity.HasIndex(x => new { x.ProviderAccountId, x.ProviderVolumeId }).IsUnique();
+            entity.HasOne<ProviderAccount>().WithMany()
+                .HasForeignKey(x => new { x.OrganizationId, x.ProviderAccountId })
+                .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ImagePublication>(entity =>
         {
@@ -371,7 +422,10 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
         {
             entity.ToTable("runtime_servers");
             entity.HasIndex(x => x.AppId);
-            entity.HasIndex(x => new { x.Provider, x.ProviderServerId });
+            entity.HasIndex(x => new { x.ProviderAccountId, x.Provider, x.ProviderServerId });
+            entity.HasOne<ProviderAccount>().WithMany()
+                .HasForeignKey(x => new { x.OrganizationId, x.ProviderAccountId })
+                .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.Property(x => x.OrganizationId).HasColumnName("organization_id");
             entity.Property(x => x.AppId).HasColumnName("app_id");
             entity.Property(x => x.ProviderServerId).HasColumnName("provider_server_id");

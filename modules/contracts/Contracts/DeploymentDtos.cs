@@ -10,7 +10,8 @@ public sealed record CreateDeploymentRequest(
     string? CommitSha,
     IReadOnlyList<DeploymentServiceRequest> Services,
     string? PostgresPassword = null,
-    string? PreparationId = null);
+    string? PreparationId = null,
+    string? Plan = null);
 
 public sealed record DeploymentServiceRequest(
     string Name,
@@ -125,5 +126,5 @@ public sealed record DeploymentActivityStepResponse(
     DateTimeOffset? StartedAt,
     DateTimeOffset? CompletedAt);
 
-public sealed record StartDeploymentPreparationRequest(string AppId, string IdempotencyKey, IReadOnlyList<string> ServiceNames);
+public sealed record StartDeploymentPreparationRequest(string AppId, string IdempotencyKey, IReadOnlyList<string> ServiceNames, string? Plan = null);
 public sealed record UpdateDeploymentPreparationRequest(string AppId, string Status, string Stage = "build");

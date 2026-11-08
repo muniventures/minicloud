@@ -82,7 +82,7 @@ public sealed partial class CliApplication
                 return CliExitCodes.Success;
             }
             if (args[0] == "instance") return await RunInstanceAsync(args.Skip(1).ToArray(), cancellationToken);
-            if (args[0] is "token" or "init" or "add-service" or "login" or "assets" or "deploy" or "branch" or "status" or "logs" or "apps" or "domains" or "secrets" or "environments")
+            if (args[0] is "token" or "init" or "add-service" or "login" or "assets" or "deploy" or "branch" or "status" or "logs" or "apps" or "domains" or "secrets" or "environments" or "plans" or "providers")
                 await EnsureInstanceAsync(cancellationToken);
             return args[0] switch
             {
@@ -93,6 +93,8 @@ public sealed partial class CliApplication
                 "assets" => await RunAssetsAsync(args.Skip(1).ToArray(), cancellationToken),
                 "deploy" => await RunDeployAsync(args.Skip(1).ToArray(), cancellationToken),
                 "environments" => await RunEnvironmentsAsync(args.Skip(1).ToArray(), cancellationToken),
+                "plans" => await RunPlansAsync(args.Skip(1).ToArray(), cancellationToken),
+                "providers" => await RunProvidersAsync(args.Skip(1).ToArray(), cancellationToken),
                 "branch" => await RunBranchAsync(args.Skip(1).ToArray(), cancellationToken),
                 "status" => await RunStatusAsync(args.Skip(1).ToArray(), cancellationToken),
                 "logs" => await RunLogsAsync(args.Skip(1).ToArray(), cancellationToken),
@@ -108,6 +110,12 @@ public sealed partial class CliApplication
             return CliExitCodes.AuthError;
         }
         catch (ApiException ex) when (ex.Code == "missing_service_secret")
+        {
+            _console.WriteError($"API error ({ex.Code}): {ex.Message}");
+            return CliExitCodes.ValidationError;
+        }
+        catch (ApiException ex) when (ex.StatusCode is 400 or 409 && (ex.Code.StartsWith("plan_", StringComparison.Ordinal)
+            || ex.Code.StartsWith("provider_", StringComparison.Ordinal) || ex.Code == "revision_conflict"))
         {
             _console.WriteError($"API error ({ex.Code}): {ex.Message}");
             return CliExitCodes.ValidationError;
@@ -180,6 +188,8 @@ public sealed partial class CliApplication
         _console.WriteLine("  add-service     Add a new service configuration to an existing application");
         _console.WriteLine("  deploy          Deploy changed services to Minicloud (or 'all' / '--all' to deploy all)");
         _console.WriteLine("  environments    List, create, or rename application environments");
+        _console.WriteLine("  plans           List named plans in an organization");
+        _console.WriteLine("  providers       Add provider accounts or import legacy resource bindings");
         _console.WriteLine("  branch          Manage preview environments (deploy branch, branch destroy)");
         _console.WriteLine("  assets          Publish immutable customer assets on the assigned VPS");
         _console.WriteLine("  status          Show deployment status and service URLs (--watch to stream updates)");
@@ -242,6 +252,7 @@ public sealed partial class CliApplication
                 _console.WriteLine("  - --build-mode source|local overrides selected services; local requires a local Docker buildx builder.");
                 _console.WriteLine("  - 'minicloud deploy all' or '--all' deploys all configured services unconditionally.");
                 _console.WriteLine("  - --environment <name> selects a named environment; required when more than one exists.");
+                _console.WriteLine("  - --plan <name> overrides YAML plan, then the selected environment's saved plan. No provider argument is needed.");
                 _console.WriteLine("  - 'minicloud deploy branch' deploys all configured services into an isolated preview branch environment.");
                 _console.WriteLine();
                 _console.WriteLine("Options:");
@@ -257,6 +268,14 @@ public sealed partial class CliApplication
                 _console.WriteLine("minicloud environments list [--config path]");
                 _console.WriteLine("minicloud environments create <name> --plan <plan> [--database sqlite|postgres] [--config path]");
                 _console.WriteLine("minicloud environments rename <name> <new-name> [--config path]");
+                return CliExitCodes.Success;
+            case "plans":
+                _console.WriteLine("minicloud plans list [--organization <id>] [--config path]");
+                return CliExitCodes.Success;
+            case "providers":
+                _console.WriteLine("minicloud providers add --organization <id> --name <name> --provider hetzner|digital-ocean|vultr [--project-id <id>] [--os-id <id>]");
+                _console.WriteLine("Reads the cloud token from the provider environment variable; tokens are never command arguments.");
+                _console.WriteLine("minicloud providers import-legacy --manifest <path>");
                 return CliExitCodes.Success;
             case "deploy branch":
                 _console.WriteLine("Deploy all services to an isolated branch environment");

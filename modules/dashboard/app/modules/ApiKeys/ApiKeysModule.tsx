@@ -55,6 +55,10 @@ const scopes: ApiKeyScope[] = [
   "api_keys:write",
   "logs:read",
   "telemetry:manage",
+  "providers:read",
+  "providers:write",
+  "plans:read",
+  "plans:write",
 ];
 
 export function ApiKeysModule() {

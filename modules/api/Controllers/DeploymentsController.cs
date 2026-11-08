@@ -78,7 +78,7 @@ public sealed class DeploymentsController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IResult> CreateDeployment([FromBody] CreateDeploymentRequest request, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] DeploymentLifecycleService deploymentLifecycle, [FromServices] AssetReleaseService assetReleases, [FromServices] DeploymentServiceSetService serviceSets, [FromServices] DomainBindingService domainBindings, [FromServices] DeploymentOrchestrator deploymentOrchestrator, [FromServices] ImagePublicationService imagePublications, [FromServices] AppServiceSecretService secrets, [FromServices] DeploymentPreparationService preparations, CancellationToken cancellationToken)
+    public async Task<IResult> CreateDeployment([FromBody] CreateDeploymentRequest request, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] DeploymentLifecycleService deploymentLifecycle, [FromServices] AssetReleaseService assetReleases, [FromServices] DeploymentServiceSetService serviceSets, [FromServices] DomainBindingService domainBindings, [FromServices] DeploymentOrchestrator deploymentOrchestrator, [FromServices] ImagePublicationService imagePublications, [FromServices] AppServiceSecretService secrets, [FromServices] DeploymentPreparationService preparations, [FromServices] ProviderCatalogService catalog, CancellationToken cancellationToken)
     {
         var principal = RequirePrincipal(HttpContext);
         var validation = ControlPlaneValidation.ValidateDeployment(request);
@@ -106,10 +106,13 @@ public sealed class DeploymentsController : ControllerBase
             return EndpointResults.Problem(ImagePublicationErrors.Unavailable, "Managed image deployment is not available yet.", StatusCodes.Status503ServiceUnavailable);
         }
 
+        var placementTouched = false;
         async Task<IResult> CreateCore()
         {
             if (managed) { await imagePublications.LockAsync(cancellationToken); }
-            var currentApp = await db.Apps.AsNoTracking().SingleAsync(x => x.Id == appRecord.Id, cancellationToken);
+            await db.Entry(appRecord).ReloadAsync(cancellationToken);
+            await db.Entry(appRecord).Reference(x => x.SelectedPlan).LoadAsync(cancellationToken);
+            var currentApp = appRecord;
             if (currentApp.DeletionStatus is not null) { return EndpointResults.Conflict("app_deleting", "The app is being deleted."); }
             Deployment? preparation = null;
             if (request.PreparationId is not null)
@@ -131,8 +134,21 @@ public sealed class DeploymentsController : ControllerBase
                 ? await preparations.HasActiveAsync(appRecord.Id, preparation.Id, cancellationToken)
                 : await db.Deployments.AnyAsync(x => x.AppId == appRecord.Id && x.Status == DeploymentStatus.WaitingForBuild, cancellationToken))
             { return EndpointResults.Conflict("deployment_active", "This app already has an active deployment or local build."); }
+            placementTouched = request.Plan is not null || appRecord.PlanId is not null;
+            if (request.Plan is not null)
+            {
+                if (preparation is null) await catalog.BindAsync(appRecord, request.Plan, cancellationToken);
+                else if (preparation.PlanId != (await catalog.ResolveAsync(appRecord.OrganizationId, request.Plan, cancellationToken, requireEnabled: false)).Id)
+                    return EndpointResults.Conflict("preparation_conflict", "Preparation is bound to another plan.");
+            }
             var deployment = deploymentLifecycle.CreateQueued(appRecord, request);
-            if (preparation is not null) { deployment.Id = preparation.Id; }
+            if (preparation is not null)
+            {
+                deployment.Id = preparation.Id;
+                if (appRecord.PlanId != preparation.PlanId)
+                    return EndpointResults.Conflict("preparation_conflict", "The app plan changed after build preparation.");
+            }
+            else await catalog.ReserveAsync(appRecord, deployment, cancellationToken);
             if (managed) { await imagePublications.FinalizeDeploymentAsync(appRecord, deployment, cancellationToken); }
             var artifactValidation = await FinalizeArtifactBackedServicesAsync(db, appRecord, deployment, cancellationToken);
             if (!artifactValidation.IsValid)
@@ -153,7 +169,8 @@ public sealed class DeploymentsController : ControllerBase
                 if (servers.Count > 1 || servers.Any(x => x.OrganizationId != appRecord.OrganizationId))
                 { return EndpointResults.Conflict("storage_server_conflict", "Storage requires one verified app server."); }
                 var options = HttpContext.RequestServices.GetRequiredService<Microsoft.Extensions.Options.IOptions<ProviderPlanOptions>>().Value;
-                var provider = servers.SingleOrDefault()?.Provider ?? ProviderPlanMapping.FromAppPlan(appRecord.Plan, options).Provider.ToString();
+                var provider = servers.SingleOrDefault()?.Provider ?? preparation?.ProviderType ?? deployment.ProviderType
+                    ?? ProviderPlanMapping.FromAppPlan(appRecord.Plan, options).Provider.ToString();
                 if (!string.Equals(provider, "Hetzner", StringComparison.OrdinalIgnoreCase))
                 { return EndpointResults.Problem("storage_provider_unsupported", "Durable storage is currently supported only on Hetzner.", StatusCodes.Status400BadRequest); }
             }
@@ -219,12 +236,29 @@ public sealed class DeploymentsController : ControllerBase
         }
         try
         {
-            return await ImagePublicationsController.Handle(() => preparations.LockedAsync(appRecord.Id, CreateCore, cancellationToken));
+            return await ImagePublicationsController.Handle(() => preparations.LockedAsync(appRecord.Id, async () =>
+            {
+                var result = await CreateCore();
+                // A rejected admission must not commit a newly selected plan or freeze its mapping.
+                if (placementTouched && result is IStatusCodeHttpResult { StatusCode: >= 400 })
+                    throw new PlanAdmissionRejectedException(result);
+                return result;
+            }, cancellationToken));
         }
+        catch (PlanAdmissionRejectedException ex) { return ex.Result; }
+        catch (ProviderCatalogException ex)
+        { return EndpointResults.Problem(ex.Code, ex.Message, StatusCodes.Status400BadRequest); }
+        catch (SecretStoreUnavailableException)
+        { return EndpointResults.Problem("secret_store_unavailable", "Provider credentials are temporarily unavailable.", StatusCodes.Status503ServiceUnavailable); }
         catch (DbUpdateException)
         {
             return EndpointResults.Conflict("deployment_domain_taken", "Deployment domain is already assigned to another app or organization.");
         }
+    }
+
+    private sealed class PlanAdmissionRejectedException(IResult result) : Exception
+    {
+        public IResult Result { get; } = result;
     }
 
     private static async Task<ValidationResult> FinalizeArtifactBackedServicesAsync(
@@ -301,7 +335,7 @@ public sealed class DeploymentsController : ControllerBase
     }
 
     [HttpPost("{deploymentId}/dispatch")]
-    public async Task<IResult> DispatchDeployment([FromRoute] string deploymentId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] DeploymentLifecycleService deploymentLifecycle, [FromServices] DeploymentServiceSetService serviceSets, [FromServices] DomainBindingService domainBindings, [FromServices] DeploymentOrchestrator deploymentOrchestrator, [FromServices] IConsoleUrlProvider consoleUrls, [FromServices] ImagePublicationService imagePublications, CancellationToken cancellationToken)
+    public async Task<IResult> DispatchDeployment([FromRoute] string deploymentId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] DeploymentLifecycleService deploymentLifecycle, [FromServices] DeploymentServiceSetService serviceSets, [FromServices] DomainBindingService domainBindings, [FromServices] DeploymentOrchestrator deploymentOrchestrator, [FromServices] IConsoleUrlProvider consoleUrls, [FromServices] ImagePublicationService imagePublications, [FromServices] ProviderCatalogService catalog, CancellationToken cancellationToken)
     {
         var principal = RequirePrincipal(HttpContext);
         var deployment = await db.Deployments
@@ -348,6 +382,7 @@ public sealed class DeploymentsController : ControllerBase
                 return EndpointResults.Conflict(ex.Code, ex.Message);
             }
 
+            await catalog.ReserveAsync(deployment.App, deployment, cancellationToken);
             deploymentLifecycle.ResetForManualDispatch(deployment);
             deployment.Domain = defaultBindings.FirstOrDefault()?.Hostname;
             // T50: manual re-queue for minicloud-worker. No GitHub dispatch.
@@ -363,7 +398,9 @@ public sealed class DeploymentsController : ControllerBase
 
             return Results.Ok(deployment.ToResponse(consoleUrls.GetConsoleBaseUrl()));
         }
-        return await ImagePublicationsController.Handle(() => imagePublications.LockedAsync(DispatchCore, cancellationToken));
+        try { return await ImagePublicationsController.Handle(() => imagePublications.LockedAsync(DispatchCore, cancellationToken)); }
+        catch (ProviderCatalogException ex) { return EndpointResults.Problem(ex.Code, ex.Message, StatusCodes.Status400BadRequest); }
+        catch (SecretStoreUnavailableException) { return EndpointResults.Problem("secret_store_unavailable", "Provider credentials are temporarily unavailable.", StatusCodes.Status503ServiceUnavailable); }
     }
 
     [HttpPost("{deploymentId}/cancel")]

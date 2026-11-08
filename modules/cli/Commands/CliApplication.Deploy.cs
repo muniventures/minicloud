@@ -35,6 +35,9 @@ public sealed partial class CliApplication
 
         var configPath = GetOption(args, "--config") ?? MinicloudConfigLoader.ResolveDefaultPath();
         var databaseOverride = GetOption(args, "--database");
+        var planOverride = GetOption(args, "--plan");
+        if (args.Any(x => x == "--plan" || x.StartsWith("--plan=", StringComparison.Ordinal)) && string.IsNullOrWhiteSpace(planOverride))
+            throw new CliCommandException(CliExitCodes.ValidationError, "--plan requires a plan name.");
         var postgresPassword = GetOption(args, "--pgpassword");
         var noPublish = args.Contains("--no-publish", StringComparer.Ordinal);
         var buildMode = GetOption(args, "--build-mode");
@@ -142,9 +145,16 @@ public sealed partial class CliApplication
         {
             var gitBranch = CurrentGitBranch(Environment.CurrentDirectory);
             _console.WriteLine($"Branch: {gitBranch}");
-            app = await _apiClient.EnsureBranchAsync(app.Id, new EnsureAppBranchRequest(gitBranch), cancellationToken);
+            app = await _apiClient.EnsureBranchAsync(app.Id, new EnsureAppBranchRequest(gitBranch, planOverride ?? config.Plan), cancellationToken);
             config = config with { AppId = app.Id };
             _console.WriteLine($"Branch app: {app.Name} ({app.Slug})");
+        }
+
+        var selectedPlan = planOverride ?? config.Plan;
+        if (selectedPlan is not null || app.PlanId is not null)
+        {
+            app = await _apiClient.SelectPlanAsync(app.Id, selectedPlan ?? app.Plan, cancellationToken);
+            _console.WriteLine($"Plan: {app.Plan}");
         }
 
         ImageBuildTarget? buildTarget = null;
@@ -218,7 +228,7 @@ public sealed partial class CliApplication
                 }
                 if (localServices.Length > 0)
                 {
-                    var pending = await _apiClient.StartDeploymentPreparationAsync(new(app.Id, Guid.NewGuid().ToString("D"), selectedServiceNames), cancellationToken);
+                    var pending = await _apiClient.StartDeploymentPreparationAsync(new(app.Id, Guid.NewGuid().ToString("D"), selectedServiceNames, selectedPlan), cancellationToken);
                     preparation = new LocalBuildDeploymentSession(_apiClient, app.Id, pending.Id, cancellationToken);
                     cancellationToken = preparation.Token;
                     _console.WriteLine($"Deployment {pending.Id}: waiting for local build.");
@@ -323,7 +333,7 @@ public sealed partial class CliApplication
                     x.Value.SecretEnv,
                     serviceArtifactIds.TryGetValue(x.Key, out var artifactId) ? artifactId : null,
                     serviceHashes.GetValueOrDefault(x.Key), x.Value.AssetMounts, imagePublications.GetValueOrDefault(x.Key)?.Id, x.Value.Storage)).ToArray(),
-                postgresPassword, preparation?.Id);
+                postgresPassword, preparation?.Id, selectedPlan);
 
             if (preparation is not null)
             {
@@ -448,7 +458,8 @@ public sealed partial class CliApplication
             "--tag",
             "--build-mode",
             "--build-jobs",
-            "--environment"
+            "--environment",
+            "--plan"
         };
 
         for (var i = 0; i < args.Count; i++)
@@ -614,6 +625,7 @@ public sealed partial class CliApplication
             config.Services.Where(x => selected.Contains(x.Key)).ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal))
         {
             AppId = config.AppId,
+            Plan = config.Plan,
             BuildJobs = config.BuildJobs
         };
     }

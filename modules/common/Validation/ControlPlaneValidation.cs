@@ -35,9 +35,15 @@ public static partial class ControlPlaneValidation
         Require(result, request.OrganizationId, "organizationId", "Organization is required.");
         Require(result, request.Name, "name", "Name is required.");
         ValidateSlug(result, request.Slug, "slug", "App slug is invalid.");
-        ValidateEnum<AppPlan>(result, request.Plan, "plan", "Plan is not supported.");
+        ValidatePlanName(result, request.Plan);
         ValidateEnum<DatabaseMode>(result, request.Database, "database", "Database mode is not supported.");
         return result;
+    }
+
+    public static void ValidatePlanName(ValidationResult result, string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > 128 || name.Any(char.IsControl))
+            result.Add("plan", "Plan must be a non-empty name of at most 128 characters without control characters.");
     }
 
     public static ValidationResult ValidateApiKey(CreateApiKeyRequest request)

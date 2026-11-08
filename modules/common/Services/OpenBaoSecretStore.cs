@@ -14,7 +14,10 @@ public sealed class OpenBaoSecretStore(HttpClient httpClient, IOptions<OpenBaoSe
 
     public async Task<StoredSecretReference> PutAsync(SecretStoreWriteRequest request, CancellationToken cancellationToken)
     {
-        var path = PathFor(request.OrganizationId, request.AppId, request.ServiceName, request.Name);
+        var path = request.ProviderAccountId is null
+            ? PathFor(request.OrganizationId, request.AppId, request.ServiceName, request.Name)
+            : ProviderPathFor(_options.EnvironmentPrefix, request.OrganizationId, request.ProviderAccountId,
+                request.CredentialGeneration ?? throw new ArgumentException("A credential generation is required."));
         var response = await SendAsync(
             HttpMethod.Post,
             $"v1/{EscapePath(_options.MountPath)}/data/{path}",
@@ -29,7 +32,8 @@ public sealed class OpenBaoSecretStore(HttpClient httpClient, IOptions<OpenBaoSe
     {
         var response = await SendAsync(
             HttpMethod.Get,
-            $"v1/{EscapePath(_options.MountPath)}/data/{reference.Path}",
+            $"v1/{EscapePath(_options.MountPath)}/data/{reference.Path}" +
+                (reference.Version is null ? "" : $"?version={Uri.EscapeDataString(reference.Version)}"),
             body: null,
             cancellationToken);
         var body = await response.Content.ReadFromJsonAsync<OpenBaoReadResponse>(JsonOptions, cancellationToken);
@@ -77,16 +81,14 @@ public sealed class OpenBaoSecretStore(HttpClient httpClient, IOptions<OpenBaoSe
 
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
+                if (method == HttpMethod.Delete) return response;
+                response.Dispose();
                 throw new SecretStoreUnavailableException("OpenBao secret was not found.");
             }
 
-            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (string.IsNullOrWhiteSpace(responseBody))
-            {
-                throw new SecretStoreUnavailableException($"OpenBao returned HTTP {(int)response.StatusCode}.");
-            }
-
-            throw new SecretStoreUnavailableException($"OpenBao returned HTTP {(int)response.StatusCode}: {responseBody}");
+            var statusCode = response.StatusCode;
+            response.Dispose();
+            throw new SecretStoreUnavailableException($"OpenBao returned HTTP {(int)statusCode}.");
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
@@ -112,6 +114,9 @@ public sealed class OpenBaoSecretStore(HttpClient httpClient, IOptions<OpenBaoSe
             Segment(name));
 
     private static string Segment(string value) => Uri.EscapeDataString(value);
+
+    public static string ProviderPathFor(string environment, string organizationId, string providerAccountId, string generation) =>
+        string.Join('/', "env", Segment(environment), "orgs", Segment(organizationId), "providers", Segment(providerAccountId), "credentials", Segment(generation));
 
     private static string EscapePath(string value) => string.Join('/', value.Split('/').Select(Segment));
 

@@ -27,9 +27,9 @@ public sealed class CustomDomainVerificationService(
         var message = "Deploy the app before configuring DNS.";
         var verified = false;
         if (server is not null && !string.IsNullOrWhiteSpace(server.ProviderServerId) && IPAddress.TryParse(target, out var expected) &&
-            !await db.ServerInstances.AnyAsync(x => x.Provider == server.Provider && x.ProviderServerId == server.ProviderServerId &&
+            !await db.ServerInstances.AnyAsync(x => x.ProviderAccountId == server.ProviderAccountId && x.Provider.ToLower() == server.Provider.ToLower() && x.ProviderServerId == server.ProviderServerId &&
                 (x.AppId != binding.AppId || x.OrganizationId != binding.OrganizationId), cancellationToken) &&
-            !await db.RuntimeServers.AnyAsync(x => x.Provider == server.Provider && x.ProviderServerId == server.ProviderServerId &&
+            !await db.RuntimeServers.AnyAsync(x => x.ProviderAccountId == server.ProviderAccountId && x.Provider.ToLower() == server.Provider.ToLower() && x.ProviderServerId == server.ProviderServerId &&
                 (x.AppId != binding.AppId || x.OrganizationId != binding.OrganizationId), cancellationToken))
         {
             try
@@ -62,7 +62,7 @@ public sealed class CustomDomainVerificationService(
         {
             return;
         }
-        if (verified && !await db.ServerInstances.AnyAsync(x => x.Id == server!.Id && x.IpAddress == target && x.AppId == binding.AppId, cancellationToken))
+        if (verified && !await db.ServerInstances.AnyAsync(x => x.Id == server!.Id && x.ProviderAccountId == server.ProviderAccountId && x.ProviderServerId == server.ProviderServerId && x.IpAddress == target && x.AppId == binding.AppId, cancellationToken))
         {
             verified = false;
         }

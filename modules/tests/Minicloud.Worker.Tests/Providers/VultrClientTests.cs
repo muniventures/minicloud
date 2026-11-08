@@ -112,6 +112,41 @@ public class VultrClientTests
         Assert.Contains("\"hostname\":\"vultr.app.muni.dev\"", req.Body);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData(2284)]
+    public async Task CreateServerAsync_UsesPerRequestOsIdWithoutCatalogLookupOrChangingAccountDefault(int? defaultOsId)
+    {
+        _handler.QueueJsonResponse("""{"instance":{"id":"mapped-os","label":"mapped-os","status":"pending"}}""", HttpStatusCode.Accepted);
+        _options.DefaultOsId = defaultOsId;
+        var request = new CreateServerRequest("mapped-os", "vc2-1c-1gb", "ewr", "", "", Image: "1743");
+
+        await CreateClient().CreateServerAsync(request);
+
+        var sent = Assert.Single(_handler.RecordedRequests);
+        Assert.Equal(HttpMethod.Post, sent.Method);
+        Assert.Contains("\"os_id\":1743", sent.Body);
+        Assert.Equal(defaultOsId, _options.DefaultOsId);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("ubuntu-24.04")]
+    [InlineData("2147483648")]
+    [InlineData(" 2284")]
+    [InlineData("2284.0")]
+    public async Task CreateServerAsync_InvalidPerRequestOsIdFailsBeforeAnyNetworkCall(string image)
+    {
+        _options.DefaultOsId = null;
+        var request = new CreateServerRequest("invalid-os", "vc2-1c-1gb", "ewr", "", "", Image: image);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => CreateClient().CreateServerAsync(request));
+
+        Assert.Empty(_handler.RecordedRequests);
+    }
+
     [Fact]
     public async Task GetServerStatusAsync_WhenActiveAndRunning_ReturnsIsRunningTrue()
     {
@@ -204,6 +239,10 @@ public class VultrClientTests
         var ex = await Assert.ThrowsAsync<ProviderApiException>(() => client.FindServerAsync("test"));
         Assert.Equal(HttpStatusCode.Unauthorized, ex.StatusCode);
         Assert.DoesNotContain("fixture", ex.Message);
-        Assert.Contains("[REDACTED]", ex.Message);
+        Assert.Equal("Vultr API request failed with HTTP 401.", ex.Message);
+        Assert.DoesNotContain("Unauthorized key", ex.Message);
+        Assert.NotNull(ex.ResponseBody);
+        Assert.DoesNotContain("fixture", ex.ResponseBody);
+        Assert.Contains("[REDACTED]", ex.ResponseBody);
     }
 }

@@ -14,6 +14,8 @@ import { SignUpModule } from "./modules/Auth/SignUpModule";
 import { TeamSettingsModule } from "./modules/Settings/TeamSettingsModule";
 import { CliLoginModule } from "./modules/CliLogin/CliLoginModule";
 
+import { ProvidersModule } from "./modules/Providers/ProvidersModule";
+
 export const routes: RouteObject[] = [
   {
     element: <AuthLayout />,
@@ -30,6 +32,7 @@ export const routes: RouteObject[] = [
       { path: "/", element: <Navigate to="/apps" replace /> },
       { path: "/apps", element: <AppsModule /> },
       { path: "/apps/new", element: <CreateAppModule /> },
+      { path: "/providers", element: <ProvidersModule /> },
       { path: "/apps/:appId", element: <AppDetailModule /> },
       { path: "/apps/:appId/deployments", element: <DeploymentsModule /> },
       { path: "/apps/:appId/deployments/:deploymentId", element: <DeploymentDetailModule /> },

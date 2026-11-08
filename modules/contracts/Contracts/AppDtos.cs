@@ -16,8 +16,9 @@ public sealed record UpdateAppRequest(
     string? Database);
 
 public sealed record DeleteAppRequest(string Confirmation);
+public sealed record SelectAppPlanRequest(string Plan);
 
-public sealed record EnsureAppBranchRequest(string BranchName);
+public sealed record EnsureAppBranchRequest(string BranchName, string? Plan = null);
 
 public sealed record AppBranchResponse(
     string Id,
@@ -28,7 +29,8 @@ public sealed record AppBranchResponse(
     string Database,
     string? WebsiteUrl,
     DateTimeOffset CreatedAt,
-    IReadOnlyList<string> Urls);
+    IReadOnlyList<string> Urls,
+    string? PlanId = null);
 
 public sealed record AppResponse(
     string Id,
@@ -45,7 +47,8 @@ public sealed record AppResponse(
     string? DeletionStatus = null,
     string? DeletionError = null,
     string? EnvironmentName = null,
-    IReadOnlyList<AppEnvironmentResponse>? Environments = null);
+    IReadOnlyList<AppEnvironmentResponse>? Environments = null,
+    string? PlanId = null);
 
 public sealed record AppDomainResponse(
     string Id,
@@ -62,4 +65,4 @@ public sealed record LatestDeploymentResponse(
 
 public sealed record CreateAppEnvironmentRequest(string Name, string Plan, string? Database = null);
 public sealed record RenameAppEnvironmentRequest(string Name);
-public sealed record AppEnvironmentResponse(string Id, string Name, string Plan, string Database, string? DeletionStatus);
+public sealed record AppEnvironmentResponse(string Id, string Name, string Plan, string Database, string? DeletionStatus, string? PlanId = null);

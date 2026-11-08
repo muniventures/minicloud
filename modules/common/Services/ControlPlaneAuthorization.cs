@@ -54,11 +54,17 @@ public sealed class ControlPlaneAuthorization(MinicloudDbContext db)
         OrganizationAction.WriteSecrets => ApiKeyScopes.SecretsWrite,
         OrganizationAction.ReadApplicationLogs => ApiKeyScopes.LogsRead,
         OrganizationAction.ManageTelemetry => ApiKeyScopes.TelemetryManage,
+        OrganizationAction.ReadProviders => ApiKeyScopes.ProvidersRead,
+        OrganizationAction.ManageProviders => ApiKeyScopes.ProvidersWrite,
+        OrganizationAction.ReadPlans => ApiKeyScopes.PlansRead,
+        OrganizationAction.ManagePlans => ApiKeyScopes.PlansWrite,
         _ => null
     };
 
     private static bool RoleAllows(OrganizationRole role, OrganizationAction action) => action switch
     {
+        OrganizationAction.ReadProviders or OrganizationAction.ReadPlans => true,
+        OrganizationAction.ManageProviders or OrganizationAction.ManagePlans => role is OrganizationRole.Owner or OrganizationRole.Admin,
         OrganizationAction.ReadApps or OrganizationAction.ReadDeployments or OrganizationAction.ReadRuntime or OrganizationAction.ReadSecrets or OrganizationAction.ReadApplicationLogs => true,
         OrganizationAction.WriteApps or OrganizationAction.CreateDeployments or OrganizationAction.ManageRuntime => role is OrganizationRole.Owner or OrganizationRole.Admin or OrganizationRole.Developer,
         OrganizationAction.WriteSecrets => role is OrganizationRole.Owner or OrganizationRole.Admin or OrganizationRole.Developer,
@@ -82,5 +88,9 @@ public enum OrganizationAction
     WriteSecrets,
     ManageMembers,
     ReadApplicationLogs,
-    ManageTelemetry
+    ManageTelemetry,
+    ReadProviders,
+    ManageProviders,
+    ReadPlans,
+    ManagePlans
 }

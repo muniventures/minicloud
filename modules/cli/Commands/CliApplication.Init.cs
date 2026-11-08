@@ -148,7 +148,8 @@ public sealed partial class CliApplication
 
         var config = new MinicloudConfig(app.Slug, database, null, services)
         {
-            AppId = app.Id
+            AppId = app.Id,
+            Plan = app.Plan
         };
         var diagnostics = MinicloudConfigValidator.Validate(config);
         if (diagnostics.Count > 0)

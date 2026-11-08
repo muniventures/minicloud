@@ -19,10 +19,16 @@ public sealed partial class SshDeployStep
         await using var scope = _scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
         var server = await db.ServerInstances.SingleAsync(x => x.Id == context.ServerInstanceId && x.AppId == context.AppId, ct);
-        if (server.OrganizationId != context.OrganizationId || !string.Equals(server.Provider, "Hetzner", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(server.ProviderServerId))
+        if (server.OrganizationId != context.OrganizationId || server.ProviderAccountId != context.ProviderAccountId ||
+            !string.Equals(server.Provider, "Hetzner", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(server.ProviderServerId))
         { throw new PipelineStepException("storage_server_conflict", "Storage server identity does not match the deployment."); }
-        var provider = scope.ServiceProvider.GetRequiredService<VpsProviderClientResolver>()(context.Provider) as IStorageVolumeProvider
+        var client = server.ProviderAccountId is null
+            ? scope.ServiceProvider.GetRequiredService<VpsProviderClientResolver>()(context.Provider)
+            : await scope.ServiceProvider.GetRequiredService<ProviderAccountClientFactory>().CreateAsync(context.OrganizationId, server.ProviderAccountId, ct);
+        var provider = client as IStorageVolumeProvider
             ?? throw new PipelineStepException("storage_provider_unsupported", "Provider does not support customer storage.");
+        var allowAllocation = server.ProviderAccountId is null || await db.ProviderAccounts.AnyAsync(x => x.Id == server.ProviderAccountId &&
+            x.OrganizationId == context.OrganizationId && x.Enabled, ct);
         var service = new AppStorageService(db, provider);
         try
         {
@@ -35,13 +41,14 @@ public sealed partial class SshDeployStep
                 foreach (var (name, mount) in StorageMounts.Read(configured.StorageJson).OrderBy(x => x.Key, StringComparer.Ordinal))
                 {
                     await EnsureOwnershipAsync(context, ct);
-                    mounts.Add(await service.EnsureAsync(context.AppId, name, mount, server.ProviderServerId!, server.Region, ct));
+                    mounts.Add(await service.EnsureAsync(context.AppId, name, mount, server.ProviderServerId!, server.Region, ct,
+                        server.ProviderAccountId is null ? null : context.OrganizationId, server.ProviderAccountId, allowAllocation));
                 }
                 result[configured.Name] = mounts.ToArray();
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not PipelineStepException)
-        { throw new PipelineStepException("storage_provision_failed", "Durable storage provisioning failed: " + ex.Message, ex); }
+        { throw new PipelineStepException("storage_provision_failed", "Durable storage provisioning failed. Check the selected provider account and retained volume identity."); }
         return result;
     }
 }

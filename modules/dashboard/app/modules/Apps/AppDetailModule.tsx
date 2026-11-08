@@ -529,7 +529,7 @@ export function AppDetailModule() {
                   )}
                 </div>
                 <div className="space-y-2 border-t pt-4">
-                  <DetailRow label="Plan" value={app.plan.toUpperCase()} />
+                  <DetailRow label="Plan" value={app.plan} />
                   <DetailRow label="Database" value={app.database} />
                   <DetailRow label="Services" value={String(services.length)} />
                 </div>
@@ -578,7 +578,7 @@ export function AppDetailModule() {
                               {branch.branchName}
                             </Link>
                           </TableCell>
-                          <TableCell data-label="Plan">{branch.plan.toUpperCase()}</TableCell>
+                          <TableCell data-label="Plan">{branch.plan}</TableCell>
                           <TableCell data-label="Service URLs">
                             <ServiceUrls services={[{ urls: branch.urls }]} />
                           </TableCell>

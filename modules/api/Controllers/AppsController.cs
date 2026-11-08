@@ -28,11 +28,14 @@ public sealed class AppsController : ControllerBase
         }
 
         var apps = await db.Apps
+            .Include(x => x.SelectedPlan)
             .Include(x => x.Organization)
             .Include(x => x.Deployments)
             .Include(x => x.Domains)
             .Include(x => x.Branches)
             .ThenInclude(x => x.Deployments)
+            .Include(x => x.Branches)
+            .ThenInclude(x => x.SelectedPlan)
             .Include(x => x.Branches)
             .ThenInclude(x => x.Domains)
             .Where(x => x.OrganizationId == organizationId && (includeBranches || x.ParentAppId == null))
@@ -43,7 +46,7 @@ public sealed class AppsController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IResult> CreateApp([FromBody] CreateAppRequest request, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] IIdGenerator ids, [FromServices] TimeProvider timeProvider, CancellationToken cancellationToken)
+    public async Task<IResult> CreateApp([FromBody] CreateAppRequest request, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] IIdGenerator ids, [FromServices] TimeProvider timeProvider, [FromServices] ProviderCatalogService catalog, CancellationToken cancellationToken)
     {
         var principal = RequirePrincipal(HttpContext);
         if (!AppEnvironmentService.IsValidName(request.EnvironmentName))
@@ -65,7 +68,10 @@ public sealed class AppsController : ControllerBase
             return EndpointResults.Conflict("app_slug_taken", "App slug is already taken in this organization.");
         }
 
-        ControlPlaneValidation.TryParseEnum<AppPlan>(request.Plan, out var plan);
+        ProviderPlan plan;
+        try { plan = await catalog.ResolveAsync(request.OrganizationId, request.Plan, cancellationToken); }
+        catch (ProviderCatalogException ex) { return EndpointResults.Problem(ex.Code, ex.Message, StatusCodes.Status400BadRequest); }
+        catch (SecretStoreUnavailableException) { return EndpointResults.Problem("secret_store_unavailable", "Provider credentials are temporarily unavailable.", StatusCodes.Status503ServiceUnavailable); }
         ControlPlaneValidation.TryParseEnum<DatabaseMode>(request.Database, out var database);
 
         var now = timeProvider.GetUtcNow();
@@ -77,7 +83,8 @@ public sealed class AppsController : ControllerBase
             Name = request.Name,
             Slug = request.Slug,
             EnvironmentName = request.EnvironmentName.Trim(),
-            Plan = plan,
+            PlanId = plan.Id,
+            SelectedPlan = plan,
             Database = database,
             CreatedAt = now,
             UpdatedAt = now
@@ -98,11 +105,14 @@ public sealed class AppsController : ControllerBase
         }
 
         var app = await db.Apps
+            .Include(x => x.SelectedPlan)
             .Include(x => x.Organization)
             .Include(x => x.Deployments)
             .Include(x => x.Domains)
             .Include(x => x.Branches)
             .ThenInclude(x => x.Deployments)
+            .Include(x => x.Branches)
+            .ThenInclude(x => x.SelectedPlan)
             .Include(x => x.Branches)
             .ThenInclude(x => x.Domains)
             .SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
@@ -117,7 +127,8 @@ public sealed class AppsController : ControllerBase
         var principal = RequirePrincipal(HttpContext);
         if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), appId, OrganizationAction.WriteApps, cancellationToken))
             return EndpointResults.Forbidden();
-        var parent = await db.Apps.Include(x => x.Organization).SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
+        var parent = await db.Apps.Include(x => x.SelectedPlan)
+            .Include(x => x.Organization).SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
         if (parent is null) return EndpointResults.NotFound("app_not_found", "App was not found.");
         try
         {
@@ -139,7 +150,7 @@ public sealed class AppsController : ControllerBase
         var principal = RequirePrincipal(HttpContext);
         if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), appId, OrganizationAction.WriteApps, cancellationToken))
             return EndpointResults.Forbidden();
-        var app = await db.Apps.SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
+        var app = await db.Apps.Include(x => x.SelectedPlan).SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
         if (app is null) return EndpointResults.NotFound("app_not_found", "App was not found.");
         try
         {
@@ -160,6 +171,7 @@ public sealed class AppsController : ControllerBase
         [FromServices] MinicloudDbContext db,
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] AppBranchService branches,
+        [FromServices] DeploymentPreparationService preparations,
         CancellationToken cancellationToken)
     {
         var principal = RequirePrincipal(HttpContext);
@@ -169,6 +181,7 @@ public sealed class AppsController : ControllerBase
         }
 
         var parent = await db.Apps
+            .Include(x => x.SelectedPlan)
             .Include(x => x.Organization)
             .SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
         if (parent is null)
@@ -178,16 +191,19 @@ public sealed class AppsController : ControllerBase
 
         try
         {
-            var branch = await branches.EnsureAsync(parent, request.BranchName, cancellationToken);
-            return Results.Ok(branch.ToResponse());
+            return await preparations.LockedAsync(parent.Id, async () =>
+            {
+                var branch = await branches.EnsureAsync(parent, request.BranchName, cancellationToken, request.Plan);
+                return Results.Ok(branch.ToResponse());
+            }, cancellationToken);
         }
         catch (AppBranchException ex)
         {
             return Results.BadRequest(new ErrorResponse(new ErrorBody(ex.Code, ex.Message, [])));
         }
-        catch (SecretStoreUnavailableException ex)
+        catch (SecretStoreUnavailableException)
         {
-            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Branch secrets could not be copied.", detail: ex.Message);
+            return EndpointResults.Problem("secret_store_unavailable", "Required credentials are temporarily unavailable.", StatusCodes.Status503ServiceUnavailable);
         }
     }
 
@@ -207,6 +223,7 @@ public sealed class AppsController : ControllerBase
         }
 
         var branch = await db.Apps
+            .Include(x => x.SelectedPlan)
             .Include(x => x.Organization)
             .Include(x => x.Domains)
             .SingleOrDefaultAsync(x => x.Id == branchAppId && x.ParentAppId == appId && x.BranchName != null, cancellationToken);
@@ -230,8 +247,29 @@ public sealed class AppsController : ControllerBase
             : Results.Json(new ErrorResponse(new ErrorBody(error.Value.Code, error.Value.Message, [])), statusCode: error.Value.Status);
     }
 
+    [HttpPost("{appId}/plan")]
+    public async Task<IResult> SelectPlan(string appId, SelectAppPlanRequest request,
+        [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization,
+        [FromServices] ProviderCatalogService catalog, [FromServices] DeploymentPreparationService preparations, CancellationToken ct)
+    {
+        if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), appId, OrganizationAction.CreateDeployments, ct))
+            return EndpointResults.Forbidden();
+        try
+        {
+            return await preparations.LockedAsync(appId, async () =>
+            {
+                var app = await db.Apps.Include(x => x.SelectedPlan).Include(x => x.Organization).SingleAsync(x => x.Id == appId, ct);
+                if (app.DeletionStatus is not null) return EndpointResults.Conflict("app_deleting", "The app is being deleted.");
+                await catalog.BindAsync(app, request.Plan, ct);
+                return Results.Ok(app.ToResponse());
+            }, ct);
+        }
+        catch (ProviderCatalogException ex) { return EndpointResults.Problem(ex.Code, ex.Message, StatusCodes.Status400BadRequest); }
+        catch (SecretStoreUnavailableException) { return EndpointResults.Problem("secret_store_unavailable", "Provider credentials are temporarily unavailable.", StatusCodes.Status503ServiceUnavailable); }
+    }
+
     [HttpPatch("{appId}")]
-    public async Task<IResult> UpdateApp([FromRoute] string appId, [FromBody] UpdateAppRequest request, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] TimeProvider timeProvider, CancellationToken cancellationToken)
+    public async Task<IResult> UpdateApp([FromRoute] string appId, [FromBody] UpdateAppRequest request, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] TimeProvider timeProvider, [FromServices] ProviderCatalogService catalog, [FromServices] DeploymentPreparationService preparations, CancellationToken cancellationToken)
     {
         var principal = RequirePrincipal(HttpContext);
         if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), appId, OrganizationAction.WriteApps, cancellationToken))
@@ -240,11 +278,14 @@ public sealed class AppsController : ControllerBase
         }
 
         var app = await db.Apps
+            .Include(x => x.SelectedPlan)
             .Include(x => x.Organization)
             .Include(x => x.Deployments)
             .Include(x => x.Domains)
             .Include(x => x.Branches)
             .ThenInclude(x => x.Deployments)
+            .Include(x => x.Branches)
+            .ThenInclude(x => x.SelectedPlan)
             .Include(x => x.Branches)
             .ThenInclude(x => x.Domains)
             .SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
@@ -253,17 +294,25 @@ public sealed class AppsController : ControllerBase
             return EndpointResults.NotFound("app_not_found", "App was not found.");
         }
 
-        if (request.Plan is not null && ControlPlaneValidation.TryParseEnum<AppPlan>(request.Plan, out var plan))
+        if (request.Database is not null && !ControlPlaneValidation.TryParseEnum<DatabaseMode>(request.Database, out _))
+            return EndpointResults.Problem("database_invalid", "Select a supported database mode.", StatusCodes.Status400BadRequest);
+        try
         {
-            app.Plan = plan;
+            return await preparations.LockedAsync(app.Id, async () =>
+            {
+                await db.Entry(app).ReloadAsync(cancellationToken);
+                if (request.Plan is not null) await catalog.BindAsync(app, request.Plan, cancellationToken);
+                if (request.Database is not null && ControlPlaneValidation.TryParseEnum<DatabaseMode>(request.Database, out var database))
+                    app.Database = database;
+                app.Name = request.Name ?? app.Name;
+                app.UpdatedAt = timeProvider.GetUtcNow();
+                await db.Entry(app).Reference(x => x.SelectedPlan).LoadAsync(cancellationToken);
+                return Results.Ok(app.ToResponse());
+            }, cancellationToken);
         }
-        if (request.Database is not null && ControlPlaneValidation.TryParseEnum<DatabaseMode>(request.Database, out var database))
-        {
-            app.Database = database;
-        }
-        app.Name = request.Name ?? app.Name;
-        app.UpdatedAt = timeProvider.GetUtcNow();
-        await db.SaveChangesAsync(cancellationToken);
-        return Results.Ok(app.ToResponse());
+        catch (ProviderCatalogException ex)
+        { return EndpointResults.Problem(ex.Code, ex.Message, StatusCodes.Status400BadRequest); }
+        catch (SecretStoreUnavailableException)
+        { return EndpointResults.Problem("secret_store_unavailable", "Provider credentials are temporarily unavailable.", StatusCodes.Status503ServiceUnavailable); }
     }
 }

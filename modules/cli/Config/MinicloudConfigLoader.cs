@@ -51,6 +51,7 @@ public static partial class MinicloudConfigLoader
             services)
         {
             AppId = GetScalar(root, "appId", "appId", diagnostics),
+            Plan = GetScalar(root, "plan", "plan", diagnostics),
             BuildJobs = ParseBuildJobs(root, diagnostics),
             Assets = ParseAssets(root, diagnostics)
         };

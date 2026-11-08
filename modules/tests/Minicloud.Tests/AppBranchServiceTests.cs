@@ -23,7 +23,7 @@ public sealed class AppBranchServiceTests : IClassFixture<SqliteTestHarness>
     }
 
     [Fact]
-    public async Task EnsureAsync_creates_reusable_vultr_child_and_copies_secrets()
+    public async Task EnsureAsync_creates_reusable_child_inheriting_parent_plan_and_copies_secrets()
     {
         await using var db = _harness.CreateDbContext();
         var now = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
@@ -57,7 +57,7 @@ public sealed class AppBranchServiceTests : IClassFixture<SqliteTestHarness>
         Assert.Equal(parent.Id, created.ParentAppId);
         Assert.Equal("feature-checkout", created.BranchName);
         Assert.Equal("store-feature-checkout", created.Slug);
-        Assert.Equal(AppPlan.P0V0, created.Plan);
+        Assert.Equal(parent.Plan, created.Plan);
         Assert.Equal(DatabaseMode.Postgres, created.Database);
         Assert.Single(db.Apps.Where(x => x.ParentAppId == parent.Id));
         var copied = Assert.Single(db.AppServiceSecrets.Where(x => x.AppId == created.Id));

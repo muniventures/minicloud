@@ -262,6 +262,19 @@ namespace Minicloud.Common.Migrations
                         .HasColumnType("text")
                         .HasColumnName("name");
 
+                    b.Property<string>("OrganizationId")
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("ProviderAccountId")
+                        .HasColumnType("text")
+                        .HasColumnName("provider_account_id");
+
                     b.Property<string>("ProviderVolumeId")
                         .HasColumnType("text")
                         .HasColumnName("provider_volume_id");
@@ -281,10 +294,12 @@ namespace Minicloud.Common.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProviderVolumeId")
+                    b.HasIndex("AppId", "Name")
                         .IsUnique();
 
-                    b.HasIndex("AppId", "Name")
+                    b.HasIndex("OrganizationId", "ProviderAccountId");
+
+                    b.HasIndex("ProviderAccountId", "ProviderVolumeId")
                         .IsUnique();
 
                     b.ToTable("app_storage_volumes", (string)null);
@@ -661,6 +676,42 @@ namespace Minicloud.Common.Migrations
                         .HasColumnType("text")
                         .HasColumnName("ownership_token");
 
+                    b.Property<string>("PlanId")
+                        .HasColumnType("text")
+                        .HasColumnName("plan_id");
+
+                    b.Property<long?>("PlanRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("plan_revision");
+
+                    b.Property<string>("ProviderAccountId")
+                        .HasColumnType("text")
+                        .HasColumnName("provider_account_id");
+
+                    b.Property<string>("ProviderBuildPlatform")
+                        .HasColumnType("text")
+                        .HasColumnName("provider_build_platform");
+
+                    b.Property<bool>("ProviderCreationAttempted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("provider_creation_attempted");
+
+                    b.Property<string>("ProviderImage")
+                        .HasColumnType("text")
+                        .HasColumnName("provider_image");
+
+                    b.Property<string>("ProviderRegion")
+                        .HasColumnType("text")
+                        .HasColumnName("provider_region");
+
+                    b.Property<string>("ProviderSku")
+                        .HasColumnType("text")
+                        .HasColumnName("provider_sku");
+
+                    b.Property<string>("ProviderType")
+                        .HasColumnType("text")
+                        .HasColumnName("provider_type");
+
                     b.Property<string>("RequestedServiceNamesJson")
                         .HasColumnType("text")
                         .HasColumnName("requested_service_names_json");
@@ -700,6 +751,8 @@ namespace Minicloud.Common.Migrations
                     b.HasIndex("AppId", "CreatedAt");
 
                     b.HasIndex("OrganizationId", "CreatedAt");
+
+                    b.HasIndex("OrganizationId", "ProviderAccountId");
 
                     b.HasIndex("Status", "CreatedAt");
 
@@ -1484,6 +1537,10 @@ namespace Minicloud.Common.Migrations
                         .HasColumnType("text")
                         .HasColumnName("plan");
 
+                    b.Property<string>("PlanId")
+                        .HasColumnType("text")
+                        .HasColumnName("plan_id");
+
                     b.Property<string>("Slug")
                         .IsRequired()
                         .HasColumnType("text")
@@ -1497,6 +1554,8 @@ namespace Minicloud.Common.Migrations
 
                     b.HasIndex("EnvironmentKey")
                         .IsUnique();
+
+                    b.HasIndex("OrganizationId", "PlanId");
 
                     b.HasIndex("OrganizationId", "Slug")
                         .IsUnique();
@@ -1576,6 +1635,228 @@ namespace Minicloud.Common.Migrations
                         .IsUnique();
 
                     b.ToTable("organization_members", (string)null);
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ProviderAccount", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CredentialGeneration")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("credential_generation");
+
+                    b.Property<string>("CredentialPath")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("credential_path");
+
+                    b.Property<string>("CredentialStoreProvider")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("credential_store_provider");
+
+                    b.Property<string>("CredentialVersion")
+                        .HasColumnType("text")
+                        .HasColumnName("credential_version");
+
+                    b.Property<int?>("DefaultOsId")
+                        .HasColumnType("integer")
+                        .HasColumnName("default_os_id");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enabled");
+
+                    b.Property<DateTimeOffset?>("LastValidatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_validated_at");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("ProjectId")
+                        .HasColumnType("text")
+                        .HasColumnName("project_id");
+
+                    b.Property<string>("ProviderType")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("provider_type");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("ValidationStatus")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("validation_status");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("provider_accounts", (string)null);
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ProviderCredentialCleanup", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("NotBefore")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("not_before");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("path");
+
+                    b.Property<string>("ProviderAccountId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("provider_account_id");
+
+                    b.Property<string>("StoreProvider")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("store_provider");
+
+                    b.Property<string>("Version")
+                        .HasColumnType("text")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("provider_credential_cleanups", (string)null);
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ProviderPlan", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("BuildPlatform")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("build_platform");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enabled");
+
+                    b.Property<string>("Image")
+                        .HasColumnType("text")
+                        .HasColumnName("image");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("normalized_name");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("ProviderAccountId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("provider_account_id");
+
+                    b.Property<DateTimeOffset?>("ProvisioningLockedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("provisioning_locked_at");
+
+                    b.Property<string>("Region")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("region");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision");
+
+                    b.Property<string>("Sku")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("sku");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "NormalizedName")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "ProviderAccountId");
+
+                    b.ToTable("provider_plans", (string)null);
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ProviderPlanName", b =>
+                {
+                    b.Property<string>("OrganizationId")
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("NormalizedName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("normalized_name");
+
+                    b.Property<string>("PlanId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("plan_id");
+
+                    b.Property<bool>("Retired")
+                        .HasColumnType("boolean")
+                        .HasColumnName("retired");
+
+                    b.HasKey("OrganizationId", "NormalizedName");
+
+                    b.ToTable("provider_plan_names", (string)null);
                 });
 
             modelBuilder.Entity("Minicloud.Common.Models.RegistryGarbageCandidate", b =>
@@ -1852,6 +2133,10 @@ namespace Minicloud.Common.Migrations
                         .HasColumnType("text")
                         .HasColumnName("provider");
 
+                    b.Property<string>("ProviderAccountId")
+                        .HasColumnType("text")
+                        .HasColumnName("provider_account_id");
+
                     b.Property<string>("ProviderServerId")
                         .HasColumnType("text")
                         .HasColumnName("provider_server_id");
@@ -1864,9 +2149,9 @@ namespace Minicloud.Common.Migrations
 
                     b.HasIndex("AppId");
 
-                    b.HasIndex("OrganizationId");
+                    b.HasIndex("OrganizationId", "ProviderAccountId");
 
-                    b.HasIndex("Provider", "ProviderServerId");
+                    b.HasIndex("ProviderAccountId", "Provider", "ProviderServerId");
 
                     b.ToTable("runtime_servers", (string)null);
                 });
@@ -1994,6 +2279,10 @@ namespace Minicloud.Common.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<string>("Image")
+                        .HasColumnType("text")
+                        .HasColumnName("image");
+
                     b.Property<string>("IpAddress")
                         .HasColumnType("text")
                         .HasColumnName("ip_address");
@@ -2003,10 +2292,18 @@ namespace Minicloud.Common.Migrations
                         .HasColumnType("text")
                         .HasColumnName("organization_id");
 
+                    b.Property<string>("PlanId")
+                        .HasColumnType("text")
+                        .HasColumnName("plan_id");
+
                     b.Property<string>("Provider")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("provider");
+
+                    b.Property<string>("ProviderAccountId")
+                        .HasColumnType("text")
+                        .HasColumnName("provider_account_id");
 
                     b.Property<string>("ProviderServerId")
                         .HasColumnType("text")
@@ -2016,6 +2313,10 @@ namespace Minicloud.Common.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("region");
+
+                    b.Property<string>("Sku")
+                        .HasColumnType("text")
+                        .HasColumnName("sku");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -2030,7 +2331,7 @@ namespace Minicloud.Common.Migrations
 
                     b.HasIndex("AppId");
 
-                    b.HasIndex("OrganizationId");
+                    b.HasIndex("OrganizationId", "ProviderAccountId");
 
                     b.ToTable("server_instances", (string)null);
                 });
@@ -2359,6 +2660,15 @@ namespace Minicloud.Common.Migrations
                     b.Navigation("Organization");
                 });
 
+            modelBuilder.Entity("Minicloud.Common.Models.AppStorageVolume", b =>
+                {
+                    b.HasOne("Minicloud.Common.Models.ProviderAccount", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProviderAccountId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("Minicloud.Common.Models.AppTelemetrySettings", b =>
                 {
                     b.HasOne("Minicloud.Common.Models.MinicloudApp", "App")
@@ -2471,6 +2781,12 @@ namespace Minicloud.Common.Migrations
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("Minicloud.Common.Models.ProviderAccount", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProviderAccountId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("App");
 
@@ -2633,9 +2949,17 @@ namespace Minicloud.Common.Migrations
                         .HasForeignKey("ParentAppId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Minicloud.Common.Models.ProviderPlan", "SelectedPlan")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "PlanId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Organization");
 
                     b.Navigation("ParentApp");
+
+                    b.Navigation("SelectedPlan");
                 });
 
             modelBuilder.Entity("Minicloud.Common.Models.OrganizationMember", b =>
@@ -2655,6 +2979,29 @@ namespace Minicloud.Common.Migrations
                     b.Navigation("Organization");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ProviderAccount", b =>
+                {
+                    b.HasOne("Minicloud.Common.Models.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Organization");
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ProviderPlan", b =>
+                {
+                    b.HasOne("Minicloud.Common.Models.ProviderAccount", "ProviderAccount")
+                        .WithMany("Plans")
+                        .HasForeignKey("OrganizationId", "ProviderAccountId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ProviderAccount");
                 });
 
             modelBuilder.Entity("Minicloud.Common.Models.RegistrySession", b =>
@@ -2707,6 +3054,12 @@ namespace Minicloud.Common.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("Minicloud.Common.Models.ProviderAccount", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProviderAccountId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("App");
 
                     b.Navigation("Organization");
@@ -2736,6 +3089,12 @@ namespace Minicloud.Common.Migrations
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("Minicloud.Common.Models.ProviderAccount", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProviderAccountId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("App");
 
@@ -2794,6 +3153,11 @@ namespace Minicloud.Common.Migrations
                     b.Navigation("Apps");
 
                     b.Navigation("Members");
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ProviderAccount", b =>
+                {
+                    b.Navigation("Plans");
                 });
 
             modelBuilder.Entity("Minicloud.Common.Models.RuntimeServer", b =>

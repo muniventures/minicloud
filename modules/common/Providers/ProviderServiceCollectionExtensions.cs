@@ -23,6 +23,8 @@ public static class ProviderServiceCollectionExtensions
 
         services.TryAddTransient<ResilientHttpRetryHandler>();
         services.TryAddSingleton<IDnsResolver, SystemDnsResolver>();
+        services.AddHttpClient(ProviderAccountClientFactory.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(30));
+        services.AddScoped<ProviderAccountClientFactory>();
 
         // Hetzner
         services.AddHttpClient<HetznerClient>()

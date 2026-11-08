@@ -14,7 +14,8 @@ public sealed class AssetsController : ControllerBase
 {
     [HttpPost]
     public async Task<IResult> Publish(PublishAssetRequest request, [FromServices] MinicloudDbContext db,
-        [FromServices] ControlPlaneAuthorization authorization, [FromServices] AssetReleaseService releases, CancellationToken ct)
+        [FromServices] ControlPlaneAuthorization authorization, [FromServices] AssetReleaseService releases,
+        [FromServices] DeploymentPreparationService preparations, CancellationToken ct)
     {
         var app = await db.Apps.SingleOrDefaultAsync(x => x.Id == request.AppId, ct);
         if (app is null) { return EndpointResults.NotFound("app_not_found", "App was not found."); }
@@ -22,9 +23,18 @@ public sealed class AssetsController : ControllerBase
         { return EndpointResults.Forbidden(); }
         try
         {
-            var (release, deployment) = await releases.PublishAsync(app, request, ct);
-            return Results.Created($"/v1/assets/{release.Id}", AssetReleaseService.Response(release, deployment));
+            return await preparations.LockedAsync(app.Id, async () =>
+            {
+                await db.Entry(app).ReloadAsync(ct);
+                if (app.DeletionStatus is not null) return EndpointResults.Conflict("app_deleting", "The app is being deleted.");
+                if (await preparations.HasActiveAsync(app.Id, null, ct))
+                    return EndpointResults.Conflict("deployment_active", "This app already has an active deployment or local build.");
+                var (release, deployment) = await releases.PublishAsync(app, request, ct);
+                return Results.Created($"/v1/assets/{release.Id}", AssetReleaseService.Response(release, deployment));
+            }, ct);
         }
+        catch (ProviderCatalogException ex) { return EndpointResults.Problem(ex.Code, ex.Message, StatusCodes.Status400BadRequest); }
+        catch (SecretStoreUnavailableException) { return EndpointResults.Problem("secret_store_unavailable", "Provider credentials are temporarily unavailable.", StatusCodes.Status503ServiceUnavailable); }
         catch (ArgumentException ex) { return Results.BadRequest(new { code = "invalid_asset_release", message = ex.Message }); }
     }
 

@@ -19,14 +19,14 @@ public sealed class DeploymentPreparationsController : ControllerBase
     [HttpPost]
     public async Task<IResult> Start([FromBody] StartDeploymentPreparationRequest request,
         [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization,
-        [FromServices] DeploymentPreparationService preparations, CancellationToken ct)
+        [FromServices] DeploymentPreparationService preparations, [FromServices] ProviderCatalogService catalog, CancellationToken ct)
     {
         if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), request.AppId, OrganizationAction.CreateDeployments, ct))
         { return EndpointResults.Forbidden(); }
         var validation = ControlPlaneValidation.ValidateDeploymentPreparation(request);
         if (!validation.IsValid) { return EndpointResults.ValidationProblem("Local build preparation is invalid.", validation); }
         var key = Guid.Parse(request.IdempotencyKey);
-        return await preparations.LockedAsync(request.AppId, async () =>
+        try { return await preparations.LockedAsync(request.AppId, async () =>
         {
             var app = await db.Apps.SingleAsync(x => x.Id == request.AppId, ct);
             if (app.DeletionStatus is not null) { return EndpointResults.Conflict("app_deleting", "The app is being deleted."); }
@@ -36,16 +36,24 @@ public sealed class DeploymentPreparationsController : ControllerBase
             {
                 if (existing.AppId != app.Id || !preparations.Matches(existing, request.ServiceNames))
                 { return EndpointResults.Conflict("preparation_conflict", "Preparation key is already bound to another request."); }
+                if (request.Plan is not null && existing.PlanId != (await catalog.ResolveAsync(app.OrganizationId, request.Plan, ct, requireEnabled: false)).Id)
+                { return EndpointResults.Conflict("preparation_conflict", "Preparation key is already bound to another plan."); }
                 if (existing.Status != DeploymentStatus.WaitingForBuild || preparations.IsExpired(existing))
                 { return EndpointResults.Conflict("preparation_closed", "Preparation has ended; use a new key."); }
                 return Results.Ok(ToResponse(existing));
             }
             if (await preparations.HasActiveAsync(app.Id, null, ct))
             { return EndpointResults.Conflict("deployment_active", "This app already has an active deployment or local build."); }
+            if (request.Plan is not null) await catalog.BindAsync(app, request.Plan, ct);
             var deployment = preparations.Start(app, id, request.ServiceNames);
+            await catalog.ReserveAsync(app, deployment, ct);
             db.Deployments.Add(deployment);
             return Results.Created($"/v1/deployments/{deployment.Id}", ToResponse(deployment));
-        }, ct);
+        }, ct); }
+        catch (ProviderCatalogException ex)
+        { return EndpointResults.Problem(ex.Code, ex.Message, StatusCodes.Status400BadRequest); }
+        catch (SecretStoreUnavailableException)
+        { return EndpointResults.Problem("secret_store_unavailable", "Provider credentials are temporarily unavailable.", StatusCodes.Status503ServiceUnavailable); }
     }
 
     [HttpPost("{id}")]

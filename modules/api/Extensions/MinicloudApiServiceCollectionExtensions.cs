@@ -130,6 +130,11 @@ public static class MinicloudApiServiceCollectionExtensions
         services.AddScoped<GrafanaSessionService>();
         services.AddScoped<GrafanaQueryGateway>();
         services.AddScoped<AuditEventService>();
+        Minicloud.Common.Providers.ProviderServiceCollectionExtensions.AddMinicloudProviders(services, configuration);
+        services.AddScoped<ProviderAccountService>();
+        services.AddScoped<ProviderCatalogService>();
+        services.Configure<ProviderCatalogOptions>(configuration.GetSection("Providers"));
+        services.AddScoped<ProviderLegacyImportService>();
         services.AddScoped<IRuntimeTokenService, RuntimeTokenService>();
         services.AddSingleton<IFirebaseTokenVerifier, FirebaseTokenVerifier>();
         services.AddScoped<DeploymentLifecycleService>();
@@ -154,6 +159,7 @@ public static class MinicloudApiServiceCollectionExtensions
         services.AddHttpClient<ISecretStore, OpenBaoSecretStore>();
         services.AddHttpClient(nameof(OpenBaoTokenRenewalService));
         services.AddHostedService<OpenBaoTokenRenewalService>();
+        services.AddHostedService<ProviderCredentialCleanupWorker>();
         // T90: GitHub dispatch client and DeploymentWorkflowMonitor decommissioned.
         // minicloud-worker claims Queued deployments via PostgreSQL SKIP LOCKED.
         services.AddScoped<ControlPlanePrincipalResolver>();

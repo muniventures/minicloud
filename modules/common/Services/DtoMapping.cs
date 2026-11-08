@@ -36,13 +36,13 @@ public static class DtoMapping
                 x.Name,
                 x.Slug,
                 x.BranchName!,
-                ControlPlaneValidation.ToWireValue(x.Plan),
+                PlanName(x),
                 ControlPlaneValidation.ToWireValue(x.Database),
                 x.Deployments.Where(deployment => deployment.AssetReleaseId == null).OrderByDescending(deployment => deployment.CreatedAt).FirstOrDefault()?.WebsiteUrl,
                 x.CreatedAt,
                 x.Domains.Where(domain => domain.Status != DomainBindingService.StatusDisabled)
                     .OrderBy(domain => domain.Hostname, StringComparer.Ordinal)
-                    .Select(domain => $"https://{domain.Hostname}").ToArray()))
+                    .Select(domain => $"https://{domain.Hostname}").ToArray(), x.PlanId))
             .ToArray();
 
         return new AppResponse(
@@ -52,7 +52,7 @@ public static class DtoMapping
             app.Slug,
             app.ParentAppId,
             app.BranchName,
-            ControlPlaneValidation.ToWireValue(app.Plan),
+            PlanName(app),
             ControlPlaneValidation.ToWireValue(app.Database),
             domains,
             branches,
@@ -62,9 +62,11 @@ public static class DtoMapping
             app.EnvironmentName ?? (app.ParentAppId is null ? "production" : null),
             app.BranchName is not null ? [] : new[] { app }.Concat(app.Branches.Where(x => x.EnvironmentName is not null))
                 .Select(x => new AppEnvironmentResponse(x.Id, x.EnvironmentName ?? "production",
-                    ControlPlaneValidation.ToWireValue(x.Plan), ControlPlaneValidation.ToWireValue(x.Database), x.DeletionStatus))
-                .OrderBy(x => x.Name, StringComparer.Ordinal).ToArray());
+                    PlanName(x), ControlPlaneValidation.ToWireValue(x.Database), x.DeletionStatus, x.PlanId))
+                .OrderBy(x => x.Name, StringComparer.Ordinal).ToArray(), app.PlanId);
     }
+
+    private static string PlanName(MinicloudApp app) => app.SelectedPlan?.Name ?? app.PlanId ?? ControlPlaneValidation.ToWireValue(app.Plan);
 
     public static ApiKeyResponse ToResponse(this ApiKey apiKey)
     {

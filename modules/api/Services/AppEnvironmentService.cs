@@ -8,7 +8,7 @@ using Minicloud.Common.Validation;
 namespace Minicloud.Api.Services;
 
 // Each environment owns a runtime app record so all runtime resources remain isolated.
-public sealed class AppEnvironmentService(MinicloudDbContext db, IIdGenerator ids, TimeProvider clock)
+public sealed class AppEnvironmentService(MinicloudDbContext db, IIdGenerator ids, TimeProvider clock, ProviderCatalogService? catalog = null)
 {
     public static bool IsValidName(string? name) => name is { Length: >= 1 and <= 63 }
         && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_')
@@ -20,7 +20,14 @@ public sealed class AppEnvironmentService(MinicloudDbContext db, IIdGenerator id
             throw new AppEnvironmentException("environment_parent_invalid", "Create environments under an active main application.");
         if (!IsValidName(request.Name))
             throw new AppEnvironmentException("environment_name_invalid", "Use 1 to 63 letters, numbers, dashes or underscores, starting with a letter or number.");
-        if (!ControlPlaneValidation.TryParseEnum<AppPlan>(request.Plan, out var plan))
+        var plan = default(AppPlan);
+        ProviderPlan? selectedPlan = null;
+        if (catalog is not null)
+        {
+            try { selectedPlan = await catalog.ResolveAsync(parent.OrganizationId, request.Plan, ct); }
+            catch (ProviderCatalogException ex) { throw new AppEnvironmentException(ex.Code, ex.Message); }
+        }
+        else if (!ControlPlaneValidation.TryParseEnum(request.Plan, out plan))
             throw new AppEnvironmentException("environment_plan_invalid", "Select a supported VPS plan.");
         var database = parent.Database;
         if (request.Database is not null && !ControlPlaneValidation.TryParseEnum(request.Database, out database))
@@ -36,6 +43,7 @@ public sealed class AppEnvironmentService(MinicloudDbContext db, IIdGenerator id
             ParentAppId = parent.Id, ParentApp = parent, EnvironmentName = request.Name,
             EnvironmentKey = $"{parent.Id}:{request.Name.ToLowerInvariant()}",
             Name = $"{parent.Name} ({request.Name})", Slug = slug, Plan = plan, Database = database,
+            PlanId = selectedPlan?.Id, SelectedPlan = selectedPlan,
             CreatedAt = now, UpdatedAt = now
         };
         // Environments start with empty secrets. Production credentials must be set explicitly.

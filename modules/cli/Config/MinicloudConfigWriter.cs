@@ -48,6 +48,12 @@ public static class MinicloudConfigWriter
             builder.AppendLine($"appId: {Escape(config.AppId)}");
         }
 
+        if (config.Plan is not null)
+        {
+            // Plan names are arbitrary user text, including YAML punctuation and keywords.
+            builder.AppendLine($"plan: {JsonSerializer.Serialize(config.Plan)}");
+        }
+
         if (!string.IsNullOrWhiteSpace(config.Database))
         {
             builder.AppendLine($"database: {Escape(config.Database)}");

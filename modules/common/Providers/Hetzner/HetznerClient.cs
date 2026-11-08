@@ -183,7 +183,7 @@ public sealed partial class HetznerClient : IVpsProviderClient
             }
 
             var redactedBody = TokenRedactor.Redact(body, _options.ApiToken);
-            var message = $"Hetzner API request failed with HTTP {(int)response.StatusCode}: {redactedBody}";
+            var message = $"Hetzner API request failed with HTTP {(int)response.StatusCode}.";
             _logger?.LogError("Hetzner API call failed: {Message}", message);
             throw new ProviderApiException(message, response.StatusCode, Provider, redactedBody);
         }

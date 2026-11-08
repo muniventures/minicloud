@@ -98,10 +98,10 @@ export type DomainAvailabilityResponse = {
 };
 
 export type DatabaseMode = "sqlite" | "postgres";
-export type AppPlan = "p0" | "p0-h-0" | "p0-v-0" | "p0-v-1" | "p0-v-2" | "p0-d-0" | "p0-d-1" | "p0-d-2";
+export type AppPlan = string;
 export type DeploymentStatus = "waiting_for_build" | "queued" | "dispatching" | "provisioning" | "deploying" | "verifying" | "succeeded" | "failed" | "canceled";
 
-export type ApiKeyScope = "apps:read" | "apps:write" | "deployments:create" | "deployments:read" | "api_keys:read" | "api_keys:write" | "logs:read" | "telemetry:manage";
+export type ApiKeyScope = "apps:read" | "apps:write" | "deployments:create" | "deployments:read" | "api_keys:read" | "api_keys:write" | "logs:read" | "telemetry:manage" | "providers:read" | "providers:write" | "plans:read" | "plans:write";
 
 export type ApiKeyResponse = {
   id: string;
