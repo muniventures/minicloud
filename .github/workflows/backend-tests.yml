@@ -13,6 +13,8 @@ jobs:
   backend-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      MINICLOUD_TEST_PREFLIGHT_SSH_IMAGE: minicloud-ssh-bootstrap-test:${{ github.run_id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -25,5 +27,9 @@ jobs:
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: '10.0.x'
+      - name: Verify runtime bootstrap ordering and argument handling
+        run: python3 scripts/github-actions/minicloud-deploy/test-runtime-bootstrap.py
+      - name: Build the disposable SSH bootstrap test fixture
+        run: docker build --tag "$MINICLOUD_TEST_PREFLIGHT_SSH_IMAGE" --file modules/tests/Minicloud.Worker.Tests/Fixtures/SshBootstrap.Dockerfile .
       - name: Run backend, worker, CLI and deployment integration tests
         run: dotnet test Minicloud.slnx --configuration Release -m:1
