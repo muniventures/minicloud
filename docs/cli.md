@@ -697,7 +697,7 @@ combined with `deploy --environment`.
 
 Deleting the main application deletes all its environments and branch previews.
 Deleting a child environment through its app detail affects only that environment.
-If provisioning failed before a server was registered, deletion checks the deployment's
-provider account for an unregistered server before removing the environment. Provider
-lookup failures or discovered servers block deletion until infrastructure is reconciled.
-A successful deployment without its server registration also requires reconciliation.
+An application without a registered server can be deleted regardless of deployment
+history or provisioning attempts. Deletion removes its system records without requiring
+provider credentials or server discovery. Registered servers are deleted through their
+registered provider account before the application records are removed.
