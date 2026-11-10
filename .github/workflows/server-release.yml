@@ -1,0 +1,119 @@
+name: Server release
+
+on:
+  push:
+    tags: ['server-v*']
+  pull_request:
+    paths:
+      - .github/workflows/server-release.yml
+      - scripts/server-release/**
+      - packaging/server/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Test release contracts without registry or signing credentials
+        run: python3 -B -m unittest discover -s scripts/server-release -p 'test_*.py' -v
+
+  publish:
+    if: github.repository == 'muniventures/minicloud' && startsWith(github.ref, 'refs/tags/server-v')
+    needs: contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: server-release
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      SOURCE_REVISION: ${{ github.sha }}
+      OUTPUT: ${{ github.workspace }}/.local/artifacts/server-release
+      BUILD_OUTPUT: ${{ github.workspace }}/.local/artifacts/server-build
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Gate missing handoffs and unmerged or reused release tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
+          git merge-base --is-ancestor "$SOURCE_REVISION" origin/main
+          git check-ignore .local/artifacts/probe
+          tags="$(gh api --paginate repos/muniventures/minicloud/releases --jq '.[].tag_name')"
+          if grep -Fqx -- "$RELEASE_TAG" <<< "$tags"; then
+            echo "::error::This server release already exists; select a new exact version."
+            exit 1
+          fi
+          python3 scripts/server-release/release.py preflight \
+            --config packaging/server/release.json --payload packaging/server/bundle \
+            --tag "$RELEASE_TAG" --source "$SOURCE_REVISION"
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          platforms: amd64,arm64
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        with:
+          cosign-release: v2.6.5
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build both architectures with matching embedded agent RIDs
+        run: |
+          python3 scripts/server-release/release.py build-images \
+            --tag "$RELEASE_TAG" --source "$SOURCE_REVISION" --output "$BUILD_OUTPUT"
+      - name: Assemble the exact release and compatibility manifest
+        run: |
+          python3 scripts/server-release/release.py package \
+            --config packaging/server/release.json --payload packaging/server/bundle \
+            --tag "$RELEASE_TAG" --source "$SOURCE_REVISION" \
+            --images "$BUILD_OUTPUT/images.json" --output "$OUTPUT"
+      - name: Sign immutable image indexes and source provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/server-release/release.py provenance \
+            --manifest "$OUTPUT/server-manifest.json" > "$BUILD_OUTPUT/provenance.json"
+          while IFS= read -r image; do
+            cosign sign --yes "$image"
+            cosign attest --yes --type slsaprovenance \
+              --predicate "$BUILD_OUTPUT/provenance.json" "$image"
+          done < <(jq -r '.images[]' "$OUTPUT/server-manifest.json")
+          cosign sign-blob --yes --new-bundle-format \
+            --bundle "$OUTPUT/checksums.txt.sigstore.json" "$OUTPUT/checksums.txt"
+      - name: Verify trust, source, both platforms and anonymous pulls before release
+        run: |
+          python3 scripts/server-release/release.py verify \
+            --directory "$OUTPUT" --tag "$RELEASE_TAG" --anonymous-pulls
+      - name: Publish only server assets, never CLI executables or repository latest
+        shell: bash
+        run: |
+          set -euo pipefail
+          prerelease=()
+          if [[ "${RELEASE_TAG#server-v}" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$RELEASE_TAG" \
+            "$OUTPUT/server-manifest.json" \
+            "$OUTPUT/minicloud-server-${RELEASE_TAG#server-v}.tar.gz" \
+            "$OUTPUT/install-server.sh" \
+            "$OUTPUT/verify-server-release.py" \
+            "$OUTPUT/checksums.txt" \
+            "$OUTPUT/checksums.txt.sigstore.json" \
+            --repo muniventures/minicloud --verify-tag --latest=false \
+            --title "Minicloud server ${RELEASE_TAG#server-v}" \
+            --notes-file packaging/server/bundle/release-notes.md "${prerelease[@]}"

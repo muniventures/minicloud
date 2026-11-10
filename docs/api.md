@@ -16,6 +16,14 @@ API routes and identity aliases. Clients and server must be updated together.
 - Other product resources use `/api`, including providers, plans, deployments,
   secrets, runtime ingestion, registry credentials and CLI authentication.
 
+Anonymous `GET /api/instance` returns `product`, `protocolVersion` and `appDomain`.
+Packaged servers additionally report `serverVersion`, `sourceRevision` and
+`cliCompatibility` from verified release metadata. Compatibility includes the
+protocol, optional half-open version interval and explicit source revisions;
+it does not imply that CLI and server versions match. Source builds without
+release metadata leave these additional fields null. See the
+[server release contract](../packaging/server/README.md).
+
 Application creation accepts nested `initialEnvironment` configuration. Unknown
 flat creation fields are rejected. Configuration `appId` is a canonical
 application ID. Deployments require environment selection when multiple active
