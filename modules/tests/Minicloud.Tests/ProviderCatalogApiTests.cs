@@ -201,6 +201,33 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task BrowserRequestsRequireCsrfAndInvalidBearerDoesNotFallBackToCookie()
+    {
+        var cookie = await AddDashboardUserAsync(OrganizationRole.Owner);
+        using var client = Client(cookie);
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "invalid-bearer");
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.GetAsync($"/api/providers?organizationId={OrganizationId}")).StatusCode);
+        client.DefaultRequestHeaders.Authorization = null;
+        client.DefaultRequestHeaders.Remove("Origin");
+        client.DefaultRequestHeaders.Add("Origin", "https://attacker.example.test");
+        var deniedOrigin = await client.PostAsJsonAsync(
+            "/api/providers",
+            new CreateProviderRequest(OrganizationId, "Rejected", "hetzner", "synthetic-token"));
+        Assert.Equal(HttpStatusCode.Forbidden, deniedOrigin.StatusCode);
+        Assert.Equal("csrf_invalid", (await deniedOrigin.Content.ReadFromJsonAsync<ErrorResponse>())!.Error.Code);
+
+        client.DefaultRequestHeaders.Remove("Origin");
+        client.DefaultRequestHeaders.Add("Origin", "https://dashboard.example.test");
+        client.DefaultRequestHeaders.Remove("X-Minicloud-CSRF");
+        var deniedCsrf = await client.PostAsJsonAsync(
+            "/api/providers",
+            new CreateProviderRequest(OrganizationId, "Rejected", "hetzner", "synthetic-token"));
+        Assert.Equal(HttpStatusCode.Forbidden, deniedCsrf.StatusCode);
+    }
+
+    [Fact]
     public async Task RevisionsAndDisabledStatesAreVisibleAndRejectNewSelection()
     {
         using var client = Client();
