@@ -108,16 +108,20 @@ class Repository:
 
     def verify_identity(self, root_fd):
         expected = self.settings.repository_id.encode("ascii")
+        temporary = ".identity-" + secrets.token_hex(16)
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=root_fd)
         try:
-            fd = os.open(".repository-id", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=root_fd)
-        except FileExistsError:
-            pass
-        else:
             with os.fdopen(fd, "wb") as stream:
                 stream.write(expected)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.fsync(root_fd)
+            try:
+                os.link(temporary, ".repository-id", src_dir_fd=root_fd, dst_dir_fd=root_fd, follow_symlinks=False)
+                os.fsync(root_fd)
+            except FileExistsError:
+                pass
+        finally:
+            os.unlink(temporary, dir_fd=root_fd)
         fd = os.open(".repository-id", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root_fd)
         with os.fdopen(fd, "rb") as stream:
             regular_file(stream.fileno())

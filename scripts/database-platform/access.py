@@ -66,7 +66,7 @@ def apply(request, run=subprocess.run):
     run(['docker','exec','-i','-u','postgres',container,'sh','-c','umask 077; cat > "$1.next" && cp "$1" "$1.previous" && mv "$1.next" "$1"','hba',path],input=hba.encode(),capture_output=True,check=True,timeout=30)
     verify = run(['docker','exec',container,'psql','-X','-U',admin,'-d','postgres','-Atc',"SELECT count(*) FROM pg_hba_file_rules WHERE error IS NOT NULL"],capture_output=True,check=True,timeout=30)
     if verify.stdout.strip() != b'0':
-        run(['docker','exec',container,'cp',path+'.previous',path],capture_output=True,check=True,timeout=30)
+        run(['docker','exec','-u','postgres',container,'cp',path+'.previous',path],capture_output=True,check=True,timeout=30)
         raise ValueError('Authentication rules failed validation')
     run(['docker','exec',container,'psql','-X','-U',admin,'-d','postgres','-v','ON_ERROR_STOP=1','-c','SELECT pg_reload_conf()'],capture_output=True,check=True,timeout=30)
     for item in request['databases']:
