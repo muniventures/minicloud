@@ -9,6 +9,7 @@ using Minicloud.Common.Models;
 using Minicloud.Common.Services;
 using Minicloud.Worker.Databases;
 using Minicloud.Worker.Ssh;
+using Minicloud.Worker.Pipeline.Steps;
 
 namespace Minicloud.Worker.Tests.Databases;
 
@@ -138,6 +139,64 @@ public sealed class DatabaseOperationPostgresTests
             Assert.Equal("deployment", server.RuntimeDeploymentId);
             Assert.Single(await db.Apps.ToListAsync());
         });
+    }
+
+    [Fact]
+    public async Task DatabaseCreationStagesItsActualSshRequestsUnderExistingTemporaryParent()
+    {
+        await WithPostgres(async options =>
+        {
+            await using var db = new MinicloudDbContext(options);
+            await db.Database.MigrateAsync();
+            db.Organizations.Add(new Organization { Id = "org", Name = "Synthetic", Slug = "synthetic" });
+            var now = DateTimeOffset.UtcNow;
+            db.Apps.Add(new MinicloudApp { Id = "app-runtime", OrganizationId = "org", Name = "Runtime", Slug = "runtime" });
+            db.ServerInstances.Add(new ServerInstance { Id = "server-runtime", OrganizationId = "org", AppId = "app-runtime",
+                Provider = "hetzner", ProviderServerId = "synthetic-provider-server", IpAddress = "192.0.2.77",
+                Region = "fsn1", Status = "running", BootstrapStatus = "ready", CreatedAt = now, UpdatedAt = now });
+            db.ManagedDatabases.Add(new ManagedDatabase { Id = "database_fixture", OrganizationId = "org", Name = "Synthetic",
+                Engine = "postgres", RecoverySourceAppId = "app-runtime", Status = "creating", Placement = "application", AccessMode = "internal" });
+            db.ApiKeys.Add(new ApiKey { Id = "key", OrganizationId = "org", Name = "Synthetic", KeyPrefix = "synthetic",
+                KeyHash = "synthetic", ExpiresAt = now.AddHours(1), ScopesJson = JsonSerializer.Serialize(new[] { ApiKeyScopes.DatabasesManage }) });
+            var operation = new DatabaseOperation { Id = "operation", OrganizationId = "org", RequestJson = "{}", CreatedAt = now, UpdatedAt = now };
+            operation.Kind = "create-database";
+            operation.DatabaseId = "database_fixture";
+            operation.Status = "queued";
+            operation.ActorJson = JsonSerializer.Serialize(new ActorIdentity("api_key", null, "key", "org", new HashSet<string> { ApiKeyScopes.DatabasesManage }));
+            db.DatabaseOperations.Add(operation);
+            await db.SaveChangesAsync();
+            var ssh = new CapturingDatabaseSshClient();
+            var encryption = new SecretEncryptionService(Options.Create(new SecretEncryptionOptions { EncryptionKey = "synthetic-staging-key" }));
+            var processor = new DatabaseOperationProcessor(db, new ControlPlaneAuthorization(db), null!, null!, null!, encryption,
+                new IdGenerator(), TimeProvider.System, ssh, Options.Create(new SshDeploymentOptions { PrivateKeyContent = "MOCK_KEY" }),
+                Options.Create(new DatabasePlatformOptions()), null!);
+
+            Assert.True(await processor.ProcessNextAsync(default));
+
+            Assert.Equal(2, ssh.Requests.Count); // Database creation and its access reconciliation.
+            Assert.All(ssh.Requests, request =>
+            {
+                Assert.Equal(SshDeployStep.RemoteDirectoryFor(operation.Id), request.RemoteDirectory);
+                Assert.Equal("/tmp", Path.GetDirectoryName(request.RemoteDirectory));
+            });
+            Assert.Equal("completed", (await db.DatabaseOperations.AsNoTracking().SingleAsync()).Status);
+            Assert.Equal("ready", (await db.ManagedDatabases.AsNoTracking().SingleAsync()).Status);
+        });
+    }
+
+    private sealed class CapturingDatabaseSshClient : ISshDeploymentClient
+    {
+        public List<SshDeploymentRequest> Requests { get; } = [];
+        public Task<SshDeploymentResult> ExecuteDeploymentAsync(SshDeploymentRequest request, Func<string, string, Task> onLogLine, CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            using var payload = JsonDocument.Parse(request.PayloadJson);
+            var operationId = payload.RootElement.GetProperty("operationId").GetString();
+            return Task.FromResult(new SshDeploymentResult(0, true, operationId,
+                ["__MINICLOUD_DATABASE_RESULT__={\"status\":\"completed\"}"]));
+        }
+        public Task<int> ExecuteCommandAsync(string host, string username, string key, string command,
+            Func<string, string, Task> onLogLine, CancellationToken cancellationToken) => throw new InvalidOperationException("Unexpected remote command");
     }
 
     private static async Task WithPostgres(Func<DbContextOptions<MinicloudDbContext>, Task> test)

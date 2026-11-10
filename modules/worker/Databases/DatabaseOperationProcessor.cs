@@ -9,6 +9,7 @@ using Minicloud.Common.Data;
 using Minicloud.Common.Models;
 using Minicloud.Common.Services;
 using Minicloud.Worker.Ssh;
+using Minicloud.Worker.Pipeline.Steps;
 
 namespace Minicloud.Worker.Databases;
 
@@ -359,7 +360,7 @@ public sealed partial class DatabaseOperationProcessor(
         var script = wrapper.ToString();
         var envelope = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(payload, Json))!.AsObject();
         envelope["ownership_token"] = operation.OwnershipToken;
-        var response = await ssh.ExecuteDeploymentAsync(new SshDeploymentRequest(host, options.Username, key, "/opt/minicloud/database-operations/" + operation.Id, envelope.ToJsonString(), script, [], TimeSpan.FromMinutes(30)), (_, _) => Task.CompletedTask, ct);
+        var response = await ssh.ExecuteDeploymentAsync(new SshDeploymentRequest(host, options.Username, key, SshDeployStep.RemoteDirectoryFor(operation.Id), envelope.ToJsonString(), script, [], TimeSpan.FromMinutes(30)), (_, _) => Task.CompletedTask, ct);
         const string marker = "__MINICLOUD_DATABASE_RESULT__=";
         var result = response.OutputLines.LastOrDefault(x => x.StartsWith(marker, StringComparison.Ordinal))
             ?? throw new DatabaseRemoteOperationException("database_runtime_interrupted");
