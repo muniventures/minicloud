@@ -23,6 +23,11 @@ public static class MinicloudApiServiceCollectionExtensions
         IConfiguration configuration,
         IWebHostEnvironment environment)
     {
+        services.AddOptions<ServerReleaseOptions>()
+            .Bind(configuration.GetSection("ServerRelease"))
+            .PostConfigure(options => options.Metadata = ServerReleaseMetadata.Load(options.ManifestPath))
+            .ValidateOnStart();
+
         services.AddControllers(options =>
             {
                 options.Conventions.Add(new RouteTokenTransformerConvention(new KebabCaseRouteTokenTransformer()));

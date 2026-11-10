@@ -87,6 +87,32 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Instance_discovery_reports_packaged_release_metadata_anonymously()
+    {
+        using var metadata = new ReleaseMetadataFixture();
+        using var factory = new AppApiFactory(_connection, "apps.discovery.example", metadata.Path);
+        using var client = factory.CreateClient();
+        var response = await client.GetAsync("/api/instance");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var info = (await response.Content.ReadFromJsonAsync<InstanceInfoResponse>())!;
+        Assert.Equal("minicloud", info.Product);
+        Assert.Equal(1, info.ProtocolVersion);
+        Assert.Equal("apps.discovery.example", info.AppDomain);
+        Assert.Equal("1.2.3-rc.1", info.ServerVersion);
+        Assert.Equal(new string('a', 40), info.SourceRevision);
+        Assert.Equal(new string('b', 40), Assert.Single(info.CliCompatibility!.SourceRevisions));
+    }
+
+    [Fact]
+    public void Instance_discovery_metadata_missing_from_a_packaged_server_fails_startup()
+    {
+        using var metadata = new ReleaseMetadataFixture();
+        File.Delete(metadata.Path);
+        using var factory = new AppApiFactory(_connection, releaseMetadataPath: metadata.Path);
+        Assert.Throws<FileNotFoundException>(() => factory.CreateClient());
+    }
+
+    [Fact]
     public async Task NamedPlanSelectionUsesDeploymentPermissionAndFreezesPlacementAtAdmission()
     {
         var seed = await SeedAsync("org_plan_selection", "app_plan_selection", DateTimeOffset.UtcNow);
@@ -903,7 +929,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
 
     private sealed record SeedResult(string OrganizationId, string AppId, string ApiKeyToken, string ApplicationId);
 
-    private sealed class AppApiFactory(SqliteConnection connection, string appDomain = "app.muni.dev") : WebApplicationFactory<Program>
+    private sealed class AppApiFactory(SqliteConnection connection, string appDomain = "app.muni.dev", string? releaseMetadataPath = null) : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -915,6 +941,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
                     ["Database:Provider"] = "Sqlite",
                     ["Providers:AllowLegacyConfiguration"] = "true",
                     ["ManagedDomains:Suffix"] = appDomain,
+                    ["ServerRelease:ManifestPath"] = releaseMetadataPath,
                     ["Firebase:ProjectId"] = "minicloud-test",
                     ["Database:RunMigrationsOnStartup"] = "false",
                     ["ConnectionStrings:Minicloud"] = "Data Source=:memory:"

@@ -1,6 +1,6 @@
 # T40–T44 — Packaged self-hosting
 
-Repository: `muniventures/minicloud`. Status: not started.
+Repository: `muniventures/minicloud`. Status: T40 in progress locally; T41–T44 not started.
 Authority: [packaged self-hosting specification](../../v1.0-self-hosted-installation.md). Its original T00–T90 IDs are local to that document; the IDs below are the umbrella assignments. Implement the stated scope without adding installation modes or rewriting deployment behavior.
 
 | Task | Deliverable | Hard dependencies | Parallel work |
@@ -31,6 +31,14 @@ Own new server-specific public release workflow/assets, image build wiring and s
 - Implement release verification and anonymous-pull checks, but leave actual publication/permission configuration to the authorized release stage. A local image build is not evidence that GHCR anonymous pulls are enabled.
 
 Acceptance: focused workflow/manifest tests reject mixed releases, unsupported architectures and mismatched source/digests; build checks cover both architecture definitions. Record any unavailable architecture/provenance/pull check as a gap.
+
+T40 implementation/handoff: [release tooling and exact schema/trust contract](../../../../packaging/server/README.md).
+The new workflow is deliberately gated on T41's Dockerfile/runtime handoff,
+T41/T43/T44's complete bundle and the integration owner's tested release input.
+Existing Dockerfiles/Compose remain untouched. The archive carries the runtime
+manifest core; a detached manifest binds its final archive checksum, avoiding a
+circular hash. No release publication, real image builds, signing, anonymous
+pulls or installation/hosted qualification are claimed by local synthetic checks.
 
 ## T41 — Shared stack and universal dashboard
 
