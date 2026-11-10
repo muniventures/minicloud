@@ -13,6 +13,14 @@ Authority: [packaged self-hosting specification](../../v1.0-self-hosted-installa
 
 Each row is a separate Copilot issue/PR. Agents run focused checks with synthetic fixtures. Codex owns final combined and disposable-host validation after implementation merges. Preparing a release workflow does not authorize publishing images/releases or using protected-environment credentials.
 
+## Frozen T00 packaging interfaces
+
+[T00](00-contracts.md#frozen-integration-decisions) fixes the source-only CLI pin/version policy, server workflow/tag/channel/asset names, manifest compatibility fields and Sigstore trust identity. [T30](30-identity-and-sessions.md#frozen-t00-wire-and-seed-contract) fixes runtime public configuration, account/setup DTOs and shared host bootstrap operations. Implement these interfaces, not alternative discovery, auth or seed paths. In particular, T42 owns setup HTTP transport only; T30 owns the shared service, host entry point and schema. T41 consumes its protected-input contract.
+
+T41 owns all three existing Dockerfiles and Compose until its handoff. T40 may author image workflow definitions against their frozen build/startup interface, but must request and record T41's handoff before modifying those files. Contract-only dependencies permit scaffolding, not merging references to nonexistent runtime services. T43/T44 then receive shared Compose/maintenance files sequentially.
+
+The shared image interface is repository-root build context with `modules/api/Dockerfile`, `modules/worker/Dockerfile` and `modules/dashboard/Dockerfile`; API/dashboard serve container port 8080, worker has no public port. API/worker retain `dotnet Minicloud.Api.dll` / `dotnet Minicloud.Worker.dll` entry points; the API additionally dispatches T30's host bootstrap operations. Dashboard accepts validated public configuration at startup, not installation-specific build arguments. T41 removes Firebase/Vite hostname build inputs; T40 supplies source/version OCI metadata without secrets. The current worker Dockerfile hardcodes its embedded runtime agent to `linux-x64`: T41 must expose explicit agent-RID build input/plumbing and T40 must supply/verify it rather than relabeling an x64 payload as arm64. Application VPS agent architecture must follow supported target placement; a native arm64 control-plane build alone is not evidence that cross-architecture managed VPSs work.
+
 ## T40 — Images and release assets
 
 Own new server-specific public release workflow/assets, image build wiring and server manifest/compatibility schema. Existing CLI workflow/installers belong to T20. Existing Dockerfiles may be touched only with an explicit handoff from T41; freeze build arguments and startup requirements first.
