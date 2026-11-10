@@ -1,5 +1,7 @@
 # Database release repairs — execution plan
 
+Coordination update: the [pre-v1 completion feature](../pre-v1-release/1.pre-v1-release.md) now owns remaining implementation order and cross-feature validation. Public repair code merged in PR #17 at `83f80fa` with required CI passing; final combined/hosted acceptance remains open. Private readiness commit `7751939` remains locally committed and unpushed. The newer CLI-removal task replaces R5's future binary-publication requirement; preserve the other behavior and qualification contracts below.
+
 Status: integration and repair code written; local and hosted validation deferred. Date: 2026-11-10.
 
 ## Current code status

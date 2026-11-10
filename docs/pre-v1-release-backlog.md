@@ -1,5 +1,7 @@
 # Pre-v1 release backlog
 
+The [pre-v1 completion feature](specs/pre-v1-release/1.pre-v1-release.md) is the current grouping and its [execution plan](specs/pre-v1-release/0.execution-plan.md) defines ordering and parallel Copilot assignments. It includes the remaining DB work, the two release items below, required Kratos authentication, and the explicitly selected SSH-key provisioning and sequential deployment-number features. Already merged work is baseline; final integration validation belongs to Codex after implementation PRs merge.
+
 Both items are required before v1. Status: planned.
 
 1. **Remove our prebuilt CLI.**
@@ -14,7 +16,7 @@ The database-release repairs have a separate [ordered specification and parallel
 - Complete hosted database backup, download and restore acceptance with data verification, network connectivity checks, and migration acceptance.
 - Review lifecycle states observed during acceptance: failed database creation remained `creating`; server deletion remained `deleting` until a normal retry. Causes are unconfirmed.
 - Improve generic or buffered operation diagnostics.
-- Resolve canonical CLI publication and distribution, pending the decision on prebuilt CLI removal.
+- Resolve canonical source-built CLI delivery under [T20](specs/pre-v1-release/subspecs/20-cli-distribution.md); do not schedule a new prebuilt binary publication as a prerequisite to removing that distribution.
 
 ## Release follow-ups observed on November 10
 
