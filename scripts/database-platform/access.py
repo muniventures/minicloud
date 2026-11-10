@@ -7,12 +7,17 @@ import os
 import secrets
 import tempfile
 import subprocess
+import time
 
 class AccessRollbackUnverifiedError(RuntimeError):
-    pass
+    def __init__(self, message, stage, cause):
+        super().__init__(message)
+        self.stage, self.cause_type = stage, type(cause).__name__
 
 class AccessChangeRolledBackError(RuntimeError):
-    pass
+    def __init__(self, message, stage, cause):
+        super().__init__(message)
+        self.stage, self.cause_type = stage, type(cause).__name__
 from pathlib import Path
 
 
@@ -146,6 +151,25 @@ def ensure_tls_identity(directory, addresses, run=subprocess.run):
     return key,cert,ca_cert
 
 
+def wait_for_postgres(container, run=subprocess.run, timeout=60, monotonic=time.monotonic, sleep=time.sleep):
+    # Compose start/recreation does not imply PostgreSQL is accepting connections.
+    # Poll observation only; never replay the access mutation on a readiness error.
+    deadline = monotonic() + timeout
+    while True:
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise RuntimeError('Database readiness deadline exceeded') from None
+        try:
+            run(['docker','exec',container,'pg_isready','-U','minicloud','-d','postgres'],
+                check=True, capture_output=True, timeout=min(5, remaining))
+            return
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise RuntimeError('Database readiness deadline exceeded') from None
+            sleep(min(1, remaining))
+
+
 def expose(request, run=subprocess.run):
     slug=request['appSlug']
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,62}',slug):
@@ -183,6 +207,7 @@ def expose(request, run=subprocess.run):
     auto=path.rsplit('/',1)[0]+'/postgresql.auto.conf'
     previous_hba=run(['docker','exec',container,'cat',path],check=True,capture_output=True,timeout=30).stdout
     previous_auto=run(['docker','exec',container,'cat',auto],check=True,capture_output=True,timeout=30).stdout
+    stage = 'access-tls'
     try:
         ca_cert=None
         if identities:
@@ -193,17 +218,21 @@ def expose(request, run=subprocess.run):
             run(['docker','exec','-u','root',container,'chmod','600','/var/lib/postgresql/data/server.key'],check=True,capture_output=True,timeout=30)
             sql="ALTER SYSTEM SET ssl = 'on';\nALTER SYSTEM SET ssl_cert_file = '/var/lib/postgresql/data/server.crt';\nALTER SYSTEM SET ssl_key_file = '/var/lib/postgresql/data/server.key';\nSELECT pg_reload_conf();\n"
             run(['docker','exec','-i',container,'psql','-X','-U','minicloud','-d','postgres','-v','ON_ERROR_STOP=1'],input=sql.encode(),check=True,capture_output=True,timeout=30)
+        stage = 'access-rules'
         result=apply(dict(container=container,databases=request['databases']),run)
         ports=['127.0.0.1:15432:5432']+[('['+address+']' if ':' in address else address)+':5432:5432' for address in addresses]
         override.write_text(json.dumps({'services':{'db':{'ports':ports}}}))
         override.chmod(0o600)
+        stage = 'access-listener'
         run(compose,check=True,capture_output=True,timeout=300)
-        run(['docker','exec',container,'pg_isready','-U','minicloud','-d','postgres'],check=True,capture_output=True,timeout=30)
+        stage = 'access-readiness'
+        wait_for_postgres(container, run)
         if identities:
+            stage = 'access-tls-verification'
             enabled=run(['docker','exec',container,'psql','-X','-U','minicloud','-d','postgres','-Atc','SHOW ssl'],check=True,capture_output=True,timeout=30)
             if enabled.stdout.strip()!=b'on': raise ValueError('Database TLS was not activated')
         return dict(result,public=public,listenAddresses=addresses,caCertificatePem=ca_cert.read_text() if ca_cert else None)
-    except Exception:
+    except Exception as cause:
         try:
             for name,contents in previous_tls.items():
                 source=certdir/name
@@ -222,9 +251,9 @@ def expose(request, run=subprocess.run):
                 override.write_bytes(previous_override)
             override.chmod(0o600)
             run(compose,check=True,capture_output=True,timeout=300)
+            wait_for_postgres(container, run)
             run(['docker','exec',container,'psql','-X','-U','minicloud','-d','postgres','-v','ON_ERROR_STOP=1','-c','SELECT pg_reload_conf()'],check=True,capture_output=True,timeout=30)
-            run(['docker','exec',container,'pg_isready','-U','minicloud','-d','postgres'],check=True,capture_output=True,timeout=30)
             if previous_override is None: override.unlink()
         except Exception:
-            raise AccessRollbackUnverifiedError('Database access failed and rollback could not be verified') from None
-        raise AccessChangeRolledBackError('Database access failed; prior access configuration restored') from None
+            raise AccessRollbackUnverifiedError('Database access failed and rollback could not be verified', stage, cause) from None
+        raise AccessChangeRolledBackError('Database access failed; prior access configuration restored', stage, cause) from None

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 using Minicloud.Common.Auth;
 using Minicloud.Common.Contracts;
 using Minicloud.Common.Data;
@@ -19,7 +20,7 @@ public sealed partial class DatabaseOperationProcessor(
     IAppSecretService appSecrets, SecretEncryptionService encryption,
     IIdGenerator ids, TimeProvider clock, ISshDeploymentClient ssh,
     IOptions<SshDeploymentOptions> sshOptions, IOptions<DatabasePlatformOptions> databaseOptions,
-    DatabaseNetworkService privateNetworks)
+    DatabaseNetworkService privateNetworks, ILogger<DatabaseOperationProcessor>? logger = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
 
@@ -80,6 +81,8 @@ public sealed partial class DatabaseOperationProcessor(
             var app = await db.Apps.SingleOrDefaultAsync(x => x.Id == server.RuntimeAppId && x.OrganizationId == operation.OrganizationId, ct);
             if (app is not null)
             {
+                if (app.DeletionStatus == "failed" && operation.AttemptCount > 1)
+                    throw new InvalidOperationException("Backing application deletion failed; explicit retry is required.");
                 server.Revision++;
                 server.UpdatedAt = clock.GetUtcNow();
                 server.Status = "deleting";
@@ -117,6 +120,9 @@ public sealed partial class DatabaseOperationProcessor(
                 abandoned.UpdatedAt = now;
                 abandoned.OwnershipToken = null;
                 abandoned.LeaseExpiresAt = null;
+                await MarkFailedResourceAsync(abandoned, ct);
+                logger?.LogWarning("Database operation {OperationId} ({OperationKind}) failed at {Stage}: {ErrorCode}.",
+                    abandoned.Id, abandoned.Kind, "lease-expired", abandoned.ErrorCode);
                 await db.SaveChangesAsync(ct);
                 interrupted = true;
             }
@@ -137,6 +143,7 @@ public sealed partial class DatabaseOperationProcessor(
         });
         if (operation is null) { return interrupted; }
         DatabaseOperationLease? hostLease = null;
+        var stage = "lease-acquisition";
         using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
         try
         {
@@ -178,7 +185,9 @@ public sealed partial class DatabaseOperationProcessor(
                 }
             }
             using var leaseRegistration = hostLease?.Lost.Register(operationCancellation.Cancel);
+            stage = "authority-validation";
             await ValidateDatabaseOperationAuthorityAsync(operation, operationCancellation.Token);
+            stage = "dispatch";
             var finished = await DispatchOperationAsync(operation, operationCancellation.Token);
             operationCancellation.Token.ThrowIfCancellationRequested();
             operation.Status = finished ? "completed" : "queued";
@@ -201,17 +210,11 @@ public sealed partial class DatabaseOperationProcessor(
             operation.ErrorCode = operation.Kind == "migrate" ? "database_migration_reconciliation_required" : error is DatabaseRemoteOperationException remote ? remote.Code : error is UnauthorizedAccessException ? "database_authority_changed" : "database_operation_failed";
             operation.ErrorMessage = operation.Kind == "migrate" ? "Migration requires explicit reconciliation. The source may remain fenced; inspect source and target before reopening writers." : "Database operation failed; source data was not replaced. Inspect its current state before retrying.";
             operation.CompletedAt = clock.GetUtcNow();
-            if (operation.Kind == "create-server" && operation.ServerId is not null)
-            {
-                var failedServer = await db.ManagedDatabaseServers.SingleOrDefaultAsync(x =>
-                    x.Id == operation.ServerId && x.OrganizationId == operation.OrganizationId && x.Status == "creating", ct);
-                if (failedServer is not null)
-                {
-                    failedServer.Status = "failed";
-                    failedServer.Revision++;
-                    failedServer.UpdatedAt = clock.GetUtcNow();
-                }
-            }
+            await MarkFailedResourceAsync(operation, ct);
+            logger?.LogWarning("Database operation {OperationId} ({OperationKind}) failed at {Stage}: {ErrorType}, {ErrorCode}, runtime {RuntimeErrorType}.",
+                operation.Id, operation.Kind, error is DatabaseRemoteOperationException failure ? failure.Stage : stage,
+                error.GetType().Name, operation.ErrorCode,
+                error is DatabaseRemoteOperationException runtimeFailure ? runtimeFailure.RuntimeErrorType : "none");
             if (cancelled)
             {
                 operation.ErrorCode = "database_cancelled";
@@ -226,6 +229,39 @@ public sealed partial class DatabaseOperationProcessor(
         await SaveOwnedDatabaseChangesAsync(operation, ct, completedOwner);
         if (operation.Status == "queued") { await Task.Delay(TimeSpan.FromSeconds(5), ct); }
         return true;
+    }
+
+    private async Task MarkFailedResourceAsync(DatabaseOperation operation, CancellationToken ct)
+    {
+        // Only creation/deletion resources transition here; a failed backup must not
+        // mark a healthy database failed. Revision concurrency protects newer state.
+        if (operation.Kind is not ("create-server" or "delete-server" or "create-database")) return;
+        if (await db.DatabaseOperations.AsNoTracking().AnyAsync(x => x.OrganizationId == operation.OrganizationId &&
+            x.Id != operation.Id && (x.Status == "queued" || x.Status == "running" || x.Status == "cancelling") &&
+            (operation.DatabaseId != null ? x.DatabaseId == operation.DatabaseId : x.ServerId == operation.ServerId), ct)) return;
+        if ((operation.Kind is "create-server" or "delete-server") && operation.ServerId is not null)
+        {
+            var expected = operation.Kind == "create-server" ? "creating" : "deleting";
+            var server = await db.ManagedDatabaseServers.SingleOrDefaultAsync(x =>
+                x.Id == operation.ServerId && x.OrganizationId == operation.OrganizationId && x.Status == expected, ct);
+            if (server is not null)
+            {
+                server.Status = "failed";
+                server.Revision++;
+                server.UpdatedAt = clock.GetUtcNow();
+            }
+        }
+        if (operation.Kind == "create-database" && operation.DatabaseId is not null)
+        {
+            var database = await db.ManagedDatabases.SingleOrDefaultAsync(x =>
+                x.Id == operation.DatabaseId && x.OrganizationId == operation.OrganizationId && x.Status == "creating", ct);
+            if (database is not null)
+            {
+                database.Status = "failed";
+                database.Revision++;
+                database.UpdatedAt = clock.GetUtcNow();
+            }
+        }
     }
 
     private async Task<bool> CreateServerAsync(DatabaseOperation operation, CancellationToken ct)
@@ -363,7 +399,7 @@ public sealed partial class DatabaseOperationProcessor(
         var response = await ssh.ExecuteDeploymentAsync(new SshDeploymentRequest(host, options.Username, key, SshDeployStep.RemoteDirectoryFor(operation.Id), envelope.ToJsonString(), script, [], TimeSpan.FromMinutes(30)), (_, _) => Task.CompletedTask, ct);
         const string marker = "__MINICLOUD_DATABASE_RESULT__=";
         var result = response.OutputLines.LastOrDefault(x => x.StartsWith(marker, StringComparison.Ordinal))
-            ?? throw new DatabaseRemoteOperationException("database_runtime_interrupted");
+            ?? throw new DatabaseRemoteOperationException("database_runtime_interrupted", scriptName);
         if (result.Length > 65536) { throw new InvalidOperationException("Database result exceeds its limit."); }
         using var document = JsonDocument.Parse(result[marker.Length..]);
         if (response.ExitCode != 0)
@@ -379,10 +415,12 @@ public sealed partial class DatabaseOperationProcessor(
                 "UnauthorizedAccessException" => "database_authority_changed",
                 _ => "database_runtime_failed"
             };
-            throw new DatabaseRemoteOperationException(code);
+            var remoteStage = document.RootElement.TryGetProperty("errorStage", out var phase) ? phase.GetString() : null;
+            var remoteType = document.RootElement.TryGetProperty("causeType", out var cause) ? cause.GetString() : category;
+            throw new DatabaseRemoteOperationException(code, scriptName, remoteStage, remoteType);
         }
         if (!response.CompletionMarkerFound || response.CompletionSha != operation.Id)
-        { throw new DatabaseRemoteOperationException("database_runtime_confirmation_missing"); }
+        { throw new DatabaseRemoteOperationException("database_runtime_confirmation_missing", scriptName); }
         return document.RootElement.Clone();
     }
 

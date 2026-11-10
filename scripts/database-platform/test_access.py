@@ -111,8 +111,15 @@ class AccessRollbackTests(unittest.TestCase):
             override.write_bytes(previous)
             calls=[]
             attempts=0
+            readiness_attempts=0
+            clock=[0]
+            original_wait=access.wait_for_postgres
+            def sleep(seconds):
+                clock[0]+=seconds
+            def wait(container, runner):
+                return original_wait(container, runner, monotonic=lambda: clock[0], sleep=sleep)
             def run(args,**kw):
-                nonlocal attempts
+                nonlocal attempts, readiness_attempts
                 calls.append((args,kw))
                 output=b''
                 if args[:2]==['docker','inspect']:
@@ -124,13 +131,26 @@ class AccessRollbackTests(unittest.TestCase):
                 if args[:2]==['docker','compose']:
                     attempts+=1
                     if attempts==1: raise subprocess.CalledProcessError(1,args)
+                if 'pg_isready' in args:
+                    readiness_attempts+=1
+                    if readiness_attempts==1: raise subprocess.CalledProcessError(1,args)
                 return SimpleNamespace(stdout=output,returncode=0)
             def mapped_path(value):
                 return base if value=='/opt/minicloud/apps' else Path(value)
-            with patch.object(access,'Path',side_effect=mapped_path):
-                with self.assertRaisesRegex(RuntimeError,'prior access configuration restored'):
+            with patch.object(access,'Path',side_effect=mapped_path), patch.object(access,'wait_for_postgres',side_effect=wait):
+                with self.assertRaisesRegex(RuntimeError,'prior access configuration restored') as failure:
                     access.expose(dict(appSlug='fixture',databases=[dict(databaseName='fixture_db',username='fixture_user',mode='internal')]),run)
+            self.assertEqual(failure.exception.stage, 'access-listener')
+            self.assertEqual(failure.exception.cause_type, 'CalledProcessError')
+            from dispatch import failure_result
+            self.assertEqual(failure_result(failure.exception), dict(status='failed', errorType='AccessChangeRolledBackError', errorStage='access-listener', causeType='CalledProcessError'))
             self.assertEqual(attempts,2)
+            self.assertEqual(readiness_attempts,2)
+            rollback_start=max(index for index,(args,_) in enumerate(calls) if args[:2]==['docker','compose'])
+            rollback_reload=next(index for index,(args,_) in enumerate(calls)
+                                 if index>rollback_start and args[-1]=='SELECT pg_reload_conf()')
+            last_readiness=max(index for index,(args,_) in enumerate(calls) if 'pg_isready' in args)
+            self.assertLess(last_readiness, rollback_reload)
             self.assertEqual(override.read_bytes(),previous)
             restored=[kwargs.get('input') for args,kwargs in calls if 'rollback' in args]
             self.assertEqual(restored,[b'previous hba',b'previous auto config'])
@@ -168,3 +188,52 @@ class RetainedMigrationFenceTests(unittest.TestCase):
                     internalCidrs=['127.0.0.1/32'],allowedCidrs=['0.0.0.0/0'])]),run)
         statement=next(args[-1] for args in calls if 'pg_terminate_backend' in args[-1])
         self.assertIn('NOT (FALSE)',statement)
+
+
+class FailureDiagnosticsTests(unittest.TestCase):
+    def test_failure_summary_never_serializes_secret_subprocess_details(self):
+        import json, subprocess
+        from access import AccessChangeRolledBackError
+        from dispatch import failure_result
+        secret = 'SENTINEL_PASSWORD_TOKEN_PROVIDER_SECRET'
+        cause = subprocess.CalledProcessError(1, ['psql', secret], output=secret.encode(), stderr=secret.encode())
+        error = AccessChangeRolledBackError(secret, 'access-listener', cause)
+        result = failure_result(error)
+        self.assertEqual(result, dict(status='failed', errorType='AccessChangeRolledBackError', errorStage='access-listener', causeType='CalledProcessError'))
+        self.assertNotIn(secret, json.dumps(result))
+        error.stage = secret
+        error.cause_type = secret
+        self.assertNotIn(secret, json.dumps(failure_result(error)))
+
+
+class PostgresReadinessTests(unittest.TestCase):
+    def test_delayed_start_is_observed_without_repeating_mutations(self):
+        import subprocess
+        from access import wait_for_postgres
+        clock = [0]
+        calls = []
+        def run(args, **kwargs):
+            calls.append(args)
+            if len(calls) < 3:
+                raise subprocess.CalledProcessError(1, args)
+        def sleep(seconds):
+            clock[0] += seconds
+        wait_for_postgres('db-1', run, timeout=4, monotonic=lambda: clock[0], sleep=sleep)
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(args[3] == 'pg_isready' for args in calls))
+        self.assertEqual(clock[0], 2)
+
+    def test_permanent_failure_has_bounded_deadline_and_no_command_details(self):
+        import subprocess
+        from access import wait_for_postgres
+        clock = [0]
+        calls = []
+        def run(args, **kwargs):
+            calls.append(args)
+            raise subprocess.CalledProcessError(1, args, stderr=b'SENTINEL_SECRET')
+        def sleep(seconds):
+            clock[0] += seconds
+        with self.assertRaisesRegex(RuntimeError, '^Database readiness deadline exceeded$'):
+            wait_for_postgres('db-1', run, timeout=3, monotonic=lambda: clock[0], sleep=sleep)
+        self.assertEqual(clock[0], 3)
+        self.assertEqual(len(calls), 3)
