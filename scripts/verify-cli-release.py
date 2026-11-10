@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""Smoke-test a packaged CLI binary against a minimal authenticated API."""
+"""Smoke-test a source-built CLI against a minimal authenticated API."""
 
 import json
 import os
@@ -112,7 +112,7 @@ def run(executable, *args, env=None):
 
 def main():
     if len(sys.argv) != 3:
-        raise SystemExit("usage: verify-cli-release.py <executable> <version>")
+        raise SystemExit("usage: verify-cli-release.py <source-built-executable> <version>")
 
     executable = Path(sys.argv[1]).resolve()
     expected_version = sys.argv[2]
@@ -128,7 +128,9 @@ def main():
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        with tempfile.TemporaryDirectory(prefix="minicloud-release-smoke-") as config_home:
+        artifacts_dir = Path(__file__).resolve().parents[1] / ".local" / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="minicloud-cli-smoke-", dir=artifacts_dir) as config_home:
             environment = os.environ.copy()
             environment["MINICLOUD_API_URL"] = f"http://127.0.0.1:{server.server_port}"
             environment.pop("MINICLOUD_APP_DOMAIN", None)
@@ -150,7 +152,7 @@ def main():
     if Handler.requests != expected_requests:
         raise AssertionError(f"unexpected API requests: {Handler.requests}")
 
-    print(f"release smoke passed for {executable.name} {expected_version}")
+    print(f"source smoke passed for {executable.name} {expected_version}")
 
 
 if __name__ == "__main__":

@@ -2,16 +2,23 @@
 
 The current command is `minicloud`.
 
-New prebuilt CLI releases are no longer published. Use the CLI source with
-.NET 10 from a checkout of this repository:
+The CLI is built from a reviewed source revision; new prebuilt CLI releases are
+not published. Install from a shell with Git and the .NET 10 SDK:
 
 ```sh
-dotnet run --project modules/cli -- --help
+curl -fsSL https://raw.githubusercontent.com/muniventures/minicloud/main/install.sh | sh
 ```
 
-Replace `--help` with the desired command and arguments. Historical release
-assets remain available; the existing installers and reusable customer workflow
-still consume those assets pending their source-build migration.
+The installer defaults to source commit
+`7416e1408ecd9d11f58c638f0caf1c28e5fa6e3f`. Set `MINICLOUD_VERSION` to a full
+lowercase commit SHA or an exact CLI version tag such as `v3.1.0` to select
+another revision; branches, `latest`, and `server-v*` tags are rejected.
+`MINICLOUD_INSTALL_DIR` selects a writable install directory; `MINICLOUD_REPO`
+is accepted only as `muniventures/minicloud`. Windows users can run `install.ps1`
+with the same environment variables. Git and the .NET 10 SDK are needed to
+build; the self-contained installed CLI does not need a separate .NET runtime.
+Historical release assets remain available but are not used by these installers
+or the reusable customer workflow.
 
 ## Instances
 

@@ -5,7 +5,7 @@ Use the reusable Minicloud workflow when you want GitHub Actions to deploy sourc
 For self-hosting, pass your HTTPS API origin as `minicloud_api_url`. When the
 instance has no managed registry, use `buildMode: source` for source-backed
 services. Pin the reusable workflow to a reviewed commit and set
-`minicloud_version` to an explicit CLI release tag for repeatable installs.
+`minicloud_version` to a full CLI source commit SHA for repeatable builds.
 
 ## Prerequisites
 
@@ -136,7 +136,7 @@ jobs:
 | `database` | No | `sqlite` | `sqlite` or `postgres`. |
 | `minicloud_environment` | No | `prod` | `prod` or `staging`. `prod` uses the production Minicloud API. `staging` uses `https://api.cloud-dev.muni.dev`. |
 | `services` | Yes | | YAML service array. Uses the same service fields as `minicloud.yml`, with `name` added because a workflow input cannot receive the keyed `services` map directly. |
-| `minicloud_version` | No | `latest` | Minicloud CLI release version to install. |
+| `minicloud_version` | No | `7416e1408ecd9d11f58c638f0caf1c28e5fa6e3f` | Full lowercase CLI source commit SHA or exact CLI version tag (for example `v3.1.0`). Branches, `latest`, and `server-v*` tags are rejected. The workflow builds this source using Git and the .NET 10 SDK. |
 
 ## Services
 
@@ -200,7 +200,7 @@ The workflow sends `secretEnv` references to the Minicloud API. Minicloud resolv
 The workflow runs one deploy job:
 
 - checks out the repository
-- installs the public Minicloud CLI from `muniventures/minicloud`
+- clones and verifies the selected CLI source revision, then builds the CLI with the .NET 10 SDK in a separate runner-temporary directory
 - converts the `services` YAML input into a temporary `minicloud.yml`
 - runs `minicloud deploy --all --config minicloud.yml`
 
@@ -231,5 +231,4 @@ For SQLite, omit `postgres_password`.
 Set `minicloud_api_url` to your HTTPS API origin and `minicloud_app_domain` to
 that installation's APP_DOMAIN. The latter sets `MINICLOUD_APP_DOMAIN` for
 framework host validation. Both are required when selecting a self-hosted instance.
-Use a CLI release containing these options, or build the current source during
-pre-release qualification.
+Select a CLI source revision containing these options with `minicloud_version`.
