@@ -38,3 +38,23 @@ jobs:
           python3 scripts/database-platform/test-postgres-integration.py
       - name: Run backend, worker, CLI and deployment integration tests
         run: dotnet test Minicloud.slnx --configuration Release -m:1
+      - name: Publish and smoke-test the source-built CLI
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          version="0.0.0-source.sha${SOURCE_REVISION:0:12}"
+          output="$GITHUB_WORKSPACE/.local/artifacts/cli-smoke/publish"
+          mkdir -p "$output"
+          echo "Publishing CLI source revision $SOURCE_REVISION"
+          dotnet publish modules/cli/Minicloud.Cli.csproj \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained true \
+            --artifacts-path "$GITHUB_WORKSPACE/.local/artifacts/cli-smoke/build" \
+            --output "$output" \
+            -p:Version="$version" \
+            -p:SourceRevisionId="$SOURCE_REVISION" \
+            -p:InformationalVersion="$version+sha.$SOURCE_REVISION"
+          mv "$output/Minicloud.Cli" "$output/minicloud"
+          python3 scripts/verify-cli-release.py "$output/minicloud" "$version"

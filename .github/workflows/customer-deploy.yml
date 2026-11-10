@@ -21,7 +21,7 @@ on:
       minicloud_version:
         required: false
         type: string
-        default: latest
+        default: 7416e1408ecd9d11f58c638f0caf1c28e5fa6e3f
       minicloud_api_url:
         description: "HTTPS API origin for a self-hosted Minicloud instance."
         required: false
@@ -50,32 +50,71 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Minicloud CLI
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build Minicloud CLI from verified source
         env:
           MINICLOUD_VERSION: ${{ inputs.minicloud_version }}
-          MINICLOUD_INSTALL_DIR: ${{ runner.temp }}/minicloud-bin
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "${MINICLOUD_INSTALL_DIR}"
-          base=https://github.com/muniventures/minicloud/releases
-          if [[ "$MINICLOUD_VERSION" == latest ]]; then
-            base="$base/latest/download"
+          if [[ "$MINICLOUD_VERSION" =~ ^[0-9a-f]{40}$ ]]; then
+            expected_sha="$MINICLOUD_VERSION"
+            cli_version="0.0.0-source.sha${MINICLOUD_VERSION:0:12}"
           elif [[ "$MINICLOUD_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            base="$base/download/$MINICLOUD_VERSION"
+            tag_ref="refs/tags/$MINICLOUD_VERSION"
+            remote_before="$(git ls-remote https://github.com/muniventures/minicloud.git "$tag_ref" "$tag_ref^{}")"
+            expected_sha="$(printf '%s\n' "$remote_before" | awk -v ref="$tag_ref" '$2 == ref { tag=$1 } $2 == ref "^{}" { peeled=$1 } END { if (peeled != "") print peeled; else print tag }')"
+            if [[ ! "$expected_sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "CLI tag $MINICLOUD_VERSION was not found in the canonical repository." >&2
+              exit 1
+            fi
+            cli_version="${MINICLOUD_VERSION#v}"
           else
-            echo "minicloud_version must be latest or a release tag such as v2.1.1." >&2
+            echo "minicloud_version must be a full lowercase commit SHA or exact CLI tag (for example v3.1.0); branches, latest, and server-v tags are not supported." >&2
             exit 1
           fi
-          archive=minicloud-linux-x64.tar.gz
-          cd "${MINICLOUD_INSTALL_DIR}"
-          curl -fsSL "$base/$archive" -o "$archive"
-          curl -fsSL "$base/checksums.txt" -o checksums.txt
-          awk -v asset="$archive" '$2 == asset && $1 ~ /^[a-fA-F0-9]+$/ && length($1) == 64 { print $1 "  " asset; found++ } END { exit(found != 1) }' checksums.txt > checksum
-          sha256sum -c checksum
-          tar -xzf "$archive"
-          test -x minicloud
-          echo "${MINICLOUD_INSTALL_DIR}" >> "${GITHUB_PATH}"
+
+          build_root="$(mktemp -d "${RUNNER_TEMP}/minicloud-cli-build.XXXXXX")"
+          source_dir="${build_root}/source"
+          publish_dir="${build_root}/publish"
+          git clone --filter=blob:none --no-tags --single-branch --branch main \
+            https://github.com/muniventures/minicloud.git "$source_dir"
+          if [[ -n "${tag_ref:-}" ]]; then
+            git -C "$source_dir" fetch --no-tags origin "$tag_ref:$tag_ref"
+            fetched_sha="$(git -C "$source_dir" rev-parse "$tag_ref^{commit}")"
+            remote_after="$(git ls-remote https://github.com/muniventures/minicloud.git "$tag_ref" "$tag_ref^{}")"
+            remote_after_sha="$(printf '%s\n' "$remote_after" | awk -v ref="$tag_ref" '$2 == ref { tag=$1 } $2 == ref "^{}" { peeled=$1 } END { if (peeled != "") print peeled; else print tag }')"
+            if [[ "$fetched_sha" != "$expected_sha" || "$remote_after_sha" != "$expected_sha" ]]; then
+              echo "CLI tag $MINICLOUD_VERSION changed while its source was being acquired; retry with a reviewed commit SHA." >&2
+              exit 1
+            fi
+          fi
+          if ! git -C "$source_dir" merge-base --is-ancestor "$expected_sha" refs/remotes/origin/main; then
+            echo "Selected CLI source $expected_sha is not in canonical main." >&2
+            exit 1
+          fi
+          git -C "$source_dir" checkout --detach "$expected_sha"
+          resolved_sha="$(git -C "$source_dir" rev-parse HEAD)"
+          if [[ "$resolved_sha" != "$expected_sha" ]]; then
+            echo "Resolved source revision did not match the selected revision." >&2
+            exit 1
+          fi
+          echo "Building Minicloud CLI from muniventures/minicloud at $resolved_sha"
+          cd "$source_dir"
+          dotnet publish "$source_dir/modules/cli/Minicloud.Cli.csproj" \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained true \
+            --output "$publish_dir" \
+            -p:Version="$cli_version" \
+            -p:SourceRevisionId="$resolved_sha" \
+            -p:InformationalVersion="$cli_version+sha.$resolved_sha"
+          mv "$publish_dir/Minicloud.Cli" "$publish_dir/minicloud"
+          python3 "$source_dir/scripts/verify-cli-release.py" "$publish_dir/minicloud" "$cli_version"
+          echo "$publish_dir" >> "$GITHUB_PATH"
 
       - name: Generate Minicloud config
         env:

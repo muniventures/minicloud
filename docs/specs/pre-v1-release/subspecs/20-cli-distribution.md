@@ -1,6 +1,6 @@
 # T20 — Remove prebuilt CLI distribution
 
-Status: partial implementation. The CLI release workflow is removed; historical assets are unchanged. Installer/customer-workflow source acquisition and source-build smoke coverage remain pending after T00.
+Status: source-build migration implemented for installers and the reusable customer workflow; Linux x64 publish/version/help/API smoke passes locally. T80 must advance the initial source pin after final CLI changes merge. This is not final release qualification; historical assets and branch protection are unchanged.
 
 Repository administration remains separate: an authorized maintainer must remove
 any obsolete CLI release-build required status checks from branch protection.
@@ -23,13 +23,13 @@ This supersedes the **future binary-publication requirement** in [DB repair R5](
 
 ## Current source
 
-| Path | Existing dependency to replace |
+| Path | Updated delivery behavior |
 | --- | --- |
 | Former `.github/workflows/cli-release.yml` | Removed entirely, including the four-platform release-build matrix, archive publication and tag/manual triggers. Ordinary backend CI still builds/tests CLI source through `Minicloud.slnx`; do not recreate binary-release CI. |
-| `install.sh`, `install.ps1` | Download platform archives from a pinned release or repository-wide `releases/latest`. |
-| `.github/workflows/customer-deploy.yml` | `Install Minicloud CLI` downloads `minicloud-linux-x64.tar.gz`; `minicloud_version` defaults to `latest`. |
+| `install.sh`, `install.ps1` | Preserve CLI installer paths and configuration inputs; verify a canonical Git SHA/tag, publish the selected source, then replace the installation only after version/help checks pass. |
+| `.github/workflows/customer-deploy.yml` | Build verified canonical CLI source with pinned .NET 10 setup in a runner-temporary directory; `minicloud_version` defaults to the frozen initial SHA. |
 | `modules/cli/Minicloud.Cli.csproj` | Existing .NET 10 executable referencing `modules/contracts`; source material must include that dependency. |
-| `scripts/verify-cli-release.py` | Existing version/help and mocked canonical API smoke assertions to retain for source-built output. |
+| `scripts/verify-cli-release.py` | Retained version/help and mocked canonical API smoke assertions for source-built output; normal backend CI publishes and runs it. |
 
 ## Implementation contract
 
