@@ -54,7 +54,8 @@ public sealed class DatabaseBindingService(MinicloudDbContext db, ControlPlaneAu
         if (binding.Status == "revoked") return;
         var database = await db.ManagedDatabases.SingleAsync(x => x.Id == databaseId && x.OrganizationId == binding.OrganizationId, ct);
         await RequireIdleAsync(database.Id, database.OrganizationId, ct);
-        if (binding.Status != "applied") throw new InvalidOperationException("Binding operation is already pending.");
+        if (binding.Status is not ("applied" or "pending" or "revoking" or "failed"))
+            throw new InvalidOperationException("The binding state does not support disconnection.");
         database.Revision++;
         binding.Status = "revoking"; binding.Revision++; binding.UpdatedAt = clock.GetUtcNow();
         QueueBindingOperation(binding, "unbind", actor);

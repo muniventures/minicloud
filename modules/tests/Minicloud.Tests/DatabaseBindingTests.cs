@@ -119,4 +119,34 @@ public sealed class DatabaseBindingTests : IAsyncLifetime
         Assert.Empty(await concurrent.ManagedDatabaseBindings.AsNoTracking().ToListAsync());
         Assert.Empty(await concurrent.DatabaseOperations.AsNoTracking().ToListAsync());
     }
+    [Theory]
+    [InlineData("pending")]
+    [InlineData("revoking")]
+    [InlineData("failed")]
+    public async Task AbandonedBindingCanQueueFreshRevocationAfterItsOperationHasFailed(string status)
+    {
+        db.ManagedDatabaseBindings.Add(new ManagedDatabaseBinding { Id = "binding_abandoned", OrganizationId = "org_test", DatabaseId = "database_test", AppId = "app_test", ServiceName = "backend", Status = status });
+        db.DatabaseOperations.Add(new DatabaseOperation { Id = "previous_failed", OrganizationId = "org_test", DatabaseId = "database_test", Kind = status == "revoking" ? "unbind" : "bind", Status = "failed" });
+        await db.SaveChangesAsync();
+        var database = await db.ManagedDatabases.SingleAsync();
+        var revision = database.Revision;
+        await service.UnbindAsync(database.Id, "binding_abandoned", actor, default);
+        Assert.Equal("revoking", (await db.ManagedDatabaseBindings.SingleAsync()).Status);
+        Assert.Equal(revision + 1, database.Revision);
+        Assert.Equal("unbind", (await db.DatabaseOperations.SingleAsync(x => x.Status == "queued")).Kind);
+    }
+
+    [Theory]
+    [InlineData("queued")]
+    [InlineData("running")]
+    [InlineData("cancelling")]
+    public async Task PendingBindingCannotBeReconciledUntilItsActiveOperationStops(string status)
+    {
+        db.ManagedDatabaseBindings.Add(new ManagedDatabaseBinding { Id = "binding_pending", OrganizationId = "org_test", DatabaseId = "database_test", AppId = "app_test", ServiceName = "backend", Status = "pending" });
+        db.DatabaseOperations.Add(new DatabaseOperation { Id = "previous_active", OrganizationId = "org_test", DatabaseId = "database_test", Kind = "bind", Status = status });
+        await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.UnbindAsync("database_test", "binding_pending", actor, default));
+        Assert.Equal("pending", (await db.ManagedDatabaseBindings.SingleAsync()).Status);
+        Assert.Single(await db.DatabaseOperations.ToListAsync());
+    }
 }

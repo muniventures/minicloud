@@ -119,9 +119,11 @@ public sealed partial class DatabaseOperationProcessor
         using var request = JsonDocument.Parse(operation.RequestJson);
         var binding = await db.ManagedDatabaseBindings.SingleAsync(x => x.Id == request.RootElement.GetProperty("bindingId").GetString() && x.DatabaseId == database.Id && x.OrganizationId == operation.OrganizationId, ct);
         await RequireApplicationMutationAsync(operation, binding.AppId, ct);
-        var host = await db.ServerInstances.SingleAsync(x => x.AppId == binding.AppId && x.OrganizationId == operation.OrganizationId, ct);
+        var host = await db.ServerInstances.SingleOrDefaultAsync(x => x.AppId == binding.AppId && x.OrganizationId == operation.OrganizationId, ct);
         await ExecuteRemoteAsync(operation, sourceHost.IpAddress!, "private-network.py", new { action = "revoke-client", bindingId = binding.Id, operationId = operation.Id }, ct);
-        await ExecuteRemoteAsync(operation, host.IpAddress!, "private-network.py", new { action = "stop-client", bindingId = binding.Id, operationId = operation.Id }, ct);
+        var deleting = await db.Apps.AnyAsync(x => x.Id == binding.AppId && x.OrganizationId == operation.OrganizationId && x.DeletionStatus != null, ct);
+        if (host is not null && !deleting)
+            await ExecuteRemoteAsync(operation, host.IpAddress!, "private-network.py", new { action = "stop-client", bindingId = binding.Id, operationId = operation.Id }, ct);
         binding.Status = "revoked";
         binding.Host = null;
         binding.UpdatedAt = clock.GetUtcNow();
@@ -139,12 +141,19 @@ public sealed partial class DatabaseOperationProcessor
             if (rollout.Status is DeploymentStatus.Failed or DeploymentStatus.Canceled) { throw new InvalidOperationException("Connection rollout failed; inspect the selected application."); }
             return rollout.Status == DeploymentStatus.Succeeded;
         }
-        if (operation.Kind == "bind") { await ApplyBindingNetworkAsync(operation, database, sourceApp, sourceHost, ct); }
-        else { await RevokeBindingNetworkAsync(operation, database, sourceApp, sourceHost, ct); }
         using var request = JsonDocument.Parse(operation.RequestJson);
         var binding = await db.ManagedDatabaseBindings.SingleAsync(x => x.Id == request.RootElement.GetProperty("bindingId").GetString() && x.OrganizationId == operation.OrganizationId, ct);
         var app = await db.Apps.SingleAsync(x => x.Id == binding.AppId && x.OrganizationId == operation.OrganizationId, ct);
         await RequireApplicationMutationAsync(operation, app.Id, ct);
+        if (operation.Kind == "bind" && app.DeletionStatus is not null)
+            throw new InvalidOperationException("Cannot bind an application pending deletion.");
+        if (operation.Kind == "bind") { await ApplyBindingNetworkAsync(operation, database, sourceApp, sourceHost, ct); }
+        else { await RevokeBindingNetworkAsync(operation, database, sourceApp, sourceHost, ct); }
+        if (operation.Kind == "unbind" && (app.DeletionStatus is not null || !await db.ServerInstances.AnyAsync(x => x.AppId == app.Id && x.OrganizationId == app.OrganizationId, ct)))
+        {
+            operation.ResultJson = JsonSerializer.Serialize(new { status = "revoked", rolloutSkipped = "application-runtime-unavailable-or-deleting" }, Json);
+            return true;
+        }
         var deployment = await QueueDatabaseRolloutAsync(app, new HashSet<string>(StringComparer.Ordinal) { binding.ServiceName }, ct);
         operation.ResultJson = JsonSerializer.Serialize(new { rolloutDeploymentId = deployment.Id }, Json);
         return false;
