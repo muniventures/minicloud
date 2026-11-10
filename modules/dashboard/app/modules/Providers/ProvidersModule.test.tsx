@@ -688,3 +688,56 @@ it("UX13/UX14: retains rows on failed refresh, isolates organization switches, a
   });
   expect(await screen.findByText("No plans")).toBeInTheDocument();
 });
+
+function rerenderPlans(view: ReturnType<typeof render>) {
+  view.rerender(<MemoryRouter initialEntries={["/plans"]}><LocationProbe /><Routes><Route path="/plans" element={<ProvidersModule />} /><Route path="/plans/accounts" element={<ProviderAccountsModule />} /></Routes></MemoryRouter>);
+}
+
+it("does not publish an old organization's hidden-plan notice when creation refresh resolves after switching", async () => {
+  const view = mount("/plans");
+  await screen.findByText("hetzner-small");
+  fireEvent.change(screen.getByLabelText("Search plans"), { target: { value: "hetzner" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add plan" }));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "vultr-created" } });
+  fireEvent.change(within(dialog).getByLabelText("Provider account"), { target: { value: "account-v1" } });
+  fireEvent.change(within(dialog).getByLabelText("Location"), { target: { value: "ewr" } });
+  fireEvent.change(within(dialog).getByLabelText("Server type"), { target: { value: "vc2-1c-1gb" } });
+  vi.mocked(api.createPlan).mockResolvedValue({ ...planVultr, id: "created", name: "vultr-created" });
+  let resolveOldRefresh!: (plans: api.ProviderPlan[]) => void;
+  vi.mocked(api.listPlans).mockImplementation(org => org === "org-1" ? new Promise(resolve => { resolveOldRefresh = resolve; }) : Promise.resolve([]));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Add plan" }));
+  await waitFor(() => expect(resolveOldRefresh).toBeTypeOf("function"));
+  auth.organizationId = "org-2";
+  rerenderPlans(view);
+  await screen.findByText("No plans");
+  await act(async () => resolveOldRefresh([{ ...planVultr, id: "created", name: "vultr-created" }]));
+  expect(screen.queryByText(/was added, but is hidden by active filters/i)).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it("does not reopen an old organization's add-plan editor when account creation refresh resolves after switching", async () => {
+  vi.mocked(api.listProviders).mockResolvedValueOnce([]);
+  vi.mocked(api.listPlans).mockResolvedValueOnce([]);
+  const view = mount("/plans");
+  await screen.findByText("No plans");
+  fireEvent.click(screen.getAllByRole("button", { name: "Add plan" })[0]);
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Connect account" }));
+  await within(dialog).findByRole("heading", { name: "Add account" });
+  fireEvent.change(within(dialog).getByLabelText("Account name"), { target: { value: "old-org-account" } });
+  fireEvent.change(within(dialog).getByLabelText("API token or key"), { target: { value: "synthetic-old-org-token" } });
+  vi.mocked(api.createProvider).mockResolvedValue({ ...accountHetznerPrimary, id: "old-created-account", name: "old-org-account" });
+  let resolveOldRefresh!: (accounts: api.ProviderAccount[]) => void;
+  vi.mocked(api.listProviders).mockImplementation(org => org === "org-1" ? new Promise(resolve => { resolveOldRefresh = resolve; }) : Promise.resolve([]));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Add account" }));
+  await waitFor(() => expect(resolveOldRefresh).toBeTypeOf("function"));
+  vi.mocked(api.listPlans).mockResolvedValue([]);
+  auth.organizationId = "org-2";
+  rerenderPlans(view);
+  await screen.findByText("No plans");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  await act(async () => resolveOldRefresh([{ ...accountHetznerPrimary, id: "old-created-account", name: "old-org-account" }]));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.queryByText("old-org-account")).not.toBeInTheDocument();
+});

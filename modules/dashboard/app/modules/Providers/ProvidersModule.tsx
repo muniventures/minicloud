@@ -617,6 +617,7 @@ export function ProvidersModule({ view }: { view?: "plans" | "accounts" } = {}) 
         if (currentOrgRef.current !== reqOrg) return;
         setEditor(null);
         const refreshed = await refresh();
+        if (currentOrgRef.current !== reqOrg) return;
         const latestAccounts = refreshed?.accounts ?? accounts;
         const latestTypes = refreshed?.types ?? types;
         const effectivePlan: ProviderPlan =
@@ -730,6 +731,7 @@ export function ProvidersModule({ view }: { view?: "plans" | "accounts" } = {}) 
         });
         if (currentOrgRef.current !== reqOrg) return;
         await refresh();
+        if (currentOrgRef.current !== reqOrg) return;
         if (resumeAddPlan) {
           setEditor({ kind: "add-plan", preferredAccountId: created.id });
         } else {
