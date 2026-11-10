@@ -363,13 +363,6 @@ preflight() {
     exit 1
   fi
 
-  if has_external_ghcr_images; then
-    if [ -z "${GHCR_TOKEN}" ]; then
-      echo "GHCR_READ_TOKEN environment secret is required for Minicloud-owned GHCR pulls."
-      exit 1
-    fi
-  fi
-
   if [ "${DATABASE}" != "postgres" ] && [ "${DATABASE}" != "sqlite" ] && [ "${DATABASE}" != "none" ]; then
     echo "Unsupported database '${DATABASE}'."
     exit 1
@@ -836,6 +829,7 @@ validate_next_configs() {
   phase "validate_next_configs"
   # Only required app/infra config can block the rollout.
   compose config >/dev/null
+  if jq -e '.managed_database_server == true and .database == "postgres" and (.services | type == "array" and length == 0)' "${PAYLOAD_FILE}" >/dev/null; then return; fi
 
   local caddy_validate_dir
   caddy_validate_dir="$(mktemp -d "${APP_DIR}/shared/caddy-validate.XXXXXX")"
@@ -1845,7 +1839,7 @@ configure_openbao() {
 
 start_infra() {
   phase "start_infra"
-  if has_external_ghcr_images; then
+  if has_external_ghcr_images && [ -n "${GHCR_TOKEN}" ]; then
     echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
   fi
 
@@ -2037,6 +2031,7 @@ verify_local_health() {
 
 activate_caddy() {
   phase "activate_caddy"
+  if jq -e '.managed_database_server == true and .database == "postgres" and (.services | type == "array" and length == 0)' "${PAYLOAD_FILE}" >/dev/null; then return; fi
 
   if [ -f "${CADDY_APP}" ]; then
     sudo cp "${CADDY_APP}" "${CADDY_PREVIOUS}"
