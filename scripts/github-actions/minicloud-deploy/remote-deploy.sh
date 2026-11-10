@@ -829,6 +829,7 @@ validate_next_configs() {
   phase "validate_next_configs"
   # Only required app/infra config can block the rollout.
   compose config >/dev/null
+  if jq -e '.managed_database_server == true and .database == "postgres" and (.services | type == "array" and length == 0)' "${PAYLOAD_FILE}" >/dev/null; then return; fi
 
   local caddy_validate_dir
   caddy_validate_dir="$(mktemp -d "${APP_DIR}/shared/caddy-validate.XXXXXX")"
@@ -2030,6 +2031,7 @@ verify_local_health() {
 
 activate_caddy() {
   phase "activate_caddy"
+  if jq -e '.managed_database_server == true and .database == "postgres" and (.services | type == "array" and length == 0)' "${PAYLOAD_FILE}" >/dev/null; then return; fi
 
   if [ -f "${CADDY_APP}" ]; then
     sudo cp "${CADDY_APP}" "${CADDY_PREVIOUS}"
