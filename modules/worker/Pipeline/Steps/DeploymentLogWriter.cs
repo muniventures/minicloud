@@ -7,7 +7,7 @@ namespace Minicloud.Worker.Pipeline.Steps;
 
 /// <summary>
 /// Batches streamed SSH output lines into <c>DeploymentLogs</c> rows.
-/// Flushes every <see cref="BatchSize"/> lines and on explicit flush.
+/// Flushes every <see cref="BatchSize"/> lines, at runtime phase boundaries, and on explicit flush.
 /// Each instance serves one deployment execution.
 /// </summary>
 public sealed class DeploymentLogWriter
@@ -51,7 +51,7 @@ public sealed class DeploymentLogWriter
                 CreatedAt = now,
             });
 
-            if (_buffer.Count >= BatchSize)
+            if (_buffer.Count >= BatchSize || IsPhaseBoundary(content))
             {
                 await FlushCoreAsync(cancellationToken);
             }
@@ -83,11 +83,16 @@ public sealed class DeploymentLogWriter
         }
 
         var batch = _buffer.ToList();
-        _buffer.Clear();
-
         await using var scope = _scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
         db.DeploymentLogs.AddRange(batch);
         await db.SaveChangesAsync(cancellationToken);
+        _buffer.Clear();
     }
+
+    private static bool IsPhaseBoundary(string content) =>
+        content.StartsWith("===== phase: ", StringComparison.Ordinal) ||
+        content.StartsWith("TIMING phase=", StringComparison.Ordinal) ||
+        content.StartsWith("ERROR: ", StringComparison.Ordinal) ||
+        content.StartsWith("__MINICLOUD_DEPLOY_FAILURE__=", StringComparison.Ordinal);
 }

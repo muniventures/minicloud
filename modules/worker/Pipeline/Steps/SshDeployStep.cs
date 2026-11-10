@@ -153,24 +153,28 @@ public sealed partial class SshDeployStep : IPipelineStep
                     await logWriter.AppendAsync(ClassifySource(line), line, cancellationToken);
                 },
                 cancellationToken);
+            await logWriter.FlushAsync(cancellationToken);
         }
         catch (PipelineStepException)
         {
-            await logWriter.FlushAsync(CancellationToken.None);
+            await FlushFailureLogsAsync(logWriter, context.DeploymentId);
             throw;
         }
         catch (RemoteQuiescenceException)
         {
-            await logWriter.FlushAsync(CancellationToken.None);
+            await FlushFailureLogsAsync(logWriter, context.DeploymentId);
             throw;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
         {
-            await logWriter.FlushAsync(CancellationToken.None);
+            await FlushFailureLogsAsync(logWriter, context.DeploymentId);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await FlushFailureLogsAsync(logWriter, context.DeploymentId);
             throw new PipelineStepException(FailureCode, $"SSH deployment to {context.ServerIp} failed: {ex.Message}", ex);
         }
-
-        await logWriter.FlushAsync(cancellationToken);
 
         if (result.ExitCode != 0 || !result.CompletionMarkerFound)
         {
@@ -209,6 +213,22 @@ public sealed partial class SshDeployStep : IPipelineStep
             context.DeploymentId, result.CompletionSha);
         await RecordEventAsync(context.DeploymentId, EventLevel.Info,
             "Remote deploy script completed successfully.", cancellationToken);
+    }
+
+    private async Task FlushFailureLogsAsync(DeploymentLogWriter logs, string deploymentId)
+    {
+        // Preserve received output even when execution was cancelled. Logging must not
+        // replace the original SSH/ownership failure or hold cancellation indefinitely.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        try
+        {
+            await logs.FlushAsync(timeout.Token);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning("Could not flush final output for deployment {DeploymentId}: {ExceptionType}.",
+                deploymentId, ex.GetType().Name);
+        }
     }
 
     internal static string ResolveFailureCode(IReadOnlyList<string> outputLines)
