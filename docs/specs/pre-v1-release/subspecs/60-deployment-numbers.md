@@ -27,6 +27,30 @@ Own the deployment model, daily counter, DbContext/new migration; lifecycle/prep
 
 Existing entry points include `Deployment`, `DeploymentLifecycleService`, `DeploymentPreparationService`, `AssetReleaseService`, `AppSummaryReader`, `DtoMapping`, `DeploymentsController`, `DeploymentPreparationsController`, `DeploymentDtos` and `AppDtos`. Inspect all creation and projection paths, not only the ordinary deployment POST.
 
+### Frozen T00 wire contract
+
+`DeploymentCreateResponse`, `DeploymentResponse`, `LatestDeploymentResponse` and `DeploymentCancellationResponse` gain required JSON `number` (C# `Number`); retain every existing field and opaque `id`. Preparation creation/replay returns the same `DeploymentCreateResponse` shape. `AppSummaryReader` must populate number before `DtoMapping` runs, including application/environment summaries and list/latest results; no empty/default number on detached projections. If a customer-facing asset response links a deployment, retain opaque `deploymentId` for correlation and add nullable `deploymentNumber` for the customer link. Do not rename runtime payload fields.
+
+| Canonical customer route | Required scope |
+| --- | --- |
+| `GET /api/deployments/{deploymentNumber}?organizationId=...` | Existing `ReadDeployments` authorization |
+| `POST /api/deployments/{deploymentNumber}/dispatch?organizationId=...` | Existing dispatch permission/lifecycle guards |
+| `POST /api/deployments/{deploymentNumber}/cancel?organizationId=...` | Existing cancel permission/lifecycle guards |
+| `POST /api/deployments/{deploymentNumber}/refresh?organizationId=...` | Existing refresh permission/runtime guards |
+| `GET /api/deployments/{deploymentNumber}/events?organizationId=...` | Existing event read permission |
+| `GET /api/deployments/{deploymentNumber}/activities?organizationId=...` | Existing activity read permission |
+| `GET /api/deployments/{deploymentNumber}/logs?organizationId=...` | Existing log read permission; preserve other log query filters |
+
+Creation/list/secret validation remain `POST`/`GET /api/deployments` and `POST /api/deployments/validate-secrets` with existing request/filter fields. Internal `POST /api/deployments/{deploymentId}/resolve-secrets` and `POST /api/deployments/preparations/{id}` remain opaque-ID protocols with their existing independent authentication/authorization. Artifact/image-publication/asset protocols and `preparationId` stay opaque. No number-to-ID client fallback or alias is permitted.
+
+Parse at most 28 ASCII characters: exactly eight date digits, `.`, and 1–19 unpadded decimal digits. Validate a real `yyyyMMdd` Gregorian date with invariant culture and `N` in `1..Int64.MaxValue`; whitespace, signs, Unicode digits, leading-zero counters and opaque IDs are invalid. Counter overflow fails explicitly (`deployment_number_exhausted`, 409) without inserting. Use 404 `deployment_not_found` with the existing error envelope for missing/malformed/not-found numbers in an authorized organization; missing organization input is 400 with the existing validation envelope, and inaccessible organization/action retains existing 403/resource-hiding behavior. Resolve only by `(organizationId, number)` after organization authorization, never load a global matching deployment first.
+
+Creation/preparation `Location` and `statusUrl` are `/api/deployments/<number>?organizationId=<escaped-id>`; console links are `<configured-console-origin>/deployments/<number>?organizationId=<escaped-id>`. T61 validates any URL organization hint against loaded memberships and selects it before fetching; without a hint use the selected authorized organization. Never infer organization from the number. Preserve the hint and other safe query parameters through login. Links and pending requests are keyed by both organization and number.
+
+Allocate with one UTC instant for date/`CreatedAt`, within the same transaction as the deployment insertion. Reserve migration `20261110120000_DeploymentNumbers` after T50's merged snapshot; non-null `number`, unique `(organization_id, number)` and a separate counter keyed by `(organization_id, utc_date)` are the persistent contract. Counters survive deployment deletion; no backwards recomputation from remaining rows. Existing preparation submission must reuse both its persisted number and original `CreatedAt`, even if the build crosses UTC midnight.
+
+### Implementation requirements
+
 1. Add a durable daily counter keyed by organization/date. Atomically allocate and insert inside the same EF execution-strategy-wrapped transaction, with provider-correct concurrency handling. Never use an unlocked row count or maximum. A rolled-back insert must roll back its counter increment.
 2. Add a forward migration; do not rewrite committed migrations. Partition historical deployments by organization and UTC creation date, order by `created_at` then opaque `id`, assign row numbers and seed counters to each partition's maximum. Make number non-null and add the unique index after backfill. Preserve equivalent PostgreSQL/SQLite behavior and every existing relationship.
 3. Cover normal creation, persisted local-build preparations and asset jobs. Preserve preparation idempotency and existing allocation/ownership locks.

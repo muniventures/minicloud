@@ -6,6 +6,8 @@ Can run in parallel with: T40/T41 packaging and non-overlapping SSH UI work. T42
 
 Read the [feature overview](../1.pre-v1-release.md), [execution plan](../0.execution-plan.md), [T30](30-identity-and-sessions.md), repository instructions and [self-hosting contract](../../v1.0-self-hosted-installation.md). Use merged canonical `/api` contracts rather than historical private examples.
 
+T00 freezes the exact account routes, flow envelopes, CSRF header, auth-provider states and T41 runtime-config shape in [T30's wire contract](30-identity-and-sessions.md#frozen-t00-wire-and-seed-contract). Consume those names; do not invent an auth route alias or a different public Kratos origin.
+
 ## Assignment and ownership
 
 Replace Firebase SDK authentication with API-backed browser sessions. Implement ordinary sign-in/out, session handling, password/account settings and capability-gated recovery while preserving CLI consent and organization authorization.
