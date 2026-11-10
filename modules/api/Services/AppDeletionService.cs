@@ -53,6 +53,12 @@ public sealed class AppDeletionService(
                 return null;
             }
             var ids = apps.Select(x => x.Id).ToArray();
+            foreach (var target in apps)
+            {
+                var blocker = await DatabaseLifecycleGuards.AppDeletionBlockerAsync(db, target.Id, ct);
+                if (blocker is not null)
+                    return ((int Status, string Code, string Message)?)(409, "database_resource_in_use", blocker);
+            }
             var deployments = await db.Deployments.Where(x => ids.Contains(x.AppId)).ToListAsync(ct);
             if (deployments.Any(x => x.OwnershipToken is not null ||
                                      x.Status is DeploymentStatus.Dispatching or DeploymentStatus.Provisioning or DeploymentStatus.Deploying or DeploymentStatus.Verifying))

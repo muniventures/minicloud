@@ -1,3 +1,5 @@
+import { DatabasesModule } from "./modules/Databases/DatabasesModule";
+import { DatabaseDetailModule } from "./modules/Databases/DatabaseDetailModule";
 import type { RouteObject } from "react-router-dom";
 import { Navigate } from "react-router-dom";
 import { AppShell } from "./core/layout/AppShell";
@@ -32,6 +34,8 @@ export const routes: RouteObject[] = [
       { path: "/", element: <Navigate to="/apps" replace /> },
       { path: "/apps", element: <AppsModule /> },
       { path: "/apps/new", element: <CreateAppModule /> },
+      { path: "/databases", element: <DatabasesModule /> },
+      { path: "/databases/:databaseId", element: <DatabaseDetailModule /> },
       { path: "/providers", element: <ProvidersModule /> },
       { path: "/apps/:appId", element: <AppDetailModule /> },
       { path: "/apps/:appId/deployments", element: <DeploymentsModule /> },

@@ -1,4 +1,4 @@
-import { AppWindow, KeyRound, Rocket, Server, Settings, Users } from "lucide-react";
+import { AppWindow, Database, KeyRound, Rocket, Server, Settings, Users } from "lucide-react";
 import type { ComponentType } from "react";
 
 export type DashboardRouteLayout = "guest" | "main" | "standalone";
@@ -24,6 +24,8 @@ export const dashboardRoutes = {
   signUp: defineRoute({ key: "signUp", name: "Sign up", path: "/sign-up", layout: "guest" }),
   onboarding: defineRoute({ key: "onboarding", name: "Onboarding", path: "/onboarding", layout: "standalone" }),
   apps: defineRoute({ key: "apps", name: "Apps", path: "/apps", layout: "main", nav: { label: "Apps", icon: AppWindow, group: "main" } }),
+  databases: defineRoute({ key: "databases", name: "Databases", path: "/databases", layout: "main", nav: { label: "Databases", icon: Database, group: "main" } }),
+  databaseDetail: defineRoute({ key: "databaseDetail", name: "Database", path: "/databases/:databaseId", layout: "main" }),
   appCreate: defineRoute({ key: "appCreate", name: "Create app", path: "/apps/new", layout: "main" }),
   providers: defineRoute({ key: "providers", name: "Providers", path: "/providers", layout: "main", nav: { label: "Providers", icon: Server, group: "main" } }),
   appDetail: defineRoute({ key: "appDetail", name: "App detail", path: "/apps/:appId", layout: "main" }),

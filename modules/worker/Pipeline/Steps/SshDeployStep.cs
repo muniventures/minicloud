@@ -419,6 +419,10 @@ public sealed partial class SshDeployStep : IPipelineStep
             throw new PipelineStepException("secret_store_unavailable", "Minicloud could not read deployment secrets. Retry when the secret store is available.", ex);
         }
 
+        var databaseContext = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+        var databaseBindings = await ResolveDatabaseBindingsAsync(databaseContext, scope.ServiceProvider.GetService<SecretEncryptionService>(), context.OrganizationId, context.AppId, deployment.Services.Select(x => x.Name).ToHashSet(StringComparer.Ordinal), cancellationToken);
+        var managedDatabaseServer = deployment.Database == DatabaseMode.Postgres &&
+            await databaseContext.ManagedDatabaseServers.AsNoTracking().AnyAsync(x => x.OrganizationId == context.OrganizationId && x.RuntimeAppId == context.AppId && x.Status != "deleted", cancellationToken);
         var storageMounts = await ResolveStorageAsync(context, deployment, cancellationToken);
         var assetMounts = await ResolveAssetMountsAsync(context, deployment.Services, cancellationToken);
         var services = deployment.Services
@@ -437,7 +441,8 @@ public sealed partial class SshDeployStep : IPipelineStep
                 hosts = ResolveServiceHosts(context, s),
                 asset_mounts = assetMounts.GetValueOrDefault(s.Name, []),
                 storage_mounts = storageMounts.GetValueOrDefault(s.Name, []).Select(m => new { name = m.Name, volume_id = m.VolumeId, mount_path = m.MountPath, uid = m.Uid, gid = m.Gid }).ToArray(),
-                env = MergeEnvironment(DeserializeEnv(s.EnvJson), resolvedSecrets.GetValueOrDefault(s.Name)),
+                managed_database_binding = databaseBindings.ContainsKey(s.Name),
+                env = MergeEnvironment(MergeEnvironment(DeserializeEnv(s.EnvJson), resolvedSecrets.GetValueOrDefault(s.Name)), databaseBindings.GetValueOrDefault(s.Name)),
             })
             .ToArray();
 
@@ -480,6 +485,7 @@ public sealed partial class SshDeployStep : IPipelineStep
             github_sha = string.IsNullOrWhiteSpace(context.CommitSha) ? context.DeploymentId : context.CommitSha,
             domain = context.PrimaryHostname,
             database = deployment.Database.ToString().ToLowerInvariant(),
+            managed_database_server = managedDatabaseServer,
             postgres_password = postgresPassword,
             postgres_password_update = postgresPassword is not null,
             runtime_agent = agent is null ? null : new { config = agent.Configuration, token = agent.Token, action = agent.Action, reason = agent.Reason, verification = agent.Verification, final_verification = agent.FinalVerification },
