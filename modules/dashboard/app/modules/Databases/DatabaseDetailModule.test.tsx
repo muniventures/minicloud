@@ -7,7 +7,7 @@ import { downloadDatabaseFile, downloadDatabaseBlob } from "./downloadDatabaseFi
 vi.mock("./downloadDatabaseFile", () => ({ downloadDatabaseFile: vi.fn(), downloadDatabaseBlob: vi.fn() }));
 vi.mock("../../core/auth/AuthProvider", () => ({ useAuth: () => ({ selectedOrganization: { id: "org-1", role: "owner" } }) }));
 vi.mock("../../api/appsApi", () => ({ listApps: vi.fn().mockResolvedValue([]), listAppServices: vi.fn().mockResolvedValue([]) }));
-vi.mock("../../api/databasesApi", () => ({ getDatabase: vi.fn(), getBackupPolicy: vi.fn(), listBackups: vi.fn(), listDatabaseOperations: vi.fn(), listRepositories: vi.fn(), listDatabaseServers: vi.fn(), getDatabaseCapabilities: vi.fn(), requestDatabaseOperation: vi.fn(), setDatabaseAccess: vi.fn(), revealDatabaseConnection: vi.fn(), exportBackupRecoveryMaterial: vi.fn(), cancelDatabaseBackup: vi.fn(), downloadBackupFile: vi.fn(), listDatabaseBindings: vi.fn().mockResolvedValue([]), bindDatabase: vi.fn() }));
+vi.mock("../../api/databasesApi", () => ({ getDatabase: vi.fn(), getBackupPolicy: vi.fn(), listBackups: vi.fn(), listDatabaseOperations: vi.fn(), listRepositories: vi.fn(), listDatabaseServers: vi.fn(), getDatabaseCapabilities: vi.fn(), requestDatabaseOperation: vi.fn(), setDatabaseAccess: vi.fn(), setBackupPolicy: vi.fn(), revealDatabaseConnection: vi.fn(), exportBackupRecoveryMaterial: vi.fn(), cancelDatabaseBackup: vi.fn(), downloadBackupFile: vi.fn(), purgeDatabaseBackups: vi.fn(), listDatabaseBindings: vi.fn().mockResolvedValue([]), bindDatabase: vi.fn() }));
 beforeEach(() => {
   vi.mocked(api.getDatabase).mockResolvedValue({ id: "db-1", name: "Orders", engine: "postgres", engineVersion: "16", placement: "shared", status: "ready", accessMode: "internal", allowedCidrsJson: "[]" });
   vi.mocked(api.getBackupPolicy).mockResolvedValue({ enabled: true, frequencyHours: 24, retentionDays: 30, minimumCopies: 2, repositoryAppId: "repo-1", status: "pending" });
@@ -92,4 +92,41 @@ it("does not offer unsupported application-hosted credential rotation", async ()
   vi.mocked(api.getDatabase).mockResolvedValue({ id: "db-1", name: "App database", engine: "postgres", engineVersion: "16", placement: "application", status: "ready", accessMode: "internal", allowedCidrsJson: "[]" });
   mount(); await screen.findByText("snapshot-1");
   expect(screen.getByRole("button", { name: "Rotate credentials" })).toBeDisabled();
+});
+
+it("purges retained backups only after exact-name confirmation with protection disabled", async () => {
+  vi.mocked(api.getBackupPolicy).mockResolvedValue({ enabled: false, frequencyHours: 24, retentionDays: 30, minimumCopies: 2, keepLastCopies: false });
+  vi.mocked(api.purgeDatabaseBackups).mockResolvedValue({ id: "purge-op", kind: "purge-backups", status: "queued", createdAt: "2026-11-09T00:00:00Z" });
+  mount(); await screen.findByText("snapshot-1");
+  fireEvent.click(screen.getByRole("button", { name: "Permanently delete retained backups" }));
+  expect(screen.getByText(/irreversibly removes all retained backup files/)).toBeInTheDocument();
+  const confirm = screen.getByLabelText("Confirm database name");
+  fireEvent.change(confirm, { target: { value: "orders" } });
+  expect(screen.getByRole("button", { name: "Permanently delete backups" })).toBeDisabled();
+  fireEvent.change(confirm, { target: { value: "Orders" } });
+  fireEvent.click(screen.getByRole("button", { name: "Permanently delete backups" }));
+  await waitFor(() => expect(api.purgeDatabaseBackups).toHaveBeenCalledWith("db-1", "Orders"));
+  expect(screen.getByText("snapshot-1")).toBeInTheDocument();
+});
+it("blocks purge while indefinite retention, scheduling, or another operation is active", async () => {
+  vi.mocked(api.getBackupPolicy).mockResolvedValue({ enabled: false, keepLastCopies: true, frequencyHours: 24, retentionDays: 30, minimumCopies: 2 });
+  mount(); await screen.findByText("snapshot-1");
+  expect(screen.getByRole("button", { name: "Permanently delete retained backups" })).toBeDisabled();
+});
+
+it("retires indefinite retention for a deleted source without resuming captures or changing destination", async () => {
+  vi.mocked(api.getDatabase).mockResolvedValue({ id: "db-1", name: "Deleted source", engine: "postgres", engineVersion: "16", placement: "application", status: "deleted", accessMode: "internal", allowedCidrsJson: "[]" });
+  const retainedPolicy: api.BackupPolicy = { enabled: false, repositoryAppId: "retained-repository", frequencyHours: 12, retentionDays: 45, minimumCopies: 3, keepLastCopies: true };
+  vi.mocked(api.getBackupPolicy).mockResolvedValue(retainedPolicy);
+  vi.mocked(api.setBackupPolicy).mockResolvedValue({ ...retainedPolicy, keepLastCopies: false });
+  mount(); await screen.findByText("snapshot-1");
+  fireEvent.click(screen.getByRole("button", { name: "Manage retained backups" }));
+  const schedule = screen.getByRole("checkbox", { name: "Enable scheduled backups" });
+  expect(schedule).not.toBeChecked();
+  expect(schedule).toBeDisabled();
+  expect(screen.getByText(/Captures cannot resume here/)).toBeInTheDocument();
+  expect(screen.queryByLabelText("Off-server repository")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("checkbox", { name: /Keep minimum complete copies/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Save backup policy" }));
+  await waitFor(() => expect(api.setBackupPolicy).toHaveBeenCalledWith("db-1", { ...retainedPolicy, enabled: false, keepLastCopies: false }));
 });

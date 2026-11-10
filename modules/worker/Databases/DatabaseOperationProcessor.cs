@@ -261,6 +261,7 @@ public sealed partial class DatabaseOperationProcessor(
     private async Task<bool> ProcessDatabaseAsync(DatabaseOperation operation, CancellationToken ct)
     {
         var database = await db.ManagedDatabases.SingleAsync(x => x.Id == operation.DatabaseId && x.OrganizationId == operation.OrganizationId, ct);
+        if (operation.Kind == "purge-backups") { return await PurgeBackupsAsync(operation, database, ct); }
         if (operation.Kind == "restore") { return await RestoreBackupAsync(operation, database, ct); }
         if (operation.Kind == "reconcile-policy") { return await ReconcileBackupPolicyAsync(operation, database, ct); }
         if (operation.Kind == "configure-backup" && !await db.DatabaseBackupPolicies.AnyAsync(x => x.DatabaseId == database.Id && x.Enabled, ct))
@@ -304,6 +305,8 @@ public sealed partial class DatabaseOperationProcessor(
         if (operation.Kind is "create-database" or "delete")
         {
             if (database.AppId is not null) { throw new InvalidOperationException("Application lifecycle is managed separately."); }
+            if (operation.Kind == "delete" && await db.ManagedDatabaseBindings.AnyAsync(x => x.DatabaseId == database.Id && x.OrganizationId == database.OrganizationId && x.Status != "revoked", ct))
+                throw new InvalidOperationException("Unbind application services before deleting this database.");
             var credentials = database.EncryptedCredentialsJson is null
                 ? new DatabaseConnectionCredentials("db_" + database.Id["database_".Length..], "user_" + database.Id["database_".Length..], Convert.ToBase64String(RandomNumberGenerator.GetBytes(36)))
                 : JsonSerializer.Deserialize<DatabaseConnectionCredentials>(encryption.Decrypt(database.EncryptedCredentialsJson), Json)!;

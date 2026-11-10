@@ -50,10 +50,11 @@ class Settings:
             retention = binding.get("retentionDays", 30)
             minimum = binding.get("minimumComplete", 2)
             if (type(retention) is not int or not 1 <= retention <= 3650 or type(minimum) is not int or not 1 <= minimum <= 100 or
+                    type(binding.get("policyRevision",0)) is not int or binding.get("policyRevision",0)<0 or
                     type(binding.get("enabled", True)) is not bool or type(binding.get("keepLastCopies", False)) is not bool):
                 raise ValueError("Invalid retention policy")
             self.policies[(environment, app)] = dict(retentionDays=retention, minimumComplete=minimum,
-                enabled=binding.get("enabled", True), keepLastCopies=binding.get("keepLastCopies", False))
+                enabled=binding.get("enabled", True), keepLastCopies=binding.get("keepLastCopies", False), policyRevision=binding.get("policyRevision",0))
         if not re.fullmatch(r"[A-Za-z0-9_-]{8,96}", repository_id):
             raise ValueError("Repository bindings and identity are required")
         if not (1 <= max_bytes <= 8 * 1024**3 and 0 <= reserve_bytes and max_bytes <= quota_bytes and 1 <= workers <= 16):
@@ -318,6 +319,58 @@ class Repository:
                     removed += 1
         return removed
 
+    def purge_source(self, environment, database_id, expected_revision, expected_repository_id):
+        """Privileged local administration only. No HTTP route exposes this operation."""
+        if not ROUTE.fullmatch(f"/v1/{environment}/{database_id}/fixture01/database.dump.enc") or type(expected_revision) is not int or expected_revision < 1:
+            raise Rejected(400,"invalid_purge_identity")
+        with self.root() as root_fd, self.serialize_upload(root_fd):
+            self.refresh_bindings()
+            self.verify_identity(root_fd)
+            policy=self.settings.policies.get((environment,database_id))
+            if expected_repository_id != self.settings.repository_id or policy is None or policy['policyRevision'] != expected_revision:
+                raise Rejected(409,"purge_identity_changed")
+            if policy['enabled'] or policy['keepLastCopies']:
+                raise Rejected(409,"purge_source_protected")
+            try:
+                with self.artifact_dir((environment,database_id),create=False) as (_,parent):
+                    names=sorted(os.listdir(parent))
+            except Rejected as error:
+                if error.status==404:
+                    return {'status':'purged','purgedBackupIds':[],'purgedCount':0,'remainingCount':0}
+                raise
+            # Validate the entire source before deleting any batch. Unknown or
+            # foreign metadata, symlinks and unexpected files fail closed.
+            for backup_id in names:
+                if not ROUTE.fullmatch(f"/v1/{environment}/{database_id}/{backup_id}/database.dump.enc"):
+                    raise Rejected(409,"purge_unrecognized_content")
+                with self.artifact_dir((environment,database_id,backup_id),create=False) as (_,directory):
+                    files=os.listdir(directory)
+                    # A prior purge may have removed metadata immediately before
+                    # interruption at rmdir. Empty owned directories hold no data.
+                    if files:
+                        self.read_metadata(directory,(environment,database_id,backup_id))
+                    for name in files:
+                        if name not in ARTIFACTS and name!='.backup-meta.json' and not re.fullmatch(r"\.(upload|metadata)-[0-9a-f]{32}",name):
+                            raise Rejected(409,"purge_unrecognized_content")
+                        fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW,dir_fd=directory)
+                        try: regular_file(fd)
+                        finally: os.close(fd)
+            selected=names[:100]
+            for backup_id in selected:
+                with self.artifact_dir((environment,database_id,backup_id),create=False) as (_,directory):
+                    files=os.listdir(directory)
+                    if files:
+                        self.read_metadata(directory,(environment,database_id,backup_id))
+                    # Ownership metadata is removed last to preserve retry proof
+                    # if interruption happens while removing artifact bytes.
+                    for name in sorted(files,key=lambda value:value=='.backup-meta.json'):
+                        os.unlink(name,dir_fd=directory)
+                    os.fsync(directory)
+                with self.artifact_dir((environment,database_id),create=False) as (_,parent):
+                    os.rmdir(backup_id,dir_fd=parent)
+                    os.fsync(parent)
+            return {'status':'purged','purgedBackupIds':selected,'purgedCount':len(selected),'remainingCount':len(names)-len(selected)}
+
     def used_bytes(self):
         total = 0
         for directory, dirs, files in os.walk(self.settings.root, followlinks=False):
@@ -354,63 +407,68 @@ class Repository:
         return metadata.st_size, digest.hexdigest()
 
     def put(self, identifiers, artifact, source, length, expected_hash):
-        with self.artifact_dir(identifiers) as (root_fd, directory), self.serialize_upload(root_fd):
-            self.create_metadata(directory, identifiers)
-            existing = False
-            try:
-                existing_fd = os.open(artifact, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
-            except FileNotFoundError:
-                pass
-            else:
+        with self.root() as root_fd, self.serialize_upload(root_fd):
+            self.refresh_bindings()
+            policy=self.settings.policies.get(identifiers[:2])
+            if policy is None or not policy['enabled']:
+                raise Rejected(403,"backup_source_disabled")
+            with self.artifact_dir(identifiers) as (_, directory):
+                self.create_metadata(directory, identifiers)
+                existing = False
                 try:
-                    if regular_file(existing_fd).st_size > self.settings.max_bytes:
-                        raise Rejected(503, "repository_unavailable")
-                    existing = True
-                finally:
-                    os.close(existing_fd)
-            if self.disk_usage(self.settings.root).free - length < self.settings.reserve_bytes:
-                raise Rejected(507, "repository_capacity")
-            if self.used_bytes() + (0 if existing else length) > self.settings.quota_bytes:
-                raise Rejected(507, "repository_capacity")
-            temporary = ".upload-" + secrets.token_hex(16)
-            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
-            try:
-                digest, received, deadline = hashlib.sha256(), 0, time.monotonic() + self.settings.upload_seconds
-                with os.fdopen(fd, "wb") as stream:
-                    while received < length:
-                        if time.monotonic() > deadline:
-                            raise Rejected(408, "upload_timeout")
-                        chunk = source.read(min(CHUNK, length - received))
-                        if not chunk:
-                            raise Rejected(400, "incomplete_upload")
-                        received += len(chunk)
-                        digest.update(chunk)
-                        stream.write(chunk)
-                    if not hmac.compare_digest(digest.hexdigest(), expected_hash):
-                        raise Rejected(400, "ciphertext_hash_mismatch")
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                try:
-                    os.link(temporary, artifact, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
-                    os.fsync(directory)
-                    created = True
-                except FileExistsError:
                     existing_fd = os.open(artifact, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
-                    try:
-                        size, actual_hash = self.digest_file(existing_fd)
-                    finally:
-                        os.close(existing_fd)
-                    if size != length or not hmac.compare_digest(actual_hash, expected_hash):
-                        raise Rejected(409, "artifact_conflict")
-                    created = False
-                self.complete_metadata(directory, identifiers)
-                return {"sha256": expected_hash, "sizeBytes": length, "created": created}
-            finally:
-                try:
-                    os.unlink(temporary, dir_fd=directory)
-                    os.fsync(directory)
                 except FileNotFoundError:
                     pass
+                else:
+                    try:
+                        if regular_file(existing_fd).st_size > self.settings.max_bytes:
+                            raise Rejected(503, "repository_unavailable")
+                        existing = True
+                    finally:
+                        os.close(existing_fd)
+                if self.disk_usage(self.settings.root).free - length < self.settings.reserve_bytes:
+                    raise Rejected(507, "repository_capacity")
+                if self.used_bytes() + (0 if existing else length) > self.settings.quota_bytes:
+                    raise Rejected(507, "repository_capacity")
+                temporary = ".upload-" + secrets.token_hex(16)
+                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+                try:
+                    digest, received, deadline = hashlib.sha256(), 0, time.monotonic() + self.settings.upload_seconds
+                    with os.fdopen(fd, "wb") as stream:
+                        while received < length:
+                            if time.monotonic() > deadline:
+                                raise Rejected(408, "upload_timeout")
+                            chunk = source.read(min(CHUNK, length - received))
+                            if not chunk:
+                                raise Rejected(400, "incomplete_upload")
+                            received += len(chunk)
+                            digest.update(chunk)
+                            stream.write(chunk)
+                        if not hmac.compare_digest(digest.hexdigest(), expected_hash):
+                            raise Rejected(400, "ciphertext_hash_mismatch")
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    try:
+                        os.link(temporary, artifact, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
+                        os.fsync(directory)
+                        created = True
+                    except FileExistsError:
+                        existing_fd = os.open(artifact, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+                        try:
+                            size, actual_hash = self.digest_file(existing_fd)
+                        finally:
+                            os.close(existing_fd)
+                        if size != length or not hmac.compare_digest(actual_hash, expected_hash):
+                            raise Rejected(409, "artifact_conflict")
+                        created = False
+                    self.complete_metadata(directory, identifiers)
+                    return {"sha256": expected_hash, "sizeBytes": length, "created": created}
+                finally:
+                    try:
+                        os.unlink(temporary, dir_fd=directory)
+                        os.fsync(directory)
+                    except FileNotFoundError:
+                        pass
 
     @contextmanager
     def get(self, identifiers, artifact):

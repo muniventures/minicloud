@@ -90,6 +90,7 @@ public sealed class AppDeletionProcessor(
                 db.RegistrySessions.RemoveRange(await db.RegistrySessions.Where(x => x.AppId == app.Id).ToListAsync(ct));
                 db.DeploymentServices.RemoveRange(await db.DeploymentServices.Where(x => x.Deployment.AppId == app.Id).ToListAsync(ct));
                 db.ImagePublications.RemoveRange(publications);
+                db.ManagedDatabaseBindings.RemoveRange(await db.ManagedDatabaseBindings.Where(x => x.AppId == app.Id && x.OrganizationId == app.OrganizationId && x.Status == "revoked").ToListAsync(ct));
                 db.Apps.Remove(app);
                 await db.SaveChangesAsync(ct);
             }

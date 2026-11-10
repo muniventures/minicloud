@@ -38,3 +38,5 @@ export const cancelDatabaseBackup = (id: string, operationId: string) => apiRequ
 export const deleteDatabaseNetwork = (networkId: string) => apiRequest<void>(`/v1/database-networks/${encodeURIComponent(networkId)}`, { method: "DELETE" });
 
 export const downloadBackupFile = (id: string, artifactId: string, fileName: "database.dump.enc" | "manifest.json.enc", signal?: AbortSignal) => apiDownload(`${idPath(id)}/backups/${encodeURIComponent(artifactId)}/files/${fileName}`, signal);
+
+export const purgeDatabaseBackups = (id: string, confirmation: string) => apiRequest<DatabaseOperation>(`${idPath(id)}/backups`, { method: "DELETE", body: { confirmation } });
