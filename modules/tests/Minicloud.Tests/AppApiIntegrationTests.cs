@@ -251,7 +251,11 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         var submit = new CreateDeploymentRequest(seed.AppId, "none", null,
             [new DeploymentServiceRequest("api", "example/api:latest", 8080, true, "/", "/health")], PreparationId: pending.Id);
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/deployments", submit)).StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsync($"/api/deployments/{pending.Id}/dispatch", null)).StatusCode);
+        var redispatch = await client.PostAsync($"/api/deployments/{pending.Id}/dispatch", null);
+        Assert.Equal(HttpStatusCode.Conflict, redispatch.StatusCode);
+        using var redispatchError = JsonDocument.Parse(await redispatch.Content.ReadAsStringAsync());
+        Assert.Equal("preparation_not_submitted",
+            redispatchError.RootElement.GetProperty("error").GetProperty("code").GetString());
         Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/deployments/preparations",
             start with { IdempotencyKey = Guid.NewGuid().ToString("D") })).StatusCode);
     }
