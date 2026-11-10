@@ -16,7 +16,7 @@ namespace Minicloud.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("v1/[controller]")]
+[Route("api/[controller]")]
 public sealed class MeController : ControllerBase
 {
     [HttpGet]

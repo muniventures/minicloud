@@ -1,10 +1,7 @@
-import { AppEnvironmentsPanel } from "./AppEnvironmentsPanel";
 import { useAppServiceInventory } from "./useAppServiceInventory";
 import { CollectionToolbar } from "@/core/components/CollectionToolbar";
 import { useRecordCollection } from "@/core/components/useRecordCollection";
-import { ServiceUrls } from "@/core/components/ServiceUrls";
 import { NavigableTableRow } from "@/core/components/NavigableTableRow";
-import { RecordToolbar } from "@/core/components/RecordToolbar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -15,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -24,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   ChevronDown,
   FileText,
@@ -37,12 +36,11 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   createAppServiceSecretService,
   deleteAppServiceSecretService,
-  getApp,
-  listApps,
+  getEnvironmentDetail,
   listAppServices,
   listAppServiceSecretServices,
   renameAppServiceSecretService,
-} from "../../api/appsApi";
+} from "../../api/environmentsApi";
 import { useDeploymentFeed } from "../Deployments/useDeploymentFeed";
 import { useAuth } from "../../core/auth/AuthProvider";
 import { CopyButton } from "../../core/components/CopyButton";
@@ -51,7 +49,7 @@ import { PageScaffold } from "../../core/components/PageScaffold";
 import { dashboardRoutes } from "../../core/routing/dashboardRoutes";
 import { StatusBadge } from "../../core/components/StatusBadge";
 import type {
-  AppResponse,
+  EnvironmentDetailResponse,
   AppServiceInventoryResponse,
   AppServiceSecretServiceResponse,
 } from "../../models/controlPlane";
@@ -65,28 +63,44 @@ import { AppServiceSecretsDialog } from "./components/AppServiceSecretsDialog";
 import { ServiceRuntimeStatus } from "./components/ServiceRuntimeStatus";
 import { runtimeFresh } from "./serviceRuntime";
 
-import { DeleteAppDialog } from "./components/DeleteAppDialog";
+import { EnvironmentScopeHeader } from "./EnvironmentScopeHeader";
+import { appSettingsPath } from "./AppsModule";
+import { deleteEnvironment, getApplication } from "../../api/applicationsApi";
+import { appsFixtureApplications, appsFixturesEnabled } from "../../api/applicationsFixtures";
+import type { ApplicationEnvironment, Application } from "../../models/application";
+
+const OPERATIONAL_TABS = ["overview", "services", "storage", "domains", "secrets", "deployments", "console", "logs"];
 
 export function AppDetailModule() {
-  const { appId } = useParams();
+  const { applicationId, environmentId } = useParams();
+  const { selectedOrganization } = useAuth();
+  return <ScopedAppDetail key={JSON.stringify([selectedOrganization?.id, applicationId, environmentId])} />;
+}
+
+function ScopedAppDetail() {
+  const { applicationId, environmentId, tab } = useParams();
   const navigate = useNavigate();
   const { selectedOrganization } = useAuth();
-  const detailScope = JSON.stringify([selectedOrganization?.id, appId]);
+  const detailScope = JSON.stringify([selectedOrganization?.id, applicationId, environmentId ?? null]);
   const currentScope = useRef(detailScope);
   currentScope.current = detailScope;
-  const [app, setApp] = useState<AppResponse | null>(null);
+  const [application, setApplication] = useState<Application | null>(null);
+  const [selectedEnvironment, setSelectedEnvironment] = useState<ApplicationEnvironment | null>(null);
+  const [resolvedRuntimeAppId, setResolvedRuntimeAppId] = useState<string | null>(null);
+  const runtimeAppId = resolvedRuntimeAppId;
+  const [app, setApp] = useState<EnvironmentDetailResponse | null>(null);
   const {
     services,
     error: serviceRefreshError,
     loading: serviceLoading,
     now: observedNow,
     refresh: refreshServices,
-  } = useAppServiceInventory(appId, selectedOrganization?.id);
+  } = useAppServiceInventory(runtimeAppId ?? undefined, selectedOrganization?.id);
   const [secretServices, setSecretServices] = useState<
     AppServiceSecretServiceResponse[]
   >([]);
   const { deployments, error: deploymentError, observed: deploymentsObserved, refresh: refreshDeployments } =
-    useDeploymentFeed(selectedOrganization?.id, appId);
+    useDeploymentFeed(runtimeAppId ? selectedOrganization?.id : undefined, runtimeAppId ?? undefined);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [secretServiceError, setSecretServiceError] = useState<string | null>(
@@ -110,17 +124,109 @@ export function AppDetailModule() {
   const [expandedServiceName, setExpandedServiceName] = useState<string | null>(
     null,
   );
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  // Scoped environment deletion target, captured at open (original-target
+  // preservation): switching environments cannot retarget the pending write.
+  const [envDeleteTarget, setEnvDeleteTarget] = useState<{
+    applicationId: string;
+    environmentId: string;
+    appName: string;
+    envName: string;
+  } | null>(null);
+  const [envDeleteConfirmation, setEnvDeleteConfirmation] = useState("");
+  const [envDeleteBusy, setEnvDeleteBusy] = useState(false);
+  const [envDeleteError, setEnvDeleteError] = useState<string | null>(null);
+
+  // Tab selection is explicit (not URL-only) so uncontrolled Radix activation
+  // quirks cannot desync the URL from the rendered tab. In scoped mode the
+  // URL is the source of truth for reload/back/forward.
+  const selectTab = useCallback(
+    (next: string) => {
+      setActiveTab(next);
+      if (applicationId && environmentId) {
+        navigate(`/apps/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}/${next}`);
+      }
+    },
+    [applicationId, environmentId, navigate],
+  );
+  const [logsServiceFilter, setLogsServiceFilter] = useState<string | null>(null);
+
+  // Scope switch: drop every previously scoped observation, dialog/form
+  // selector, in-progress edit, and busy/error state so stale data — or an
+  // unsubmitted form for the previous environment's services — can never
+  // render or operate under the new header. Keying the dialogs alone does
+  // not clear this parent state, so state is cleared explicitly. Pending
+  // writes keep only their captured immutable targets (deleteTarget).
+  useEffect(() => {
+    currentScope.current = detailScope;
+    setApp(null);
+    setApplication(null);
+    setSelectedEnvironment(null);
+    setResolvedRuntimeAppId(null);
+    setSecretServices([]);
+    setError(null);
+    setActionError(null);
+    setSecretServiceError(null);
+    setExpandedServiceName(null);
+    setLogsServiceFilter(null);
+    setEnvDeleteTarget(null);
+    setEnvDeleteConfirmation("");
+    setEnvDeleteBusy(false);
+    setEnvDeleteError(null);
+    setManageDomainsServiceName(null);
+    setSecretsServiceName(null);
+    setManualSecretsServiceName("");
+    setEditingSecretServiceId(null);
+    setEditingSecretServiceName("");
+    setBusySecretServiceId(null);
+    return () => { currentScope.current = "unmounted"; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailScope]);
+
+  // Sync tab from the URL so deep links and browser back/forward preserve scope.
+  useEffect(() => {
+    if (tab && OPERATIONAL_TABS.includes(tab)) setActiveTab(tab);
+  }, [tab, detailScope]);
 
   useEffect(() => {
-    if (!appId || !selectedOrganization) {
-      return;
+    if (!selectedOrganization) return;
+    {
+      if (!applicationId || !environmentId || resolvedRuntimeAppId) return;
+      let live = true;
+      (async () => {
+        try {
+          const app = await loadScoping(applicationId);
+          if (!live) return;
+          if (app.id !== applicationId || app.organizationId !== selectedOrganization.id) {
+            throw new Error("Application does not belong to the selected organization.");
+          }
+          const env = app.environments.find((e) => e.id === environmentId);
+          if (!env || env.applicationId !== applicationId || env.organizationId !== selectedOrganization.id) {
+            setError(`Environment ${environmentId} not found in application ${applicationId}.`);
+            return;
+          }
+          setApplication(app);
+          setSelectedEnvironment(env);
+          // Only the selected, authorized environment can provide runtime data.
+          if (env.id) setResolvedRuntimeAppId(env.id);
+          else setError(`Environment ${env.id ?? "<unknown>"} has no resolvable identity.`);
+        } catch (loadError) {
+          if (live) {
+            setError(
+              loadError instanceof Error
+                ? loadError.message
+                : "Unable to load application scope.",
+            );
+          }
+        }
+      })();
+      return () => { live = false; };
     }
+  }, [applicationId, environmentId, resolvedRuntimeAppId, selectedOrganization?.id]);
 
+  useEffect(() => {
+    if (!runtimeAppId || !selectedOrganization) return;
     let live = true;
-    setApp(null);
-    setError(null);
-    loadAppDetail(appId)
+    loadAppDetail(runtimeAppId)
       .then(([nextApp, nextSecretServices]) => {
         if (!live) return;
         setApp(nextApp);
@@ -134,33 +240,35 @@ export function AppDetailModule() {
         ),
       );
     return () => { live = false; };
-  }, [appId, selectedOrganization?.id]);
-
-  const onDeletionRequested = useCallback(() => {
-    setApp((current) =>
-      current
-        ? { ...current, deletionStatus: "queued", deletionError: null }
-        : current,
-    );
-  }, []);
+  }, [runtimeAppId, selectedOrganization?.id]);
 
   const refreshRecord = useCallback(async () => {
-    if (!appId || !selectedOrganization) return;
+    if (!runtimeAppId || !selectedOrganization) return;
     setActionError(null);
     try {
-      const [[nextApp, nextSecretServices]] = await Promise.all([
-        loadAppDetail(appId),
+      const [[nextApp, nextSecretServices], , , nextApplication] = await Promise.all([
+        loadAppDetail(runtimeAppId),
         refreshDeployments(),
         refreshServices(),
+        applicationId ? loadScoping(applicationId) : Promise.resolve(null),
       ]);
       if (currentScope.current !== detailScope) return;
+      if (nextApplication) {
+        if (nextApplication.id !== applicationId || nextApplication.organizationId !== selectedOrganization.id) {
+          throw new Error("Application does not belong to the selected organization.");
+        }
+        const nextEnvironment = nextApplication.environments.find(env => env.id === environmentId && env.applicationId === applicationId && env.organizationId === selectedOrganization.id);
+        if (!nextEnvironment) throw new Error("The selected environment is no longer available in this application.");
+        setApplication(nextApplication);
+        setSelectedEnvironment(nextEnvironment);
+      }
       setApp(nextApp);
       setSecretServices(nextSecretServices);
     } catch (refreshError) {
       if (currentScope.current !== detailScope) return;
       setActionError(refreshError instanceof Error ? refreshError.message : "Unable to refresh app.");
     }
-  }, [appId, selectedOrganization?.id, detailScope, refreshServices, refreshDeployments]);
+  }, [runtimeAppId, applicationId, environmentId, selectedOrganization?.id, detailScope, refreshServices, refreshDeployments]);
 
   useEffect(() => {
     if (
@@ -173,19 +281,13 @@ export function AppDetailModule() {
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        const remaining = await listApps(selectedOrganization.id);
+        const parent = await getApplication(applicationId!);
         if (canceled) return;
-        const exists = remaining.some(
-          (item) =>
-            item.id === app.id ||
-            item.environments?.some((environment) => environment.id === app.id) ||
-            item.branches?.some((branch) => branch.id === app.id),
-        );
-        if (!exists) {
+        if (!parent.environments.some((environment) => environment.id === app.id)) {
           navigate(dashboardRoutes.apps.path, { replace: true });
           return;
         }
-        const next = await getApp(app.id);
+        const next = await getEnvironmentDetail(app.id);
         if (!canceled) {
           setApp(next);
           setActionError(null);
@@ -202,31 +304,47 @@ export function AppDetailModule() {
       canceled = true;
       clearTimeout(timer);
     };
-  }, [app?.id, app?.deletionStatus, selectedOrganization, navigate]);
+  }, [app?.id, app?.deletionStatus, selectedOrganization, applicationId, navigate]);
+
+  // Capture the immutable scope at operation start. Every post-await state
+  // update below is checked against this identity: a response that lands
+  // after the user switched environments is discarded — it can never
+  // repopulate the new scope's UI or reopen dialogs bound to it.
+  const scopeStillCurrent = (captured: string) =>
+    currentScope.current === captured;
 
   const refreshSecretServices = useCallback(async () => {
-    if (!appId) {
+    if (!runtimeAppId) {
       return;
     }
+    const captured = currentScope.current;
 
-    setSecretServices(await listAppServiceSecretServices(appId));
-  }, [appId]);
+    const next = await listAppServiceSecretServices(runtimeAppId);
+    if (!scopeStillCurrent(captured)) return;
+    setSecretServices(next);
+  }, [runtimeAppId]);
 
   async function createSecretService() {
-    if (!appId || !manualSecretsServiceName.trim()) {
+    if (!runtimeAppId || !manualSecretsServiceName.trim()) {
       return;
     }
+    const captured = currentScope.current;
+    const targetAppId = runtimeAppId;
+    const targetName = manualSecretsServiceName.trim();
 
     setSecretServiceError(null);
     try {
       const created = await createAppServiceSecretService(
-        appId,
-        manualSecretsServiceName.trim(),
+        targetAppId,
+        targetName,
       );
+      if (!scopeStillCurrent(captured)) return;
       setManualSecretsServiceName("");
       await refreshSecretServices();
+      if (!scopeStillCurrent(captured)) return;
       setSecretsServiceName(created.serviceName);
     } catch (createError) {
+      if (!scopeStillCurrent(captured)) return;
       setSecretServiceError(
         createError instanceof Error
           ? createError.message
@@ -236,35 +354,41 @@ export function AppDetailModule() {
   }
 
   async function renameSecretService(serviceId: string) {
-    if (!appId || !editingSecretServiceName.trim()) {
+    if (!runtimeAppId || !editingSecretServiceName.trim()) {
       return;
     }
+    const captured = currentScope.current;
+    const targetAppId = runtimeAppId;
+    const targetServiceId = serviceId;
+    const targetName = editingSecretServiceName.trim();
 
-    setBusySecretServiceId(serviceId);
+    setBusySecretServiceId(targetServiceId);
     setSecretServiceError(null);
     try {
       await renameAppServiceSecretService(
-        appId,
-        serviceId,
-        editingSecretServiceName.trim(),
+        targetAppId,
+        targetServiceId,
+        targetName,
       );
+      if (!scopeStillCurrent(captured)) return;
       setEditingSecretServiceId(null);
       setEditingSecretServiceName("");
       await refreshSecretServices();
     } catch (renameError) {
+      if (!scopeStillCurrent(captured)) return;
       setSecretServiceError(
         renameError instanceof Error
           ? renameError.message
           : "Unable to rename service.",
       );
     } finally {
-      setBusySecretServiceId(null);
+      if (scopeStillCurrent(captured)) setBusySecretServiceId(null);
     }
   }
 
   async function deleteSecretService(serviceId: string) {
     if (
-      !appId ||
+      !runtimeAppId ||
       !window.confirm(
         "Remove this service from secrets management? Secrets already stored for this service remain unless deleted separately.",
       )
@@ -272,24 +396,28 @@ export function AppDetailModule() {
       return;
     }
 
+    const captured = currentScope.current;
+
     setBusySecretServiceId(serviceId);
     setSecretServiceError(null);
     try {
-      await deleteAppServiceSecretService(appId, serviceId);
+      await deleteAppServiceSecretService(runtimeAppId, serviceId);
+      if (!scopeStillCurrent(captured)) return;
       await refreshSecretServices();
     } catch (deleteError) {
+      if (!scopeStillCurrent(captured)) return;
       setSecretServiceError(
         deleteError instanceof Error
           ? deleteError.message
           : "Unable to remove service.",
       );
     } finally {
-      setBusySecretServiceId(null);
+      if (scopeStillCurrent(captured)) setBusySecretServiceId(null);
     }
   }
 
   const serviceCollection = useRecordCollection(
-    `${appId}:services`,
+    `${runtimeAppId}:services`,
     services,
     {
       name: (item) => item.name,
@@ -297,20 +425,14 @@ export function AppDetailModule() {
     },
     (item) => item.name,
   );
-  const branchCollection = useRecordCollection(
-    `${appId}:branches`,
-    app?.branches ?? [],
-    { name: (item) => item.branchName, plan: (item) => item.plan },
-    (item) => item.id,
-  );
   const secretCollection = useRecordCollection(
-    `${appId}:secret-services`,
+    `${runtimeAppId}:secret-services`,
     secretServices,
     { name: (item) => item.serviceName },
     (item) => item.id,
   );
   const deploymentCollection = useRecordCollection(
-    `${appId}:history`,
+    `${runtimeAppId}:history`,
     deployments,
     {
       createdAt: (item) => item.createdAt,
@@ -325,16 +447,70 @@ export function AppDetailModule() {
     return <p className="text-sm text-destructive">{error}</p>;
   }
 
-  if (!app || app.id !== appId || app.organizationId !== selectedOrganization?.id) {
+  if (!app || app.id !== runtimeAppId || app.organizationId !== selectedOrganization?.id) {
     return <p className="text-sm text-muted-foreground">Loading app...</p>;
   }
+
+  const scopedHeader = application && selectedEnvironment ? (
+    <EnvironmentScopeHeader
+      application={application}
+      environment={selectedEnvironment}
+      currentTab={activeTab}
+      onSwitch={(nextEnvironmentId) => {
+        if (!applicationId) return;
+        navigate(`/apps/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(nextEnvironmentId)}/${activeTab}`);
+      }}
+      onRefresh={() => void refreshRecord()}
+      loading={serviceLoading}
+      refreshing={serviceLoading}
+      canManage={["owner", "admin", "developer"].includes(selectedOrganization?.role?.toLowerCase() ?? "")}
+      moreActions={
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button aria-label={`More actions for ${application.name} ${selectedEnvironment.name}`} size="icon" variant="ghost">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem asChild>
+              <Link to={appSettingsPath(application.id)}>Application settings…</Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to={`${appSettingsPath(application.id)}#environment-${selectedEnvironment.id}`}>
+                {selectedEnvironment.name} environment settings…
+              </Link>
+            </DropdownMenuItem>
+            {["owner", "admin", "developer"].includes(selectedOrganization?.role?.toLowerCase() ?? "") ? <DropdownMenuItem
+              disabled={!!application.deletionStatus || (!!selectedEnvironment.deletionStatus && selectedEnvironment.deletionStatus !== "failed")}
+              onClick={() => {
+                // Capture the explicit environment target before opening the dialog.
+                setEnvDeleteTarget({
+                  applicationId: application.id,
+                  environmentId: selectedEnvironment.id,
+                  appName: application.name,
+                  envName: selectedEnvironment.name,
+                });
+                setEnvDeleteConfirmation("");
+                setEnvDeleteError(null);
+              }}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              <span>Delete {application.name} / {selectedEnvironment.name} environment…</span>
+            </DropdownMenuItem> : null}
+            <DropdownMenuItem asChild>
+              <Link to={appSettingsPath(application.id)}>
+                Delete application…
+              </Link>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      }
+    />
+  ) : null;
 
   const latestDeployment = deploymentsObserved
     ? [...deployments].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null
     : app.latestDeployment;
-  const publicServiceCount = services.filter(
-    (service) => service.public,
-  ).length;
   const activeDomainCount = services.reduce(
     (count, service) =>
       count +
@@ -349,33 +525,19 @@ export function AppDetailModule() {
 
   return (
     <PageScaffold
-      breadcrumbs={[
-        { label: "Apps", to: dashboardRoutes.apps.path },
-        { label: app.name },
-      ]}
-      header={
-        <RecordToolbar
-          title={app.name}
-          back={{ to: dashboardRoutes.apps.path, label: "Back to apps" }}
-          status={<StatusBadge status={latestDeployment?.status ?? "No deployments"} />}
-          metadata={
-            <>
-              <span>{app.slug} · {app.plan} · {app.database}</span>
-              <span>{services.length} services · {publicServiceCount} public · {activeDomainCount} active domains</span>
-              <span>Runtime: {services.some((service) => runtimeFresh(service, observedNow) && service.runtime) ? `${runtimeRunningCount}/${services.length} observed running` : "Unavailable or stale"}</span>
-            </>
-          }
-          refreshLabel={`Refresh ${app.name}`}
-          onRefresh={refreshRecord}
-          more={[[{
-            id: "delete",
-            label: app.deletionStatus === "failed" ? "Retry deletion" : "Delete application",
-            icon: <Trash2 className="h-4 w-4" />,
-            visible: !app.deletionStatus || app.deletionStatus === "failed",
-            onClick: () => setDeleteDialogOpen(true),
-          }]]}
-        />
+      breadcrumbs={
+        application && selectedEnvironment
+          ? [
+              { label: "Apps", to: dashboardRoutes.apps.path },
+              { label: application.name },
+              { label: selectedEnvironment.name },
+            ]
+          : [
+              { label: "Apps", to: dashboardRoutes.apps.path },
+              { label: app.name },
+            ]
       }
+      header={scopedHeader}
       title={app.name}
     >
       {app.deletionStatus ? (
@@ -399,36 +561,51 @@ export function AppDetailModule() {
         </p>
       ) : null}
 
-      <Tabs onValueChange={setActiveTab} value={activeTab}>
-        <TabsList className="flex w-full justify-start overflow-x-auto">
+      <Tabs onValueChange={selectTab} value={activeTab}>
+        <div className="sm:hidden">
+          <Label htmlFor="section-menu">Section</Label>
+          <Select value={activeTab} onValueChange={selectTab}>
+            <SelectTrigger id="section-menu" aria-label="Section">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {OPERATIONAL_TABS.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {value === "logs" ? "Logs" : value === "console" ? "Console" : value.charAt(0).toUpperCase() + value.slice(1)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <TabsList className="hidden w-full justify-start rounded-none border-b bg-transparent p-0 sm:flex">
           <TabsTrigger
-            onClick={() => setActiveTab("overview")}
+            className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-foreground" onClick={() => selectTab("overview")}
             value="overview"
           >
             Overview
           </TabsTrigger>
           <TabsTrigger
-            onClick={() => setActiveTab("services")}
+            className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-foreground" onClick={() => selectTab("services")}
             value="services"
           >
             Services
           </TabsTrigger>
-          <TabsTrigger value="storage">Storage</TabsTrigger>
-          <TabsTrigger value="domains">Domains</TabsTrigger>
-          <TabsTrigger onClick={() => setActiveTab("secrets")} value="secrets">
+          <TabsTrigger className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-foreground" onClick={() => selectTab("storage")} value="storage">Storage</TabsTrigger>
+          <TabsTrigger className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-foreground" onClick={() => selectTab("domains")} value="domains">Domains</TabsTrigger>
+          <TabsTrigger className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-foreground" onClick={() => selectTab("secrets")} value="secrets">
             Secrets
           </TabsTrigger>
           <TabsTrigger
-            onClick={() => setActiveTab("deployments")}
+            className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-foreground" onClick={() => selectTab("deployments")}
             value="deployments"
           >
             Deployments
           </TabsTrigger>
-          <TabsTrigger onClick={() => setActiveTab("console")} value="console">
+          <TabsTrigger className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-foreground" onClick={() => selectTab("console")} value="console">
             Console
           </TabsTrigger>
-          <TabsTrigger onClick={() => setActiveTab("logs")} value="logs">
-            Application logs
+          <TabsTrigger className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-foreground" onClick={() => selectTab("logs")} value="logs">
+            Logs
           </TabsTrigger>
         </TabsList>
 
@@ -441,12 +618,84 @@ export function AppDetailModule() {
         </TabsContent>
 
         <TabsContent className="space-y-4" value="overview">
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)]">
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card>
+              <CardHeader>
+                <CardTitle>Runtime</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <p className="text-muted-foreground">
+                  {runtimeRunningCount}/{services.length} observed running
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {services.some((service) => runtimeFresh(service, observedNow) && service.runtime)
+                    ? "Fresh observation"
+                    : serviceRefreshError
+                      ? "Could not refresh. Showing last observation."
+                      : "No fresh observation"}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Latest deployment</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                {latestDeployment ? (
+                  <>
+                    <StatusBadge status={latestDeployment.status} />
+                    <p className="text-muted-foreground">
+                      {latestDeployment.completedAt
+                        ? `Completed ${formatDate(latestDeployment.completedAt)}`
+                        : "In progress"}
+                    </p>
+                    <button
+                      type="button"
+                      className="text-primary hover:underline"
+                      onClick={() => {
+                        setActiveTab("deployments");
+                        if (applicationId && environmentId) {
+                          navigate(`/apps/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}/deployments`);
+                        }
+                      }}
+                    >
+                      View deployment
+                    </button>
+                  </>
+                ) : (
+                  <p className="text-muted-foreground">No deployments yet.</p>
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Domains</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <p className="text-muted-foreground">
+                  {activeDomainCount} {activeDomainCount === 1 ? "hostname" : "hostnames"}
+                </p>
+                <button
+                  type="button"
+                  className="text-primary hover:underline"
+                  onClick={() => {
+                    setActiveTab("domains");
+                    if (applicationId && environmentId) {
+                      navigate(`/apps/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}/domains`);
+                    }
+                  }}
+                >
+                  View domains
+                </button>
+              </CardContent>
+            </Card>
+          </div>
+          <div className="grid gap-4">
             <Card>
               <CardHeader>
                 <CardTitle>Services</CardTitle>
                 <p className="text-sm text-muted-foreground">
-                  Public URLs and the latest observed runtime state.
+                  Preferred address and the latest observed runtime state.
                 </p>
               </CardHeader>
               <CardContent className="p-0">
@@ -461,16 +710,24 @@ export function AppDetailModule() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Service</TableHead>
-                        <TableHead>URL</TableHead>
                         <TableHead>Runtime</TableHead>
+                        <TableHead>Address</TableHead>
+                        <TableHead className="text-right">Details</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {services.map((service) => {
-                        const urls = service.domains
-                          .filter((domain) => domain.status !== "disabled")
-                          .map((domain) => `https://${domain.hostname}`);
-
+                        const enabledDomains = service.domains.filter((domain) => domain.status !== "disabled");
+                        const primary =
+                          enabledDomains.find((domain) => domain.isPrimary) ??
+                          enabledDomains.find((domain) => domain.kind === "custom_domain") ??
+                          enabledDomains[0];
+                        const address = primary
+                          ? `https://${primary.hostname}`
+                          : service.public
+                            ? "No URL assigned"
+                            : "Internal only";
+                        const extra = enabledDomains.length - (primary ? 1 : 0);
                         return (
                           <TableRow key={service.name}>
                             <TableCell data-label="Service">
@@ -481,21 +738,46 @@ export function AppDetailModule() {
                                 </span>
                               </div>
                             </TableCell>
-                            <TableCell data-label="URL">
-                              <ServiceUrls
-                                services={[{ urls }]}
-                                emptyText={
-                                  service.public
-                                    ? "No URL assigned"
-                                    : "Internal only"
-                                }
-                              />
-                            </TableCell>
                             <TableCell data-label="Runtime">
                               <ServiceRuntimeStatus
                                 service={service}
                                 now={observedNow}
                               />
+                            </TableCell>
+                            <TableCell data-label="Address">
+                              {primary ? (
+                                <a
+                                  className="break-all text-sm text-primary hover:underline"
+                                  href={address}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {address}
+                                </a>
+                              ) : (
+                                <span className="text-sm text-muted-foreground">{address}</span>
+                              )}
+                              {extra > 0 ? (
+                                <p className="text-xs text-muted-foreground">+{extra} {extra === 1 ? "hostname" : "hostnames"}</p>
+                              ) : null}
+                            </TableCell>
+                            <TableCell data-label="Details" className="text-right">
+                              <button
+                                type="button"
+                                className="text-primary hover:underline"
+                                onClick={() => {
+                                  setExpandedServiceName(service.name);
+                                  setActiveTab("services");
+                                  if (applicationId && environmentId) {
+                                    navigate(`/apps/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}/services`);
+                                  }
+                                  requestAnimationFrame(() => {
+                                    document.getElementById(`service-details-${service.name}`)?.scrollIntoView({ block: "center" });
+                                  });
+                                }}
+                              >
+                                Details
+                              </button>
                             </TableCell>
                           </TableRow>
                         );
@@ -506,90 +788,7 @@ export function AppDetailModule() {
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Application</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-5 text-sm">
-                <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Latest deployment
-                  </p>
-                  {latestDeployment ? (
-                    <div className="space-y-2">
-                      <StatusBadge status={latestDeployment.status} />
-                      <p className="text-muted-foreground">
-                        {latestDeployment.completedAt
-                          ? `Completed ${formatDate(latestDeployment.completedAt)}`
-                          : "In progress"}
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-muted-foreground">No deployments yet.</p>
-                  )}
-                </div>
-                <div className="space-y-2 border-t pt-4">
-                  <DetailRow label="Plan" value={app.plan} />
-                  <DetailRow label="Database" value={app.database} />
-                  <DetailRow label="Services" value={String(services.length)} />
-                </div>
-              </CardContent>
-            </Card>
           </div>
-          {!app.branchName && <AppEnvironmentsPanel app={app} onUpdated={refreshRecord} />}
-          {!app.parentAppId ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Branches</CardTitle>
-                <CollectionToolbar
-                  label="branches"
-                  {...branchCollection.toolbar}
-                  onRefresh={() =>
-                    getApp(app.id)
-                      .then(setApp)
-                      .catch((error) => setActionError(String(error)))
-                  }
-                />
-              </CardHeader>
-              <CardContent className="p-0">
-                {(app.branches ?? []).length === 0 ? (
-                  <div className="p-4">
-                    <p className="text-sm text-muted-foreground">
-                      No branch deployments.
-                    </p>
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Branch</TableHead>
-                        <TableHead>Plan</TableHead>
-                        <TableHead>Service URLs</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {branchCollection.records.map((branch) => (
-                        <NavigableTableRow key={branch.id} href={`/apps/${branch.id}`}>
-                          <TableCell data-label="Branch" className="font-medium">
-                            <Link
-                              className="text-primary hover:underline"
-                              to={`/apps/${branch.id}`}
-                            >
-                              {branch.branchName}
-                            </Link>
-                          </TableCell>
-                          <TableCell data-label="Plan">{branch.plan}</TableCell>
-                          <TableCell data-label="Service URLs">
-                            <ServiceUrls services={[{ urls: branch.urls }]} />
-                          </TableCell>
-                        </NavigableTableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          ) : null}
 
         </TabsContent>
 
@@ -627,7 +826,7 @@ export function AppDetailModule() {
                     <TableRow>
                       <TableHead className="w-[22%]">Service</TableHead>
                       <TableHead className="w-[10%]">Access</TableHead>
-                      <TableHead className="w-[40%]">URL</TableHead>
+                      <TableHead className="w-[40%]">Primary address</TableHead>
                       <TableHead className="w-[23%]">Runtime</TableHead>
                       <TableHead className="w-[5%]" />
                     </TableRow>
@@ -679,7 +878,7 @@ export function AppDetailModule() {
                                 {service.public ? "Public" : "Private"}
                               </span>
                             </TableCell>
-                            <TableCell data-label="URL">
+                            <TableCell data-label="Primary address">
                               {!service.public ? (
                                 <span className="text-sm text-muted-foreground">
                                   Internal only
@@ -688,44 +887,39 @@ export function AppDetailModule() {
                                 <span className="text-sm text-muted-foreground">
                                   No URL assigned
                                 </span>
-                              ) : (
-                                <div className="space-y-3">
-                                  {enabledDomains.map((domain) => {
-                                    const url = `https://${domain.hostname}`;
-                                    return (
-                                      <div
-                                        key={domain.id}
-                                        className="min-w-0 space-y-1"
+                              ) : (() => {
+                                const primary =
+                                  enabledDomains.find((domain) => domain.isPrimary) ??
+                                  enabledDomains.find((domain) => domain.kind === "custom_domain") ??
+                                  enabledDomains[0];
+                                const url = `https://${primary.hostname}`;
+                                const extra = enabledDomains.length - 1;
+                                return (
+                                  <div className="min-w-0 space-y-1">
+                                    <div className="flex min-w-0 items-center gap-2">
+                                      <a
+                                        aria-label={`${service.name} primary address ${url}`}
+                                        className="min-w-0 break-all text-primary hover:underline"
+                                        href={url}
+                                        target="_blank"
+                                        rel="noreferrer"
                                       >
-                                        <div className="flex min-w-0 items-center gap-2">
-                                          <a
-                                            className="min-w-0 break-all text-primary hover:underline"
-                                            href={url}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                          >
-                                            {url}
-                                          </a>
-                                          <CopyButton
-                                            ariaLabel={`Copy ${service.name} URL`}
-                                            label="Copy"
-                                            value={url}
-                                          />
-                                        </div>
-                                        <p className="text-xs text-muted-foreground">
-                                          Domain {domain.status} · HTTPS{" "}
-                                          {domain.sslStatus}
-                                        </p>
-                                        {domain.failureMessage ? (
-                                          <p className="text-xs text-destructive">
-                                            {domain.failureMessage}
-                                          </p>
-                                        ) : null}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
+                                        {primary.hostname}
+                                      </a>
+                                      <CopyButton
+                                        ariaLabel={`Copy ${service.name} primary URL`}
+                                        label="Copy"
+                                        value={url}
+                                      />
+                                    </div>
+                                    {extra > 0 ? (
+                                      <p className="text-xs text-muted-foreground">
+                                        +{extra} {extra === 1 ? "hostname" : "hostnames"}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                );
+                              })()}
                             </TableCell>
                             <TableCell data-label="Runtime">
                               <ServiceRuntimeStatus
@@ -781,10 +975,16 @@ export function AppDetailModule() {
                                     </DropdownMenuItem>
                                   ) : null}
                                   <DropdownMenuItem
-                                    onClick={() => setActiveTab("logs")}
+                                    onClick={() => {
+                                      setLogsServiceFilter(service.name);
+                                      setActiveTab("logs");
+                                      if (applicationId && environmentId) {
+                                        navigate(`/apps/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}/logs`);
+                                      }
+                                    }}
                                   >
                                     <FileText className="mr-2 h-4 w-4" />
-                                    <span>View service logs</span>
+                                    <span>View application logs</span>
                                   </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
@@ -799,7 +999,47 @@ export function AppDetailModule() {
                                 colSpan={5}
                                 data-label="Service configuration"
                               >
-                                <div className="grid gap-4 px-2 py-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                                <div className="space-y-3 px-2 py-3">
+                                  <div>
+                                    <p className="text-xs font-medium text-muted-foreground">
+                                      Addresses
+                                    </p>
+                                    {service.domains.length === 0 ? (
+                                      <p className="text-xs text-muted-foreground">
+                                        {service.public ? "No URLs assigned." : "Internal only."}
+                                      </p>
+                                    ) : (
+                                      <ul className="space-y-2">
+                                        {service.domains.map((domain) => (
+                                          <li key={domain.id} className="text-xs">
+                                            <span className="flex flex-wrap items-center gap-2">
+                                              <a
+                                                className="break-all text-primary hover:underline"
+                                                href={`https://${domain.hostname}`}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                              >
+                                                {domain.hostname}
+                                              </a>
+                                              <CopyButton
+                                                ariaLabel={`Copy ${domain.hostname}`}
+                                                label="Copy"
+                                                value={`https://${domain.hostname}`}
+                                              />
+                                              <span className="text-muted-foreground">
+                                                Routing: {domain.dnsStatus} · {domain.applyStatus} · HTTPS: {domain.sslStatus}
+                                              </span>
+                                            </span>
+                                            {domain.failureMessage ? (
+                                              <p className="text-destructive">{domain.failureMessage}</p>
+                                            ) : null}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="grid gap-4 px-2 pb-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
                                   <div className="sm:col-span-2 lg:col-span-2">
                                     <p className="text-xs font-medium text-muted-foreground">
                                       Image reference
@@ -1085,16 +1325,19 @@ export function AppDetailModule() {
 
         <TabsContent className="space-y-4" value="logs">
           <AppTelemetryPanel
+            key={`${detailScope}:logs:${logsServiceFilter ?? ""}`}
             app={app}
             serviceNames={services.map((service) => service.name)}
+            initialService={logsServiceFilter}
           />
         </TabsContent>
       </Tabs>
-      {appId ? (
+      {runtimeAppId ? (
         <ManageServiceDomainsDialog
+          key={`domains:${detailScope}`}
           onManageAppDomains={() => { setManageDomainsServiceName(null); setActiveTab("domains"); }}
           organizationId={app.organizationId}
-          appId={appId}
+          appId={runtimeAppId}
           serviceName={manageDomainsServiceName}
           domains={
             services.find((s) => s.name === manageDomainsServiceName)
@@ -1109,16 +1352,93 @@ export function AppDetailModule() {
           onSaved={refreshServices}
         />
       ) : null}
-      <DeleteAppDialog
-        app={app}
-        onRequested={onDeletionRequested}
-        open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
-        showTrigger={false}
-      />
-      {appId ? (
+      {envDeleteTarget ? (
+        <Dialog
+          open={true}
+          onOpenChange={(open) => {
+            if (!open && !envDeleteBusy) {
+              setEnvDeleteTarget(null);
+              setEnvDeleteError(null);
+            }
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                Delete {envDeleteTarget.appName} / {envDeleteTarget.envName}?
+              </DialogTitle>
+              <DialogDescription>
+                This deletes only the {envDeleteTarget.envName} environment of{" "}
+                {envDeleteTarget.appName} and its services, domains, secrets
+                and deployments. Other environments are unaffected. Durable
+                storage volumes are retained in Hetzner and continue to incur
+                charges until you delete them there.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label htmlFor="delete-env-confirmation">
+                Type {envDeleteTarget.envName} to confirm
+              </Label>
+              <Input
+                id="delete-env-confirmation"
+                autoComplete="off"
+                disabled={envDeleteBusy}
+                onChange={(event) => setEnvDeleteConfirmation(event.target.value)}
+                value={envDeleteConfirmation}
+              />
+              {envDeleteError ? (
+                <p role="alert" className="text-sm text-destructive">{envDeleteError}</p>
+              ) : null}
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                disabled={envDeleteBusy}
+                onClick={() => {
+                  setEnvDeleteTarget(null);
+                  setEnvDeleteError(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={envDeleteBusy || envDeleteConfirmation !== envDeleteTarget.envName}
+                onClick={() => {
+                  const target = envDeleteTarget;
+                  // Original scope/operation identity: reject + finally
+                  // paths are guarded too, so a failure landing after the
+                  // user switched environments can never write the error
+                  // into (or un-busy) the new scope's dialog.
+                  const captured = currentScope.current;
+                  setEnvDeleteBusy(true);
+                  setEnvDeleteError(null);
+                  deleteEnvironment(target.applicationId, target.environmentId, envDeleteConfirmation)
+                    .then(() => {
+                      if (!scopeStillCurrent(captured)) return;
+                      setEnvDeleteTarget(null);
+                      navigate(dashboardRoutes.apps.path);
+                    })
+                    .catch((e) => {
+                      if (!scopeStillCurrent(captured)) return;
+                      setEnvDeleteError(e instanceof Error ? e.message : "Unable to delete environment.");
+                    })
+                    .finally(() => {
+                      if (!scopeStillCurrent(captured)) return;
+                      setEnvDeleteBusy(false);
+                    });
+                }}
+              >
+                {envDeleteBusy ? "Deleting…" : "Delete environment"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+      {runtimeAppId ? (
         <AppServiceSecretsDialog
-          appId={appId}
+          key={`secrets:${detailScope}`}
+          appId={runtimeAppId}
           serviceName={secretsServiceName}
           open={secretsServiceName !== null}
           onOpenChange={(open) => {
@@ -1151,7 +1471,15 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 
 function loadAppDetail(appId: string) {
   return Promise.all([
-    getApp(appId),
+    getEnvironmentDetail(appId),
     listAppServiceSecretServices(appId),
   ]);
+}
+
+async function loadScoping(applicationId: string): Promise<Application> {
+  if (appsFixturesEnabled()) {
+    return appsFixtureApplications().find((a) => a.id === applicationId)
+      ?? (() => { throw new Error(`Application ${applicationId} not found.`); })();
+  }
+  return getApplication(applicationId);
 }

@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
-import { checkAppDomainAvailability, createAppDomain } from "../../../api/appsApi";
+import { checkAppDomainAvailability, createAppDomain } from "../../../api/environmentsApi";
 import type { DomainAvailabilityResponse } from "../../../models/controlPlane";
 
 type Props = {

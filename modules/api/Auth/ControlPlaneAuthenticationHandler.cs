@@ -16,7 +16,7 @@ public sealed class ControlPlaneAuthenticationHandler(
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        if (Request.Path.StartsWithSegments("/v2") || Request.Path == "/v1/registry/token")
+        if (Request.Path.StartsWithSegments("/v2") || Request.Path == "/api/registry/token")
         {
             return AuthenticateResult.NoResult();
         }

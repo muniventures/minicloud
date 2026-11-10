@@ -19,7 +19,7 @@ import {
   listAppServiceSecrets,
   setAppServiceSecret,
   updateAppServiceSecret
-} from "../../../api/appsApi";
+} from "../../../api/environmentsApi";
 import { EmptyState } from "../../../core/components/EmptyState";
 import { StatusBadge } from "../../../core/components/StatusBadge";
 import type { AppServiceSecretResponse } from "../../../models/controlPlane";

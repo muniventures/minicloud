@@ -15,18 +15,18 @@ export async function getRuntimeLogs(appId: string, query: RuntimeLogQuery = {})
   if (query.tail) search.set("tail", String(query.tail));
   if (query.since) search.set("since", query.since);
   search.set("appId", appId);
-  return apiRequest<RuntimeLogResponse[]>(`/v1/runtime/logs?${search}`);
+  return apiRequest<RuntimeLogResponse[]>(`/api/runtime/logs?${search}`);
 }
 
 export async function getRuntimeStatus(appId: string) {
-  return apiRequest<RuntimeStatusResponse>(`/v1/runtime/status?appId=${encodeURIComponent(appId)}`);
+  return apiRequest<RuntimeStatusResponse>(`/api/runtime/status?appId=${encodeURIComponent(appId)}`);
 }
 
 export async function getRuntimeLogSources(appId: string) {
-  return apiRequest<RuntimeLogSourceResponse[]>(`/v1/runtime/log-sources?appId=${encodeURIComponent(appId)}`);
+  return apiRequest<RuntimeLogSourceResponse[]>(`/api/runtime/log-sources?appId=${encodeURIComponent(appId)}`);
 }
 
 export async function getRuntimeDiagnostics(appId: string, since = "30m") {
   const search = new URLSearchParams({ appId, since });
-  return apiRequest<RuntimeDiagnosticBundleResponse>(`/v1/runtime/diagnostics?${search}`);
+  return apiRequest<RuntimeDiagnosticBundleResponse>(`/api/runtime/diagnostics?${search}`);
 }

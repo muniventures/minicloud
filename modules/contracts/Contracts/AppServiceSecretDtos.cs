@@ -34,7 +34,9 @@ public sealed record UpdateAppServiceSecretRequest(string Value);
 
 public sealed record ValidateDeploymentSecretsRequest(
     string AppId,
-    IReadOnlyList<DeploymentSecretServiceRequest> Services);
+    IReadOnlyList<DeploymentSecretServiceRequest> Services,
+    string? ApplicationId = null,
+    string? EnvironmentId = null);
 
 public sealed record ResolveDeploymentSecretsRequest(
     IReadOnlyList<DeploymentSecretServiceRequest> Services);

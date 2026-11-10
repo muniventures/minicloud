@@ -15,7 +15,7 @@ namespace Minicloud.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("v1/[controller]")]
+[Route("api/[controller]")]
 public sealed class ArtifactsController : ControllerBase
 {
     [HttpGet]
@@ -24,17 +24,25 @@ public sealed class ArtifactsController : ControllerBase
         [FromServices] MinicloudDbContext db,
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] TimeProvider timeProvider,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
         var principal = EndpointResults.RequirePrincipal(HttpContext);
-        if (string.IsNullOrWhiteSpace(appId))
+        var ownershipError = await EndpointResults.VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
+        if (string.IsNullOrWhiteSpace(targetAppId))
         {
             var validation = new ValidationResult();
             validation.Add("appId", "App is required.");
             return EndpointResults.ValidationProblem("Deployment artifact request is invalid.", validation);
         }
 
-        var app = await db.Apps.AsNoTracking().SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
+        var app = await db.Apps.AsNoTracking().SingleOrDefaultAsync(x => x.Id == targetAppId, cancellationToken);
         if (app is null)
         {
             return EndpointResults.NotFound("app_not_found", "App was not found.");
@@ -61,7 +69,7 @@ public sealed class ArtifactsController : ControllerBase
             await db.SaveChangesAsync(cancellationToken);
         }
 
-        return Results.Ok(artifacts.Select(ToResponse));
+        return Results.Ok(artifacts.Select(x => ToResponse(x, app.ApplicationId)));
     }
 
     [HttpPost]
@@ -75,13 +83,19 @@ public sealed class ArtifactsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var principal = EndpointResults.RequirePrincipal(HttpContext);
+        var ownershipError = await EndpointResults.VerifyTargetOwnershipAsync(db, request.AppId, request.ApplicationId, request.EnvironmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
         var validation = ValidateCreateArtifact(request, storage.MaxArtifactBytes);
         if (!validation.IsValid)
         {
             return EndpointResults.ValidationProblem("Deployment artifact request is invalid.", validation);
         }
 
-        var app = await db.Apps.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.AppId, cancellationToken);
+        var targetAppId = !string.IsNullOrWhiteSpace(request.EnvironmentId) ? request.EnvironmentId! : request.AppId;
+        var app = await db.Apps.AsNoTracking().SingleOrDefaultAsync(x => x.Id == targetAppId, cancellationToken);
         if (app is null)
         {
             return EndpointResults.NotFound("app_not_found", "App was not found.");
@@ -113,7 +127,7 @@ public sealed class ArtifactsController : ControllerBase
         db.DeploymentArtifacts.Add(artifact);
         await db.SaveChangesAsync(cancellationToken);
 
-        return Results.Created($"/v1/artifacts/{artifact.Id}", ToCreateResponse(artifact));
+        return Results.Created($"/api/artifacts/{artifact.Id}", ToCreateResponse(artifact, app.ApplicationId));
     }
 
     [HttpPut("{artifactId}/file")]
@@ -330,18 +344,20 @@ public sealed class ArtifactsController : ControllerBase
         return true;
     }
 
-    private static DeploymentArtifactCreateResponse ToCreateResponse(DeploymentArtifact artifact) =>
+    private static DeploymentArtifactCreateResponse ToCreateResponse(DeploymentArtifact artifact, string? applicationId = null) =>
         new(
             artifact.Id,
             artifact.AppId,
             artifact.ServiceName,
             ControlPlaneValidation.ToWireValue(artifact.Status),
-            $"/v1/artifacts/{artifact.Id}/file",
+            $"/api/artifacts/{artifact.Id}/file",
             artifact.ExpectedSizeBytes ?? 0,
             artifact.ExpectedSha256 ?? string.Empty,
-            artifact.ExpiresAt);
+            artifact.ExpiresAt,
+            applicationId,
+            artifact.AppId);
 
-    private static DeploymentArtifactResponse ToResponse(DeploymentArtifact artifact) =>
+    private static DeploymentArtifactResponse ToResponse(DeploymentArtifact artifact, string? applicationId = null) =>
         new(
             artifact.Id,
             artifact.AppId,
@@ -350,6 +366,8 @@ public sealed class ArtifactsController : ControllerBase
             artifact.SizeBytes ?? artifact.ExpectedSizeBytes ?? 0,
             artifact.Sha256 ?? artifact.ExpectedSha256 ?? string.Empty,
             artifact.CreatedAt,
-            artifact.ExpiresAt);
+            artifact.ExpiresAt,
+            applicationId,
+            artifact.AppId);
 
 }

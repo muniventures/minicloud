@@ -24,7 +24,7 @@ public sealed class CliDeploymentPollingTests
             var handler = new CancelHandler();
             var app = new CliApplication(console, environment, tokens, new MinicloudApiClient(environment, tokens, new HttpClient(handler)));
             Assert.Equal(CliExitCodes.Success, await app.RunAsync(["deploy", "cancel", "dep_test"], default));
-            Assert.Equal("/v1/deployments/dep_test/cancel", handler.Path);
+            Assert.Equal("/api/deployments/dep_test/cancel", handler.Path);
             Assert.Contains("Cancellation requested for dep_test", console.Output);
             Assert.Equal(CliExitCodes.ValidationError, await app.RunAsync(["deploy", "cancel"], default));
         }
@@ -174,7 +174,7 @@ public sealed class CliDeploymentPollingTests
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/v1/deployments/dep_test")
+            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/api/deployments/dep_test")
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
@@ -193,7 +193,7 @@ public sealed class CliDeploymentPollingTests
                 });
             }
 
-            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/v1/deployments/dep_test/refresh")
+            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/api/deployments/dep_test/refresh")
             {
                 _refreshCount++;
                 if (_refreshCount == 1)
@@ -233,7 +233,7 @@ public sealed class CliDeploymentPollingTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/v1/deployments/dep_test")
+            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/api/deployments/dep_test")
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
@@ -249,7 +249,7 @@ public sealed class CliDeploymentPollingTests
                 });
             }
 
-            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/v1/deployments/dep_test/refresh")
+            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/api/deployments/dep_test/refresh")
             {
                 cts.Cancel();
                 cancellationToken.ThrowIfCancellationRequested();
@@ -283,7 +283,7 @@ public sealed class CliDeploymentPollingTests
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/v1/me")
+            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/api/me")
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
@@ -299,13 +299,17 @@ public sealed class CliDeploymentPollingTests
                 });
             }
 
-            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/v1/apps/app_main")
+            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/api/apps/app_main")
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(CliApiFixtures.Application("app_main", "org_1", "app_main")) });
+
+            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/api/environments/app_main")
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = JsonContent.Create(new
                     {
                         id = "app_main",
+                        applicationId = "app_main",
                         organizationId = "org_1",
                         name = "Demo",
                         slug = "demo",
@@ -316,7 +320,7 @@ public sealed class CliDeploymentPollingTests
                 });
             }
 
-            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/v1/deployments")
+            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/api/deployments")
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created)
                 {
@@ -329,7 +333,7 @@ public sealed class CliDeploymentPollingTests
                 });
             }
 
-            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/v1/deployments/dep_deploy_123/refresh")
+            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/api/deployments/dep_deploy_123/refresh")
             {
                 _refreshCount++;
                 if (_refreshCount == 1)

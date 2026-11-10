@@ -16,7 +16,7 @@ namespace Minicloud.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("v1/[controller]")]
+[Route("api/[controller]")]
 public sealed class OrganizationsController : ControllerBase
 {
     [HttpGet]
@@ -77,7 +77,7 @@ public sealed class OrganizationsController : ControllerBase
             UpdatedAt = now
         });
         await db.SaveChangesAsync(cancellationToken);
-        return Results.Created($"/v1/organizations/{organization.Id}", organization.ToResponse());
+        return Results.Created($"/api/organizations/{organization.Id}", organization.ToResponse());
     }
 
     [HttpGet("{organizationId}")]

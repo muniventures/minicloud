@@ -7,7 +7,7 @@ using Minicloud.Telemetry.Services;
 namespace Minicloud.Telemetry.Controllers;
 
 [ApiController]
-[Route("v1/logs")]
+[Route("api/logs")]
 public sealed class TelemetryQueryController(
     TelemetryQueryService queries,
     TimeProvider timeProvider,

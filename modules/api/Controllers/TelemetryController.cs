@@ -9,7 +9,7 @@ namespace Minicloud.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("v1/apps/{appId}/telemetry")]
+[Route("api/environments/{appId}/telemetry")]
 public sealed class TelemetryController : ControllerBase
 {
     private static IResult HiddenNotFound() =>
@@ -61,7 +61,7 @@ public sealed class TelemetryController : ControllerBase
         }
 
         var response = result.Success!.Response;
-        return Results.Created($"/v1/apps/{appId}/telemetry/credentials/{response.Id}", response);
+        return Results.Created($"/api/environments/{appId}/telemetry/credentials/{response.Id}", response);
     }
 
     [HttpGet("credentials")]

@@ -128,17 +128,17 @@ Proposed routes, following existing `/v1` organization authorization patterns:
 
 | Route | Behavior |
 | --- | --- |
-| `GET /v1/provider-types` | Supported VPS types, safe credential-field descriptions, adapter defaults and capabilities. No secrets or organization configuration. |
-| `GET/POST /v1/providers?organizationId=...` | List/create accounts within the authorized organization. Creation accepts a write-only credential object and adapter settings. |
-| `GET/PATCH/DELETE /v1/providers/{id}` | Read safe metadata, edit metadata/state, or remove an unused account. |
-| `PUT /v1/providers/{id}/credentials` | Replace credentials with optimistic concurrency and scope checks; returns only safe metadata. |
-| `POST /v1/providers/{id}/validate` | Perform a read-only credential/scope check and return sanitized results. |
-| `GET/POST /v1/plans?organizationId=...` | List/create organization plans; optional account filter for the provider detail page. |
-| `GET/PATCH/DELETE /v1/plans/{id}` | Read/edit/retire plans subject to uniqueness, usage and reservation rules. |
+| `GET /api/provider-types` | Supported VPS types, safe credential-field descriptions, adapter defaults and capabilities. No secrets or organization configuration. |
+| `GET/POST /api/providers?organizationId=...` | List/create accounts within the authorized organization. Creation accepts a write-only credential object and adapter settings. |
+| `GET/PATCH/DELETE /api/providers/{id}` | Read safe metadata, edit metadata/state, or remove an unused account. |
+| `PUT /api/providers/{id}/credentials` | Replace credentials with optimistic concurrency and scope checks; returns only safe metadata. |
+| `POST /api/providers/{id}/validate` | Perform a read-only credential/scope check and return sanitized results. |
+| `GET/POST /api/plans?organizationId=...` | List/create organization plans; optional account filter for the provider detail page. |
+| `GET/PATCH/DELETE /api/plans/{id}` | Read/edit/retire plans subject to uniqueness, usage and reservation rules. |
 
 App creation, app update, environment creation, branch creation, and deployment admission accept a plan name where selection is needed. Reuse the existing `plan` string field where practical; define its new meaning explicitly as the organization plan name. Responses include `planId`, current `plan` name, and safe account/type/placement information where relevant. Internal worker input uses stable IDs and snapshots, never name lookup.
 
-`GET /v1/plans` supplies name resolution and discovery; a dedicated global-name route is unnecessary. Request schema and OpenAPI must distinguish the provider's SKU from the user's Minicloud plan name.
+`GET /api/plans` supplies name resolution and discovery; a dedicated global-name route is unnecessary. Request schema and OpenAPI must distinguish the provider's SKU from the user's Minicloud plan name.
 
 Return explicit errors for unknown/duplicate plan names, unsupported provider types, cross-organization references, disabled accounts/plans, invalid placement, immutable mapping changes, stale revisions, unavailable credentials, unresolved resource ownership, and a requested change to an existing environment's placement. Never substitute a global default or silently ignore an invalid name.
 

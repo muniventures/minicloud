@@ -17,7 +17,7 @@ namespace Minicloud.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("v1/[controller]")]
+[Route("api/[controller]")]
 public sealed class RuntimeController : ControllerBase
 {
     [HttpPost("heartbeat")]
@@ -230,10 +230,13 @@ public sealed class RuntimeController : ControllerBase
     }
 
     [HttpPost("servers")]
-    public async Task<IResult> CreateRuntimeServer([FromQuery] string appId, [FromBody] CreateRuntimeServerRequest request, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] IRuntimeTokenService runtimeTokens, [FromServices] IIdGenerator ids, [FromServices] TimeProvider timeProvider, CancellationToken cancellationToken)
+    public async Task<IResult> CreateRuntimeServer([FromQuery] string appId, [FromBody] CreateRuntimeServerRequest request, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] IRuntimeTokenService runtimeTokens, [FromServices] IIdGenerator ids, [FromServices] TimeProvider timeProvider, CancellationToken cancellationToken, [FromQuery] string? applicationId = null, [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null) { return ownershipError; }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        var appRecord = await db.Apps.SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
+        var appRecord = await db.Apps.SingleOrDefaultAsync(x => x.Id == targetAppId, cancellationToken);
         if (appRecord is null)
         {
             return EndpointResults.NotFound("app_not_found", "App was not found.");
@@ -261,7 +264,7 @@ public sealed class RuntimeController : ControllerBase
                 !string.Equals(selectedPlan.ProviderAccount.ProviderType.ToString(), request.Provider, StringComparison.OrdinalIgnoreCase))
             { return EndpointResults.Conflict("runtime_account_conflict", "Runtime provider account does not match the app plan."); }
             if (string.IsNullOrWhiteSpace(request.ProviderServerId) || !await db.ServerInstances.AnyAsync(x =>
-                x.AppId == appId && x.OrganizationId == appRecord.OrganizationId && x.ProviderAccountId == accountId &&
+                x.AppId == targetAppId && x.OrganizationId == appRecord.OrganizationId && x.ProviderAccountId == accountId &&
                 x.Provider.ToLower() == request.Provider.ToLower() && x.ProviderServerId == request.ProviderServerId, cancellationToken))
             { return EndpointResults.Conflict("runtime_server_conflict", "Register the exact managed server saved for this environment."); }
         }
@@ -274,14 +277,14 @@ public sealed class RuntimeController : ControllerBase
             { return EndpointResults.Conflict("runtime_account_conflict", "Runtime provider account does not belong to this organization or provider type."); }
         }
         if (await db.ServerInstances.AnyAsync(x => x.ProviderAccountId == accountId && x.Provider.ToLower() == request.Provider.ToLower() &&
-                x.ProviderServerId == request.ProviderServerId && (x.AppId != appId || x.OrganizationId != appRecord.OrganizationId), cancellationToken) ||
+                x.ProviderServerId == request.ProviderServerId && (x.AppId != targetAppId || x.OrganizationId != appRecord.OrganizationId), cancellationToken) ||
             await db.RuntimeServers.AnyAsync(x => x.ProviderAccountId == accountId && x.Provider.ToLower() == request.Provider.ToLower() &&
-                x.ProviderServerId == request.ProviderServerId && (x.AppId != appId || x.OrganizationId != appRecord.OrganizationId), cancellationToken))
+                x.ProviderServerId == request.ProviderServerId && (x.AppId != targetAppId || x.OrganizationId != appRecord.OrganizationId), cancellationToken))
         { return EndpointResults.Conflict("runtime_server_conflict", "Runtime server is registered to another application."); }
         var now = timeProvider.GetUtcNow();
         var runtimeServer = await db.RuntimeServers
             .SingleOrDefaultAsync(x =>
-                x.AppId == appId &&
+                x.AppId == targetAppId &&
                 x.ProviderAccountId == accountId &&
                 x.Provider.ToLower() == request.Provider.ToLower() &&
                 x.ProviderServerId == request.ProviderServerId,
@@ -323,7 +326,7 @@ public sealed class RuntimeController : ControllerBase
         });
 
         await db.SaveChangesAsync(cancellationToken);
-        return Results.Created($"/v1/runtime/servers/{runtimeServer.Id}?appId={Uri.EscapeDataString(appId)}", new RuntimeServerCreateResponse(
+        return Results.Created($"/api/runtime/servers/{runtimeServer.Id}?appId={Uri.EscapeDataString(targetAppId)}", new RuntimeServerCreateResponse(
             runtimeServer.Id,
             runtimeServer.OrganizationId,
             runtimeServer.AppId,
@@ -333,10 +336,13 @@ public sealed class RuntimeController : ControllerBase
     }
 
     [HttpPost("servers/{serverId}/rotate-token")]
-    public async Task<IResult> RotateRuntimeServerToken([FromQuery] string appId, [FromRoute] string serverId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] IRuntimeTokenService runtimeTokens, [FromServices] IIdGenerator ids, [FromServices] TimeProvider timeProvider, CancellationToken cancellationToken)
+    public async Task<IResult> RotateRuntimeServerToken([FromQuery] string appId, [FromRoute] string serverId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] IRuntimeTokenService runtimeTokens, [FromServices] IIdGenerator ids, [FromServices] TimeProvider timeProvider, CancellationToken cancellationToken, [FromQuery] string? applicationId = null, [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null) { return ownershipError; }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        var server = await db.RuntimeServers.SingleOrDefaultAsync(x => x.Id == serverId && x.AppId == appId, cancellationToken);
+        var server = await db.RuntimeServers.SingleOrDefaultAsync(x => x.Id == serverId && x.AppId == targetAppId, cancellationToken);
         if (server is null)
         {
             return EndpointResults.NotFound("runtime_server_not_found", "Runtime server was not found.");
@@ -363,15 +369,18 @@ public sealed class RuntimeController : ControllerBase
     }
 
     [HttpGet("logs")]
-    public async Task<IResult> GetLogs([FromQuery] string appId, [FromQuery] string? source, [FromQuery] string? service, [FromQuery] int? tail, [FromQuery] string? since, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] TimeProvider timeProvider, CancellationToken cancellationToken)
+    public async Task<IResult> GetLogs([FromQuery] string appId, [FromQuery] string? source, [FromQuery] string? service, [FromQuery] int? tail, [FromQuery] string? since, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] TimeProvider timeProvider, CancellationToken cancellationToken, [FromQuery] string? applicationId = null, [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null) { return ownershipError; }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), appId, OrganizationAction.ReadRuntime, cancellationToken))
+        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), targetAppId, OrganizationAction.ReadRuntime, cancellationToken))
         {
             return EndpointResults.Forbidden();
         }
 
-        var appRecord = await db.Apps.AsNoTracking().SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
+        var appRecord = await db.Apps.AsNoTracking().SingleOrDefaultAsync(x => x.Id == targetAppId, cancellationToken);
         if (appRecord is null)
         {
             return EndpointResults.NotFound("app_not_found", "App was not found.");
@@ -379,7 +388,7 @@ public sealed class RuntimeController : ControllerBase
 
         var cutoff = ParseSince(since, timeProvider.GetUtcNow());
         var take = Math.Clamp(tail ?? 200, 1, 1000);
-        var query = db.RuntimeLogRecords.AsNoTracking().Where(x => x.AppId == appId);
+        var query = db.RuntimeLogRecords.AsNoTracking().Where(x => x.AppId == targetAppId);
         if (!string.IsNullOrWhiteSpace(source))
         {
             query = query.Where(x => x.Source == source);
@@ -407,36 +416,42 @@ public sealed class RuntimeController : ControllerBase
     }
 
     [HttpGet("status")]
-    public async Task<IResult> GetRuntimeStatus([FromQuery] string appId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] TimeProvider timeProvider, CancellationToken cancellationToken)
+    public async Task<IResult> GetRuntimeStatus([FromQuery] string appId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] TimeProvider timeProvider, CancellationToken cancellationToken, [FromQuery] string? applicationId = null, [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null) { return ownershipError; }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), appId, OrganizationAction.ReadRuntime, cancellationToken))
+        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), targetAppId, OrganizationAction.ReadRuntime, cancellationToken))
         {
             return EndpointResults.Forbidden();
         }
 
-        var appRecord = await db.Apps.AsNoTracking().SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
+        var appRecord = await db.Apps.AsNoTracking().SingleOrDefaultAsync(x => x.Id == targetAppId, cancellationToken);
         if (appRecord is null)
         {
             return EndpointResults.NotFound("app_not_found", "App was not found.");
         }
 
-        var response = await LatestRuntimeStatusAsync(db, appId, timeProvider.GetUtcNow(), cancellationToken);
+        var response = await LatestRuntimeStatusAsync(db, targetAppId, timeProvider.GetUtcNow(), cancellationToken);
         return response is null
             ? Results.Ok(new RuntimeStatusResponse("", null, null, false, false, null, [], null))
             : Results.Ok(response);
     }
 
     [HttpGet("log-sources")]
-    public async Task<IResult> GetLogSources([FromQuery] string appId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, CancellationToken cancellationToken)
+    public async Task<IResult> GetLogSources([FromQuery] string appId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, CancellationToken cancellationToken, [FromQuery] string? applicationId = null, [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null) { return ownershipError; }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), appId, OrganizationAction.ReadRuntime, cancellationToken))
+        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), targetAppId, OrganizationAction.ReadRuntime, cancellationToken))
         {
             return EndpointResults.Forbidden();
         }
 
-        var appRecord = await db.Apps.AsNoTracking().SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
+        var appRecord = await db.Apps.AsNoTracking().SingleOrDefaultAsync(x => x.Id == targetAppId, cancellationToken);
         if (appRecord is null)
         {
             return EndpointResults.NotFound("app_not_found", "App was not found.");
@@ -444,7 +459,7 @@ public sealed class RuntimeController : ControllerBase
 
         var sourceRows = await db.RuntimeLogRecords
             .AsNoTracking()
-            .Where(x => x.AppId == appId)
+            .Where(x => x.AppId == targetAppId)
             .GroupBy(x => new { x.Source, x.Service })
             .Select(x => new
             {
@@ -461,15 +476,18 @@ public sealed class RuntimeController : ControllerBase
     }
 
     [HttpGet("diagnostics")]
-    public async Task<IResult> GetRuntimeDiagnostics([FromQuery] string appId, [FromQuery] string? since, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] TimeProvider timeProvider, CancellationToken cancellationToken)
+    public async Task<IResult> GetRuntimeDiagnostics([FromQuery] string appId, [FromQuery] string? since, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] TimeProvider timeProvider, CancellationToken cancellationToken, [FromQuery] string? applicationId = null, [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null) { return ownershipError; }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), appId, OrganizationAction.ReadRuntime, cancellationToken))
+        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), targetAppId, OrganizationAction.ReadRuntime, cancellationToken))
         {
             return EndpointResults.Forbidden();
         }
 
-        var appRecord = await db.Apps.AsNoTracking().SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
+        var appRecord = await db.Apps.AsNoTracking().SingleOrDefaultAsync(x => x.Id == targetAppId, cancellationToken);
         if (appRecord is null)
         {
             return EndpointResults.NotFound("app_not_found", "App was not found.");
@@ -477,7 +495,7 @@ public sealed class RuntimeController : ControllerBase
 
         var cutoff = ParseSince(since, timeProvider.GetUtcNow()) ?? timeProvider.GetUtcNow().AddMinutes(-30);
         var diagnosticRows = await db.RuntimeLogRecords.AsNoTracking()
-            .Where(x => x.AppId == appId)
+            .Where(x => x.AppId == targetAppId)
             .ToListAsync(cancellationToken);
         var caddy = diagnosticRows
             .Where(x => x.Source == "caddy" && x.ObservedAt >= cutoff && (x.Content.Contains("error") || x.Content.Contains("502")))
@@ -489,9 +507,9 @@ public sealed class RuntimeController : ControllerBase
             .OrderByDescending(x => x.ObservedAt)
             .Take(50)
             .ToList();
-        var status = await LatestRuntimeStatusAsync(db, appId, timeProvider.GetUtcNow(), cancellationToken);
+        var status = await LatestRuntimeStatusAsync(db, targetAppId, timeProvider.GetUtcNow(), cancellationToken);
         var latestDeployments = await db.Deployments.AsNoTracking()
-            .Where(x => x.AppId == appId)
+            .Where(x => x.AppId == targetAppId)
             .ToDateTimeOffsetOrderedListAsync(db, x => x.CreatedAt, x => x.CreatedAt, descending: true, take: 1, cancellationToken);
         var deploymentUrl = latestDeployments.FirstOrDefault()?.WebsiteUrl;
 

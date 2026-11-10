@@ -30,7 +30,7 @@ services:
 
 A name identifies a volume within the app. Services may share a name with the same size and ownership. Branch apps have separate app IDs and separate disks; data is not cloned. Existing files inside the image at the mount path are hidden by the mount, not copied. UID/GID default to 0 and apply only when creating the volume's data directory; changing ownership later is rejected. Configure the application's container user accordingly.
 
-The dashboard Storage tab lists registered and retained volumes and offers a configuration example. Expanded service details and `minicloud apps inspect <app>` show configured mounts. `GET /v1/apps/{appId}/storage` returns the app-scoped stored volume inventory, not a live mount-health check.
+The dashboard Storage tab lists registered and retained volumes and offers a configuration example. Expanded service details and `minicloud apps inspect <app>` show configured mounts. `GET /api/environments/{appId}/storage` returns the app-scoped stored volume inventory, not a live mount-health check.
 
 Only Hetzner is supported. Each app supports up to 16 named volumes and 10,000 GB total, with 10–10,000 GB per volume, subject to provider quota. Increase `sizeGb` to grow; shrinking is rejected. Growth changes the provider disk and extends ext4 on the VPS. A failed deployment or rollback does not undo growth.
 

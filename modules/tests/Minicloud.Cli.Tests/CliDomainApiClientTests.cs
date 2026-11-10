@@ -30,11 +30,11 @@ public sealed class CliDomainApiClientTests
             await client.DeleteDomainAsync("app_123", "dom_123", CancellationToken.None);
 
             Assert.Equal([
-                "GET /v1/domains/services?appId=app_123",
-                "GET /v1/domains?appId=app_123",
-                "POST /v1/domains?appId=app_123",
-                "PATCH /v1/domains/dom_123?appId=app_123",
-                "DELETE /v1/domains/dom_123?appId=app_123"
+                "GET /api/domains/services?appId=app_123",
+                "GET /api/domains?appId=app_123",
+                "POST /api/domains?appId=app_123",
+                "PATCH /api/domains/dom_123?appId=app_123",
+                "DELETE /api/domains/dom_123?appId=app_123"
             ], handler.Requests.Select(x => $"{x.Method} {x.Path}").ToArray());
             Assert.All(handler.Requests, request => Assert.Equal("Bearer mc_test", request.Authorization));
             Assert.Contains(handler.Requests, request => request.Body?.Contains("\"serviceName\":\"api\"", StringComparison.Ordinal) == true);
@@ -68,8 +68,8 @@ public sealed class CliDomainApiClientTests
             await client.UploadDeploymentArtifactContentAsync(created.Id, created.UploadUrl, artifactPath, "abc", 9, CancellationToken.None);
 
             Assert.Equal([
-                "POST /v1/artifacts",
-                "PUT /v1/artifacts/art_123/file"
+                "POST /api/artifacts",
+                "PUT /api/artifacts/art_123/file"
             ], handler.Requests.Select(x => $"{x.Method} {x.Path}").ToArray());
             Assert.All(handler.Requests, request => Assert.Equal("Bearer mc_test", request.Authorization));
             Assert.Contains(handler.Requests, request => request.Body?.Contains("\"serviceName\":\"api\"", StringComparison.Ordinal) == true);
@@ -101,8 +101,8 @@ public sealed class CliDomainApiClientTests
                 return new HttpResponseMessage(HttpStatusCode.NoContent);
             }
 
-            var payload = request.RequestUri!.AbsolutePath == "/v1/artifacts"
-                ? """{"id":"art_123","appId":"app_123","serviceName":"api","status":"uploading","uploadUrl":"/v1/artifacts/art_123/file","sizeBytes":9,"sha256":"abc","expiresAt":"2026-06-07T12:10:00Z"}"""
+            var payload = request.RequestUri!.AbsolutePath == "/api/artifacts"
+                ? """{"id":"art_123","appId":"app_123","serviceName":"api","status":"uploading","uploadUrl":"/api/artifacts/art_123/file","sizeBytes":9,"sha256":"abc","expiresAt":"2026-06-07T12:10:00Z"}"""
                 : request.RequestUri!.AbsolutePath.EndsWith("/file", StringComparison.Ordinal)
                 ? """{"id":"art_123","appId":"app_123","serviceName":"api","status":"ready","sizeBytes":9,"sha256":"abc","createdAt":"2026-06-07T12:00:00Z","expiresAt":"2026-06-07T12:10:00Z"}"""
                 : request.RequestUri!.AbsolutePath.EndsWith("/services", StringComparison.Ordinal)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { listAppStorage } from "@/api/appsApi";
+import { listAppStorage } from "@/api/environmentsApi";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CopyButton } from "@/core/components/CopyButton";

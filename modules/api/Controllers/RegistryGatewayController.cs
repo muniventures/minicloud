@@ -24,7 +24,7 @@ public sealed class RegistryGatewayController(
     private static readonly SemaphoreSlim Transfers = new(32, 32);
     private readonly RegistryOptions _options = options.Value;
 
-    [HttpGet("v1/registry/token")]
+    [HttpGet("api/registry/token")]
     public Task<IResult> Token(CancellationToken ct) => ImagePublicationsController.Handle(async () =>
     {
         publications.RequireEnabled();
@@ -59,7 +59,7 @@ public sealed class RegistryGatewayController(
         if (session is null)
         {
             Response.StatusCode = 401;
-            Response.Headers.WWWAuthenticate = $"Bearer realm=\"{_options.PublicUrl.TrimEnd('/')}/v1/registry/token\",service=\"{_options.Audience}\"";
+            Response.Headers.WWWAuthenticate = $"Bearer realm=\"{_options.PublicUrl.TrimEnd('/')}/api/registry/token\",service=\"{_options.Audience}\"";
             var segments = (path ?? "").Split('/');
             if (segments.Length >= 7 && segments[0] == "org" && segments[2] == "app" && segments[4] == "service")
             {

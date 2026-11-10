@@ -2,7 +2,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { StatusBadge } from "@/core/components/StatusBadge";
 import { ServiceUrls } from "@/core/components/ServiceUrls";
 import { Disclosure } from "@/core/components/Disclosure";
-import type { AppResponse } from "@/models/controlPlane";
+import type { EnvironmentDetailResponse } from "@/models/controlPlane";
 import { isNonInteractiveNavigationClick } from "@/core/components/NavigableTableRow";
 import { Link } from "react-router-dom";
 export function AppCard({
@@ -10,7 +10,7 @@ export function AppCard({
   onOpen,
   compact = false,
 }: {
-  app: AppResponse;
+  app: EnvironmentDetailResponse;
   compact?: boolean;
   onOpen: (id: string) => void;
 }) {

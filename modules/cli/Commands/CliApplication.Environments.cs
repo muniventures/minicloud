@@ -17,27 +17,22 @@ public sealed partial class CliApplication
             throw new CliCommandException(CliExitCodes.ValidationError, "Usage: minicloud environments list | create <name> --plan <plan> | rename <name> <new-name> [--config path]");
         var result = MinicloudConfigLoader.Load(GetOption(args, "--config") ?? MinicloudConfigLoader.ResolveDefaultPath());
         if (!result.IsValid || result.Config is null) { PrintDiagnostics(result.Diagnostics); return CliExitCodes.ValidationError; }
-        var app = await _apiClient.GetAppAsync(result.Config.AppId!, ct);
-        if (app.BranchName is not null) throw new CliCommandException(CliExitCodes.ValidationError, "Use a main application config to manage environments.");
-        if (app.ParentAppId is not null) app = await _apiClient.GetAppAsync(app.ParentAppId, ct);
+        var application = await GetApplicationContextAsync(result.Config.AppId!, ct);
         if (action == "create")
         {
-            var created = await _apiClient.CreateEnvironmentAsync(app.Id, new(name!, GetOption(args, "--plan")!, GetOption(args, "--database")), ct);
-            _console.WriteLine($"Environment created: {created.EnvironmentName} ({created.Plan}), runtime {created.Id}");
+            var created = await _apiClient.CreateEnvironmentAsync(application.Id,
+                new(name!, GetOption(args, "--plan")!, GetOption(args, "--database") ?? "none"), ct);
+            _console.WriteLine($"App: {application.Name} · Environment created: {created.Name} ({created.Plan}), runtime {created.Id}");
         }
-        else
+        else if (action == "rename")
         {
-            var environments = app.Environments ?? [new AppEnvironmentResponse(app.Id, app.EnvironmentName ?? "production", app.Plan, app.Database, app.DeletionStatus)];
-            if (action == "rename")
-            {
-                var selected = environments.SingleOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase))
-                    ?? throw new CliCommandException(CliExitCodes.ValidationError, $"Unknown environment '{name}'.");
-                await _apiClient.RenameEnvironmentAsync(selected.Id, new(args[2]), ct);
-                _console.WriteLine($"Environment renamed: {name} -> {args[2]}");
-            }
-            else foreach (var environment in environments)
-                _console.WriteLine($"{environment.Name}\t{environment.Plan}\t{environment.Database}\t{environment.Id}");
+            var selected = application.Environments.SingleOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase))
+                ?? throw new CliCommandException(CliExitCodes.ValidationError, $"Unknown environment '{name}'.");
+            await _apiClient.UpdateEnvironmentAsync(application.Id, selected.Id, new(Name: args[2]), ct);
+            _console.WriteLine($"Environment renamed: {name} -> {args[2]}");
         }
+        else foreach (var environment in application.Environments)
+            _console.WriteLine($"{environment.Name}\t{environment.Plan}\t{environment.Database}\t{environment.Id}");
         return CliExitCodes.Success;
     }
 }

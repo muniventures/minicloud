@@ -30,7 +30,7 @@ export type LatestDeployment = {
 
 export type AppEnvironmentResponse = { id: string; name: string; plan: AppPlan; database: DatabaseMode; deletionStatus?: string | null };
 
-export type AppResponse = {
+export type EnvironmentDetailResponse = {
   environmentName?: string | null;
   environments?: AppEnvironmentResponse[];
   deletionStatus?: string | null;

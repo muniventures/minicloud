@@ -51,7 +51,7 @@ public sealed class CliServiceUrlTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Assert.Equal("/v1/deployments/dep_test", request.RequestUri!.AbsolutePath);
+            Assert.Equal("/api/deployments/dep_test", request.RequestUri!.AbsolutePath);
             var payload = new
             {
                 id = "dep_test", appId = "app_test", organizationId = "org_test", database = "sqlite",

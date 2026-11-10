@@ -17,16 +17,23 @@ namespace Minicloud.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("v1/[controller]")]
+[Route("api/[controller]")]
 public sealed class DeploymentsController : ControllerBase
 {
     [HttpGet]
-    public async Task<IResult> ListDeployments([FromQuery] string organizationId, [FromQuery] string? appId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] IConsoleUrlProvider consoleUrls, CancellationToken cancellationToken, [FromQuery] bool all = false)
+    public async Task<IResult> ListDeployments([FromQuery] string organizationId, [FromQuery] string? appId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] IConsoleUrlProvider consoleUrls, CancellationToken cancellationToken, [FromQuery] bool all = false, [FromQuery] string? applicationId = null, [FromQuery] string? environmentId = null)
     {
         var principal = RequirePrincipal(HttpContext);
         if (!await authorization.CanAccessOrganizationAsync(principal.ToActorIdentity(), organizationId, OrganizationAction.ReadDeployments, cancellationToken))
         {
             return EndpointResults.Forbidden();
+        }
+
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
         }
 
         var query = db.Deployments
@@ -35,9 +42,13 @@ public sealed class DeploymentsController : ControllerBase
             .Include(x => x.Services)
             .Include(x => x.Events.Where(e => e.Message == DeploymentLifecycleService.ManuallyQueuedMessage))
             .Where(x => x.OrganizationId == organizationId);
-        if (!string.IsNullOrWhiteSpace(appId))
+        if (!string.IsNullOrWhiteSpace(targetAppId))
         {
-            query = query.Where(x => x.AppId == appId);
+            query = query.Where(x => x.AppId == targetAppId);
+        }
+        else if (!string.IsNullOrWhiteSpace(applicationId))
+        {
+            query = query.Where(x => x.App.ApplicationId == applicationId);
         }
 
         var deployments = await query.ToDateTimeOffsetOrderedListAsync(db, x => x.CreatedAt, x => x.CreatedAt, descending: true, take: all ? null : 100, cancellationToken);
@@ -53,11 +64,17 @@ public sealed class DeploymentsController : ControllerBase
         [FromServices] AppServiceSecretService secrets,
         CancellationToken cancellationToken)
     {
-        if (!await db.Apps.AnyAsync(x => x.Id == request.AppId, cancellationToken))
+        var ownershipError = await VerifyTargetOwnershipAsync(db, request.AppId, request.ApplicationId, request.EnvironmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(request.EnvironmentId) ? request.EnvironmentId! : request.AppId;
+        if (!await db.Apps.AnyAsync(x => x.Id == targetAppId, cancellationToken))
         {
             return EndpointResults.NotFound("app_not_found", "App was not found.");
         }
-        if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), request.AppId, OrganizationAction.CreateDeployments, cancellationToken))
+        if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), targetAppId, OrganizationAction.CreateDeployments, cancellationToken))
         {
             return EndpointResults.Forbidden();
         }
@@ -68,7 +85,7 @@ public sealed class DeploymentsController : ControllerBase
         }
         try
         {
-            await secrets.ValidateReferencesAsync(request.AppId, request.Services, cancellationToken);
+            await secrets.ValidateReferencesAsync(targetAppId, request.Services, cancellationToken);
             return Results.NoContent();
         }
         catch (MissingAppServiceSecretException ex)
@@ -81,15 +98,21 @@ public sealed class DeploymentsController : ControllerBase
     public async Task<IResult> CreateDeployment([FromBody] CreateDeploymentRequest request, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] DeploymentLifecycleService deploymentLifecycle, [FromServices] AssetReleaseService assetReleases, [FromServices] DeploymentServiceSetService serviceSets, [FromServices] DomainBindingService domainBindings, [FromServices] DeploymentOrchestrator deploymentOrchestrator, [FromServices] ImagePublicationService imagePublications, [FromServices] AppServiceSecretService secrets, [FromServices] DeploymentPreparationService preparations, [FromServices] ProviderCatalogService catalog, CancellationToken cancellationToken)
     {
         var principal = RequirePrincipal(HttpContext);
+        var ownershipError = await VerifyTargetOwnershipAsync(db, request.AppId, request.ApplicationId, request.EnvironmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
         var validation = ControlPlaneValidation.ValidateDeployment(request);
         if (!validation.IsValid)
         {
             return EndpointResults.ValidationProblem("Deployment request is invalid.", validation);
         }
 
+        var targetAppId = !string.IsNullOrWhiteSpace(request.EnvironmentId) ? request.EnvironmentId! : request.AppId;
         var appRecord = await db.Apps
             .Include(x => x.Organization)
-            .SingleOrDefaultAsync(x => x.Id == request.AppId, cancellationToken);
+            .SingleOrDefaultAsync(x => x.Id == targetAppId, cancellationToken);
         if (appRecord is null)
         {
             return EndpointResults.NotFound("app_not_found", "App was not found.");
@@ -113,7 +136,7 @@ public sealed class DeploymentsController : ControllerBase
             await db.Entry(appRecord).ReloadAsync(cancellationToken);
             await db.Entry(appRecord).Reference(x => x.SelectedPlan).LoadAsync(cancellationToken);
             var currentApp = appRecord;
-            if (currentApp.DeletionStatus is not null) { return EndpointResults.Conflict("app_deleting", "The app is being deleted."); }
+            if (currentApp.DeletionStatus is not null || await db.Applications.AnyAsync(x => x.Id == currentApp.ApplicationId && x.DeletionStatus != null, cancellationToken)) { return EndpointResults.Conflict("app_deleting", "The app is being deleted."); }
             Deployment? preparation = null;
             if (request.PreparationId is not null)
             {
@@ -225,14 +248,16 @@ public sealed class DeploymentsController : ControllerBase
             // minicloud-worker claims it via PostgreSQL SKIP LOCKED. No GitHub dispatch.
             var enqueue = await deploymentOrchestrator.EnqueueAsync(appRecord.Organization, appRecord, deployment, request.PostgresPassword, desiredServices, defaultBindings, cancellationToken);
             if (preparation is null) { db.Deployments.Add(deployment); }
-            return Results.Created($"/v1/deployments/{deployment.Id}", new DeploymentCreateResponse(
+            return Results.Created($"/api/deployments/{deployment.Id}", new DeploymentCreateResponse(
                 deployment.Id,
                 deployment.AppId,
                 ControlPlaneValidation.ToWireValue(deployment.Status),
-                $"/v1/deployments/{deployment.Id}",
+                $"/api/deployments/{deployment.Id}",
                 deployment.WebsiteUrl,
                 deployment.CreatedAt,
-                enqueue.GeneratedPostgresPassword));
+                enqueue.GeneratedPostgresPassword,
+                appRecord.ApplicationId,
+                appRecord.Id));
         }
         try
         {
@@ -480,7 +505,7 @@ public sealed class DeploymentsController : ControllerBase
     public async Task<IResult> GetDeploymentEvents([FromRoute] string deploymentId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, CancellationToken cancellationToken)
     {
         var principal = RequirePrincipal(HttpContext);
-        var deployment = await db.Deployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deploymentId, cancellationToken);
+        var deployment = await db.Deployments.AsNoTracking().Include(x => x.App).SingleOrDefaultAsync(x => x.Id == deploymentId, cancellationToken);
         if (deployment is null)
         {
             return EndpointResults.NotFound("deployment_not_found", "Deployment was not found.");
@@ -494,7 +519,7 @@ public sealed class DeploymentsController : ControllerBase
             .Where(x => x.DeploymentId == deploymentId)
             .ToDateTimeOffsetOrderedListAsync(db, x => x.CreatedAt, x => x.CreatedAt, descending: false, take: null, cancellationToken);
         var events = eventRows
-            .Select(x => new DeploymentEventResponse(x.Id, ControlPlaneValidation.ToWireValue(x.Level), x.Message, x.MetadataJson, x.CreatedAt))
+            .Select(x => new DeploymentEventResponse(x.Id, ControlPlaneValidation.ToWireValue(x.Level), x.Message, x.MetadataJson, x.CreatedAt, deployment.App.ApplicationId, deployment.AppId))
             .ToList();
 
         return Results.Ok(events);

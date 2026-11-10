@@ -6,7 +6,7 @@ using Minicloud.Common.Services;
 namespace Minicloud.Tests;
 
 /// <summary>
-/// T50 queue gateway: POST /v1/deployments returns 201 {status:queued} and the
+/// T50 queue gateway: POST /api/deployments returns 201 {status:queued} and the
 /// API makes zero GitHub calls. DeploymentOrchestrator.EnqueueAsync only sets
 /// the deployment domain, ensures the postgres secret, and leaves the row
 /// Queued for minicloud-worker (PostgreSQL SKIP LOCKED claim). DispatchAsync

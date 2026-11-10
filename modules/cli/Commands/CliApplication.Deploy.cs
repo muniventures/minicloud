@@ -104,42 +104,19 @@ public sealed partial class CliApplication
         var hasLocalCandidate = !noPublish && candidates.Any(x => x.Value.BuildMode == ServiceBuildModes.Local && !string.IsNullOrWhiteSpace(x.Value.SourcePath));
 
         var me = await _apiClient.GetMeAsync(cancellationToken);
-        var app = await _apiClient.GetAppAsync(config.AppId!, cancellationToken);
-        var organization = me.Organizations.FirstOrDefault(x => x.Id == app.OrganizationId);
+        var application = await GetApplicationContextAsync(config.AppId!, cancellationToken);
+        var organization = me.Organizations.FirstOrDefault(x => x.Id == application.OrganizationId);
         if (organization is null)
         {
             _console.WriteError($"Auth error: your token is not associated with app '{config.AppId}'.");
             return CliExitCodes.AuthError;
         }
-
         var environmentName = GetOption(args, "--environment");
         if (args.Any(x => x == "--environment" || x.StartsWith("--environment=", StringComparison.Ordinal)) && string.IsNullOrWhiteSpace(environmentName))
             throw new CliCommandException(CliExitCodes.ValidationError, "--environment requires an environment name.");
-        if (branchDeploy && environmentName is not null)
-            throw new CliCommandException(CliExitCodes.ValidationError, "--environment cannot be combined with deploy branch.");
-        if (!branchDeploy && app.BranchName is null)
-        {
-            // Resolve from the application root even when a config points at an environment runtime.
-            if (app.ParentAppId is not null) app = await _apiClient.GetAppAsync(app.ParentAppId, cancellationToken);
-            var environments = app.Environments ?? [new AppEnvironmentResponse(app.Id, app.EnvironmentName ?? "production", app.Plan, app.Database, app.DeletionStatus)];
-            AppEnvironmentResponse? selected;
-            if (environmentName is null)
-            {
-                if (environments.Count != 1)
-                    throw new CliCommandException(CliExitCodes.ValidationError, $"Choose an environment with --environment <name>. Available: {string.Join(", ", environments.Select(x => x.Name))}");
-                selected = environments[0];
-            }
-            else selected = environments.SingleOrDefault(x => string.Equals(x.Name, environmentName, StringComparison.OrdinalIgnoreCase));
-            if (selected is null)
-                throw new CliCommandException(CliExitCodes.ValidationError, $"Unknown environment '{environmentName}'. Available: {string.Join(", ", environments.Select(x => x.Name))}");
-            if (selected.DeletionStatus is not null)
-                throw new CliCommandException(CliExitCodes.ValidationError, $"Environment '{selected.Name}' is being deleted.");
-            if (selected.Id != app.Id) app = await _apiClient.GetAppAsync(selected.Id, cancellationToken);
-            config = config with { AppId = app.Id };
-            _console.WriteLine($"Environment: {selected.Name} ({selected.Plan})");
-        }
-        else if (environmentName is not null)
-            throw new CliCommandException(CliExitCodes.ValidationError, "Named environment selection requires a main application config.");
+        var app = await ResolveEnvironmentAsync(application, environmentName, cancellationToken);
+        config = config with { AppId = app.Id };
+        WriteEnvironmentTarget(app);
 
         if (branchDeploy)
         {
@@ -333,7 +310,7 @@ public sealed partial class CliApplication
                     x.Value.SecretEnv,
                     serviceArtifactIds.TryGetValue(x.Key, out var artifactId) ? artifactId : null,
                     serviceHashes.GetValueOrDefault(x.Key), x.Value.AssetMounts, imagePublications.GetValueOrDefault(x.Key)?.Id, x.Value.Storage)).ToArray(),
-                postgresPassword, preparation?.Id, selectedPlan);
+                postgresPassword, preparation?.Id, selectedPlan, app.ApplicationId, app.Id);
 
             if (preparation is not null)
             {
@@ -399,12 +376,7 @@ public sealed partial class CliApplication
             return CliExitCodes.ValidationError;
         }
 
-        var mainApp = await _apiClient.GetAppAsync(configResult.Config.AppId, cancellationToken);
-        if (mainApp.ParentAppId is not null)
-        {
-            _console.WriteError("Config error: branch destroy must use the main app's minicloud.yml.");
-            return CliExitCodes.ValidationError;
-        }
+        var mainApp = await ResolveEnvironmentAsync(await GetApplicationContextAsync(configResult.Config.AppId, cancellationToken), GetOption(args, "--environment"), cancellationToken);
 
         if (mainApp.Branches.Count == 0)
         {
@@ -666,7 +638,7 @@ public sealed partial class CliApplication
         return total;
     }
 
-    private async Task SyncLocalSecretsAsync(AppResponse app, MinicloudConfig config, Rendering.IDeploymentRenderer renderer, CancellationToken cancellationToken)
+    private async Task SyncLocalSecretsAsync(EnvironmentDetailResponse app, MinicloudConfig config, Rendering.IDeploymentRenderer renderer, CancellationToken cancellationToken)
     {
         foreach (var (serviceName, service) in config.Services)
         {

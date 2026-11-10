@@ -17,10 +17,11 @@ public sealed class AppBranchService(
 {
     public async Task<MinicloudApp> EnsureAsync(MinicloudApp parent, string branchName, CancellationToken cancellationToken, string? planName = null)
     {
-        if (parent.ParentAppId is not null)
-        {
-            throw new AppBranchException("branch_parent_invalid", "Branches can only be created from a main app.");
-        }
+        await db.Entry(parent).ReloadAsync(cancellationToken);
+        if (parent.ApplicationId is null || parent.EnvironmentKind != EnvironmentKinds.Persistent || parent.BranchName is not null)
+            throw new AppBranchException("branch_parent_invalid", "Branches require a persistent source environment in an application.");
+        if (parent.DeletionStatus is not null || await db.Applications.AnyAsync(x => x.Id == parent.ApplicationId && x.DeletionStatus != null, cancellationToken))
+            throw new AppBranchException("app_deleting", "The application or source environment is being deleted.");
 
         var normalized = NormalizeBranchName(branchName);
         var existing = await db.Apps
@@ -46,6 +47,16 @@ public sealed class AppBranchService(
             return existing;
         }
 
+        var collidesWithPersistent = await db.Apps.AnyAsync(x =>
+            x.ApplicationId == parent.ApplicationId && x.BranchName == null &&
+            (x.NormalizedEnvironmentName == normalized || (x.EnvironmentName ?? "production").ToLower() == normalized), cancellationToken);
+        if (await db.Apps.AnyAsync(x => x.ApplicationId == parent.ApplicationId && x.ParentAppId != parent.Id && x.BranchName == normalized, cancellationToken))
+            throw new AppBranchException("branch_source_conflict", "This preview already belongs to another source environment.");
+        if (collidesWithPersistent)
+        {
+            throw new AppBranchException("branch_environment_name_conflict", $"Branch '{branchName}' conflicts with an existing environment name in this application.");
+        }
+
         ProviderPlan? selectedPlan = null;
         if (catalog is not null)
         {
@@ -66,9 +77,17 @@ public sealed class AppBranchService(
             Id = ids.NewId("app"),
             OrganizationId = parent.OrganizationId,
             Organization = parent.Organization,
+            ApplicationId = parent.ApplicationId,
             ParentAppId = parent.Id,
             ParentApp = parent,
             BranchName = normalized,
+            RuntimeParentSlug = parent.Slug,
+            SourceBranch = branchName.Trim(),
+            SourceEnvironmentId = parent.Id,
+            EnvironmentName = normalized,
+            NormalizedEnvironmentName = normalized,
+            EnvironmentKind = EnvironmentKinds.Preview,
+            EnvironmentKey = $"{parent.Id}:{normalized}",
             Name = $"{parent.Name} ({normalized})",
             Slug = slug,
             Plan = parent.Plan,
@@ -124,6 +143,18 @@ public sealed class AppBranchService(
         }
 
         db.Apps.Remove(branch);
+        if (branch.ApplicationId is not null)
+        {
+            var application = await db.Applications.SingleOrDefaultAsync(x => x.Id == branch.ApplicationId, cancellationToken);
+            if (application is not null && application.DefaultEnvironmentId == branch.Id)
+            {
+                var remaining = await db.Apps.AsNoTracking()
+                    .Where(x => x.ApplicationId == application.Id && x.Id != branch.Id)
+                    .ToListAsync(cancellationToken);
+                application.DefaultEnvironmentId = ApplicationEnvironmentMigrationService.SelectNextDefaultEnvironmentId(remaining);
+                application.UpdatedAt = timeProvider.GetUtcNow();
+            }
+        }
         await db.SaveChangesAsync(cancellationToken);
     }
 

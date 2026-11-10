@@ -99,6 +99,47 @@ public sealed class DatabaseOperationPostgresTests
         });
     }
 
+    [Fact]
+    public async Task FailedProvisioningPersistsFailedServerWithoutRemovingItsBackingApp()
+    {
+        await WithPostgres(async options =>
+        {
+            await using var db = new MinicloudDbContext(options);
+            await db.Database.MigrateAsync();
+            var now = DateTimeOffset.UtcNow;
+            db.Organizations.Add(new Organization { Id = "org", Name = "Synthetic", Slug = "synthetic" });
+            db.ProviderAccounts.Add(new ProviderAccount { Id = "account", OrganizationId = "org", Name = "Synthetic",
+                CredentialPath = "synthetic", CredentialGeneration = "1" });
+            db.ProviderPlans.Add(new ProviderPlan { Id = "plan", OrganizationId = "org", ProviderAccountId = "account",
+                Name = "synthetic", NormalizedName = "SYNTHETIC", Region = "synthetic", Sku = "synthetic" });
+            db.Apps.Add(new MinicloudApp { Id = "app", OrganizationId = "org", Name = "Synthetic", Slug = "db-synthetic" });
+            db.Deployments.Add(new Deployment { Id = "deployment", OrganizationId = "org", AppId = "app",
+                Status = DeploymentStatus.Failed });
+            db.ManagedDatabaseServers.Add(new ManagedDatabaseServer { Id = "dbserver_test", OrganizationId = "org",
+                Name = "synthetic", PlanId = "plan", Status = "creating", RuntimeAppId = "app", RuntimeDeploymentId = "deployment" });
+            db.ApiKeys.Add(new ApiKey { Id = "key", OrganizationId = "org", Name = "Synthetic", KeyPrefix = "synthetic",
+                KeyHash = "synthetic", ExpiresAt = now.AddHours(1), ScopesJson = JsonSerializer.Serialize(new[] { ApiKeyScopes.DatabasesManage }) });
+            var actor = new ActorIdentity("api_key", null, "key", "org", new HashSet<string> { ApiKeyScopes.DatabasesManage });
+            db.DatabaseOperations.Add(new DatabaseOperation { Id = "operation", OrganizationId = "org", ServerId = "dbserver_test",
+                Kind = "create-server", Status = "queued", ActorJson = JsonSerializer.Serialize(actor),
+                RequestJson = "{}", CreatedAt = now, UpdatedAt = now });
+            await db.SaveChangesAsync();
+            var processor = new DatabaseOperationProcessor(db, new ControlPlaneAuthorization(db), null!, null!, null!, null!,
+                new IdGenerator(), TimeProvider.System, null!, Options.Create(new SshDeploymentOptions()),
+                Options.Create(new DatabasePlatformOptions()), null!);
+
+            Assert.True(await processor.ProcessNextAsync(default));
+
+            var operation = await db.DatabaseOperations.AsNoTracking().SingleAsync();
+            var server = await db.ManagedDatabaseServers.AsNoTracking().SingleAsync();
+            Assert.Equal("failed", operation.Status);
+            Assert.Equal("failed", server.Status);
+            Assert.Equal("app", server.RuntimeAppId);
+            Assert.Equal("deployment", server.RuntimeDeploymentId);
+            Assert.Single(await db.Apps.ToListAsync());
+        });
+    }
+
     private static async Task WithPostgres(Func<DbContextOptions<MinicloudDbContext>, Task> test)
     {
         var name = "mc-database-operation-" + Guid.NewGuid().ToString("N");

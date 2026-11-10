@@ -548,13 +548,7 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
 
     internal static string BuildServerName(string orgSlug, string appSlug)
     {
-        var name = $"minicloud-{orgSlug}-production-{appSlug}".ToLowerInvariant();
-        if (name.Length > 63)
-        {
-            throw new PipelineStepException(FailureCode, "Server name exceeds 63 characters; refusing ambiguous server discovery.");
-        }
-
-        return name;
+        return ManagedServerName.ForApp(orgSlug, appSlug);
     }
 
     internal static string BuildCloudInit(string orgSlug, string appSlug, string? sshPublicKey = null)
@@ -564,7 +558,7 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
             "#cloud-config",
             "package_update: true",
             "package_upgrade: false",
-            $"hostname: minicloud-{orgSlug}-{appSlug}",
+            $"hostname: {ManagedServerName.ForHostname(orgSlug, appSlug)}",
             "users:",
             "  - default",
             "  - name: minicloud",

@@ -7,7 +7,7 @@ public sealed class RuntimeApiClient(HttpClient httpClient, AgentConfig config, 
 {
     public async Task<RuntimeLogIngestResponse> SendLogsAsync(IReadOnlyList<AgentLogRecord> records, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{config.ApiBaseUrl.TrimEnd('/')}/v1/runtime/ingest/logs")
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{config.ApiBaseUrl.TrimEnd('/')}/api/runtime/ingest/logs")
         {
             Content = JsonContent.Create(new RuntimeLogIngestRequest(records), options: JsonDefaults.Options)
         };
@@ -20,7 +20,7 @@ public sealed class RuntimeApiClient(HttpClient httpClient, AgentConfig config, 
 
     public async Task SendHeartbeatAsync(string agentVersion, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{config.ApiBaseUrl.TrimEnd('/')}/v1/runtime/heartbeat")
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{config.ApiBaseUrl.TrimEnd('/')}/api/runtime/heartbeat")
         {
             Content = JsonContent.Create(new RuntimeHeartbeatRequest(agentVersion, DateTimeOffset.UtcNow), options: JsonDefaults.Options)
         };
@@ -31,7 +31,7 @@ public sealed class RuntimeApiClient(HttpClient httpClient, AgentConfig config, 
 
     public async Task SendStatusAsync(RuntimeStatusIngestRequest status, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{config.ApiBaseUrl.TrimEnd('/')}/v1/runtime/ingest/status")
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{config.ApiBaseUrl.TrimEnd('/')}/api/runtime/ingest/status")
         {
             Content = JsonContent.Create(status, options: JsonDefaults.Options)
         };
@@ -42,7 +42,7 @@ public sealed class RuntimeApiClient(HttpClient httpClient, AgentConfig config, 
 
     public async Task<RuntimeDesiredRoutingResponse> GetRoutingAsync(CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"{config.ApiBaseUrl.TrimEnd('/')}/v1/runtime/routing");
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{config.ApiBaseUrl.TrimEnd('/')}/api/runtime/routing");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var response = await httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -52,7 +52,7 @@ public sealed class RuntimeApiClient(HttpClient httpClient, AgentConfig config, 
 
     public async Task SendRoutingApplyResultsAsync(RuntimeRoutingApplyResultsRequest results, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{config.ApiBaseUrl.TrimEnd('/')}/v1/runtime/routing/apply-results")
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{config.ApiBaseUrl.TrimEnd('/')}/api/runtime/routing/apply-results")
         {
             Content = JsonContent.Create(results, options: JsonDefaults.Options)
         };

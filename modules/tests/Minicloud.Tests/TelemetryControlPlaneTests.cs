@@ -141,6 +141,7 @@ public sealed class TelemetryControlPlaneTests : IClassFixture<SqliteTestHarness
         var now = Now();
         var time = new MutableTimeProvider(now);
         var (org, parent) = await SeedOrgAppAsync(db, tag, "shop");
+        await AttachPersistentApplicationAsync(db, parent, now);
         SeedSucceededDeployment(db, org, parent, "backend", now);
         await db.SaveChangesAsync();
 
@@ -271,6 +272,7 @@ public sealed class TelemetryControlPlaneTests : IClassFixture<SqliteTestHarness
         var now = Now();
         var time = new MutableTimeProvider(now);
         var (org, parent) = await SeedOrgAppAsync(db, tag, "shop");
+        await AttachPersistentApplicationAsync(db, parent, now);
         SeedSucceededDeployment(db, org, parent, "backend", now);
         await db.SaveChangesAsync();
 
@@ -401,6 +403,23 @@ public sealed class TelemetryControlPlaneTests : IClassFixture<SqliteTestHarness
         });
         await db.SaveChangesAsync();
         return (org, app);
+    }
+
+    private static async Task AttachPersistentApplicationAsync(MinicloudDbContext db, MinicloudApp environment, DateTimeOffset now)
+    {
+        var applicationId = $"appl_{environment.Id}";
+        db.Applications.Add(new MinicloudApplication
+        {
+            Id = applicationId, OrganizationId = environment.OrganizationId,
+            Name = environment.Name, Slug = environment.Slug, NormalizedSlug = environment.Slug.ToLowerInvariant(),
+            DefaultEnvironmentId = environment.Id, LegacyRootAppId = environment.Id,
+            CreatedAt = now, UpdatedAt = now
+        });
+        environment.ApplicationId = applicationId;
+        environment.EnvironmentKind = EnvironmentKinds.Persistent;
+        environment.EnvironmentName = "production";
+        environment.NormalizedEnvironmentName = "production";
+        await db.SaveChangesAsync();
     }
 
     private static void SeedSucceededDeployment(

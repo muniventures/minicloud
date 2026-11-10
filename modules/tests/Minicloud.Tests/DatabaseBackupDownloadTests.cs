@@ -45,7 +45,7 @@ public sealed class DatabaseBackupDownloadTests : IAsyncLifetime
         await download.CopyToAsync(destination, default);
         Assert.Equal(new byte[] { 1, 2, 3 }, destination.ToArray());
         Assert.Equal("Bearer " + new string('t', 64), handler.Authorization);
-        Assert.Equal("https://backup.example.test/v1/org-test/database_test/20261109T000000Z-test/database.dump.enc", handler.Url);
+        Assert.Equal("https://backup.example.test/api/org-test/database_test/20261109T000000Z-test/database.dump.enc", handler.Url);
         Assert.DoesNotContain("never-return-this-key", download.Filename);
         var audit = await db.AuditEvents.SingleAsync();
         Assert.DoesNotContain(new string('t', 64), audit.Details);

@@ -34,7 +34,7 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
         await db.SaveChangesAsync();
 
         var provisioning = CreateProvisioning(db, time, fake);
-        var gatewayBase = "https://api.test/v1/grafana/query-gateway";
+        var gatewayBase = "https://api.test/api/grafana/query-gateway";
         var principalA = FirebasePrincipal($"usr_{tag}a");
         var principalB = FirebasePrincipal($"usr_{tag}b");
 
@@ -96,7 +96,7 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
 
         var provisioning = CreateProvisioning(db, time, fake);
         var ready = await provisioning.EnsureProvisionedAsync(
-            FirebasePrincipal($"viewer_{tag}"), app.Id, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"viewer_{tag}"), app.Id, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.True(ready.Ready);
 
         // Guard denies every datasource/auth/membership mutation for Viewers.
@@ -112,7 +112,7 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
         fake.SetRole(ready.GrafanaOrgId, ready.GrafanaUserId, "Admin");
         fake.AddToOrg(1, ready.GrafanaUserId, "Viewer");
         var repaired = await provisioning.EnsureProvisionedAsync(
-            FirebasePrincipal($"viewer_{tag}"), app.Id, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"viewer_{tag}"), app.Id, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.True(repaired.Ready);
         Assert.Equal("Viewer", fake.GetRole(ready.GrafanaOrgId, ready.GrafanaUserId));
         Assert.Equal([ready.GrafanaOrgId], fake.GetUserOrgIds(ready.GrafanaUserId));
@@ -130,29 +130,29 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
 
         var sessions = CreateSessions(db, time, fake, audience: "production");
         var launch = await sessions.IssueLaunchCodeAsync(
-            FirebasePrincipal($"usr_{tag}"), app.Id, "/explore", "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"usr_{tag}"), app.Id, "/explore", "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.True(launch.Ok);
 
-        var first = await sessions.ExchangeLaunchCodeAsync(launch.Code!, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+        var first = await sessions.ExchangeLaunchCodeAsync(launch.Code!, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.True(first.Ok);
         Assert.NotNull(first.SessionToken);
         Assert.Equal("/explore", first.Destination);
 
-        var replay = await sessions.ExchangeLaunchCodeAsync(launch.Code!, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+        var replay = await sessions.ExchangeLaunchCodeAsync(launch.Code!, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.False(replay.Ok);
 
         var launch2 = await sessions.IssueLaunchCodeAsync(
-            FirebasePrincipal($"usr_{tag}"), app.Id, null, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"usr_{tag}"), app.Id, null, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.True(launch2.Ok);
         time.Advance(TimeSpan.FromSeconds(61));
-        var expired = await sessions.ExchangeLaunchCodeAsync(launch2.Code!, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+        var expired = await sessions.ExchangeLaunchCodeAsync(launch2.Code!, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.False(expired.Ok);
 
         var launch3 = await sessions.IssueLaunchCodeAsync(
-            FirebasePrincipal($"usr_{tag}"), app.Id, null, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"usr_{tag}"), app.Id, null, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.True(launch3.Ok);
         var staging = CreateSessions(db, time, fake, audience: "staging");
-        var crossEnv = await staging.ExchangeLaunchCodeAsync(launch3.Code!, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+        var crossEnv = await staging.ExchangeLaunchCodeAsync(launch3.Code!, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.False(crossEnv.Ok);
     }
 
@@ -168,8 +168,8 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
 
         var sessions = CreateSessions(db, time, fake, audience: "production");
         var launch = await sessions.IssueLaunchCodeAsync(
-            FirebasePrincipal($"usr_{tag}"), app.Id, null, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
-        var exchanged = await sessions.ExchangeLaunchCodeAsync(launch.Code!, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"usr_{tag}"), app.Id, null, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
+        var exchanged = await sessions.ExchangeLaunchCodeAsync(launch.Code!, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.True(exchanged.Ok);
         Assert.NotNull(await sessions.ValidateProxySessionAsync(exchanged.SessionToken!, CancellationToken.None));
 
@@ -184,7 +184,7 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
 
         // A logged-out session never validates again, even with a live membership.
         var launch2 = await sessions.IssueLaunchCodeAsync(
-            FirebasePrincipal($"usr_{tag}"), app.Id, null, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"usr_{tag}"), app.Id, null, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.False(launch2.Ok);
     }
 
@@ -200,8 +200,8 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
 
         var sessions = CreateSessions(db, time, fake, audience: "production");
         var launch = await sessions.IssueLaunchCodeAsync(
-            FirebasePrincipal($"usr_{tag}"), app.Id, null, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
-        var exchanged = await sessions.ExchangeLaunchCodeAsync(launch.Code!, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"usr_{tag}"), app.Id, null, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
+        var exchanged = await sessions.ExchangeLaunchCodeAsync(launch.Code!, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.True(exchanged.Ok);
 
         time.Advance(TimeSpan.FromMinutes(14).Add(TimeSpan.FromSeconds(59)));
@@ -210,8 +210,8 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
         Assert.Null(await sessions.ValidateProxySessionAsync(exchanged.SessionToken!, CancellationToken.None));
 
         var launch2 = await sessions.IssueLaunchCodeAsync(
-            FirebasePrincipal($"usr_{tag}"), app.Id, null, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
-        var exchanged2 = await sessions.ExchangeLaunchCodeAsync(launch2.Code!, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"usr_{tag}"), app.Id, null, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
+        var exchanged2 = await sessions.ExchangeLaunchCodeAsync(launch2.Code!, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.True(exchanged2.Ok);
         for (var i = 0; i < 4; i++)
         {
@@ -235,13 +235,13 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
 
         var provisioning = CreateProvisioning(db, time, fake);
         var result = await provisioning.EnsureProvisionedAsync(
-            FirebasePrincipal($"usr_{tag}"), app.Id, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"usr_{tag}"), app.Id, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.False(result.Ready);
         Assert.NotNull(result.UnavailableReason);
 
         var sessions = CreateSessions(db, time, fake, audience: "production");
         var launch = await sessions.IssueLaunchCodeAsync(
-            FirebasePrincipal($"usr_{tag}"), app.Id, null, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"usr_{tag}"), app.Id, null, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.False(launch.Ok);
         Assert.Empty(db.GrafanaLaunchCodes.Where(x => x.AppId == app.Id && x.ConsumedAt != null));
         Assert.Empty(db.GrafanaProxySessions.Where(x => x.AppId == app.Id));
@@ -250,7 +250,7 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
         var fake2 = new FakeGrafanaApiClient { FailOperations = new HashSet<string>(StringComparer.Ordinal) { "user" } };
         var provisioning2 = CreateProvisioning(db, time, fake2);
         var partial = await provisioning2.EnsureProvisionedAsync(
-            FirebasePrincipal($"usr_{tag}"), app.Id, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"usr_{tag}"), app.Id, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.False(partial.Ready);
         var userBinding = await db.GrafanaUserBindings
             .SingleOrDefaultAsync(x => x.OrganizationId == app.OrganizationId && x.MinicloudUserId == $"usr_{tag}");
@@ -270,9 +270,9 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
 
         var sessions = CreateSessions(db, time, fake, audience: "production");
         var launch = await sessions.IssueLaunchCodeAsync(
-            FirebasePrincipal($"usr_{tag}a"), appA.Id, null, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"usr_{tag}a"), appA.Id, null, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.True(launch.Ok);
-        var exchanged = await sessions.ExchangeLaunchCodeAsync(launch.Code!, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+        var exchanged = await sessions.ExchangeLaunchCodeAsync(launch.Code!, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         var snapshot = await sessions.ValidateProxySessionAsync(exchanged.SessionToken!, CancellationToken.None);
         Assert.NotNull(snapshot);
         Assert.Equal(orgA.Id, snapshot.OrganizationId);
@@ -280,7 +280,7 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
 
         // Cross-org launch payload: member of A cannot launch into B's app.
         var crossOrg = await sessions.IssueLaunchCodeAsync(
-            FirebasePrincipal($"usr_{tag}a"), appB.Id, null, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"usr_{tag}a"), appB.Id, null, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.False(crossOrg.Ok);
 
         // Forged caller headers are stripped; only the trusted identity survives.
@@ -336,7 +336,7 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
 
         var provisioning = CreateProvisioning(db, time, fake);
         var ready = await provisioning.EnsureProvisionedAsync(
-            FirebasePrincipal($"usr_{tag}"), app.Id, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"usr_{tag}"), app.Id, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.True(ready.Ready);
         var token = $"Bearer {ReadToken(fake, ready.GrafanaOrgId, ready.DataSourceUid)}";
 
@@ -393,7 +393,7 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
         {
             var (_, app) = await SeedOrgAppAsync(db, $"{tag}{i}", $"app{i}");
             var ready = await CreateProvisioning(db, time, fake).EnsureProvisionedAsync(
-                FirebasePrincipal($"usr_{tag}{i}"), app.Id, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+                FirebasePrincipal($"usr_{tag}{i}"), app.Id, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
             Assert.True(ready.Ready);
             tokens.Add($"Bearer {ReadToken(fake, ready.GrafanaOrgId, ready.DataSourceUid)}");
         }
@@ -464,9 +464,9 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
 
         var provisioning = CreateProvisioning(db, time, fake);
         var first = await provisioning.EnsureProvisionedAsync(
-            FirebasePrincipal($"usr_{tag}"), app.Id, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"usr_{tag}"), app.Id, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         var second = await provisioning.EnsureProvisionedAsync(
-            FirebasePrincipal($"usr_{tag}"), app.Id, "https://api.test/v1/grafana/query-gateway", CancellationToken.None);
+            FirebasePrincipal($"usr_{tag}"), app.Id, "https://api.test/api/grafana/query-gateway", CancellationToken.None);
         Assert.True(first.Ready);
         Assert.True(second.Ready);
         Assert.Equal(first.GrafanaOrgId, second.GrafanaOrgId);

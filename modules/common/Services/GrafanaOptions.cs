@@ -34,7 +34,7 @@ public sealed class GrafanaOptions
 
     /// <summary>
     /// Public base URL of the query gateway baked into provisioned Loki data
-    /// sources (e.g. https://api.cloud.muni.dev/v1/grafana/query-gateway).
+    /// sources (e.g. https://api.cloud.muni.dev/api/grafana/query-gateway).
     /// Empty falls back to the current request host.
     /// </summary>
     public string QueryGatewayBaseUrl { get; set; } = string.Empty;

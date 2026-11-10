@@ -12,23 +12,32 @@ namespace Minicloud.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("v1/[controller]")]
+[Route("api/[controller]")]
 public sealed class SecretsController : ControllerBase
 {
     [HttpGet("services")]
     public async Task<IResult> ListSecretServices(
         [FromQuery] string appId,
+        [FromServices] MinicloudDbContext db,
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] AppServiceSecretService secrets,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), appId, OrganizationAction.ReadSecrets, cancellationToken))
+        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), targetAppId, OrganizationAction.ReadSecrets, cancellationToken))
         {
             return EndpointResults.Forbidden();
         }
 
-        return Results.Ok(await secrets.ListServicesAsync(appId, cancellationToken));
+        return Results.Ok(await secrets.ListServicesAsync(targetAppId, cancellationToken));
     }
 
     [HttpPost("services")]
@@ -39,10 +48,18 @@ public sealed class SecretsController : ControllerBase
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] AppServiceSecretService secrets,
         [FromServices] ILogger<SecretsController> logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        var app = await db.Apps.SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
+        var app = await db.Apps.SingleOrDefaultAsync(x => x.Id == targetAppId, cancellationToken);
         if (app is null)
         {
             return EndpointResults.NotFound("app_not_found", "App was not found.");
@@ -59,7 +76,7 @@ public sealed class SecretsController : ControllerBase
             return EndpointResults.ValidationProblem("Service request is invalid.", result.Validation!);
         }
 
-        return Results.Created($"/v1/secrets/services/{result.Service!.Id}?appId={Uri.EscapeDataString(appId)}", result.Service);
+        return Results.Created($"/api/secrets/services/{result.Service!.Id}?appId={Uri.EscapeDataString(targetAppId)}", result.Service);
     }
 
     [HttpPut("services/{serviceId}")]
@@ -70,10 +87,18 @@ public sealed class SecretsController : ControllerBase
         [FromServices] MinicloudDbContext db,
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] AppServiceSecretService secrets,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        var service = await db.AppServiceSecretServices.SingleOrDefaultAsync(x => x.AppId == appId && x.Id == serviceId && x.DeletedAt == null, cancellationToken);
+        var service = await db.AppServiceSecretServices.SingleOrDefaultAsync(x => x.AppId == targetAppId && x.Id == serviceId && x.DeletedAt == null, cancellationToken);
         if (service is null)
         {
             return EndpointResults.NotFound("service_not_found", "Service was not found.");
@@ -100,10 +125,18 @@ public sealed class SecretsController : ControllerBase
         [FromServices] MinicloudDbContext db,
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] AppServiceSecretService secrets,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        var service = await db.AppServiceSecretServices.SingleOrDefaultAsync(x => x.AppId == appId && x.Id == serviceId && x.DeletedAt == null, cancellationToken);
+        var service = await db.AppServiceSecretServices.SingleOrDefaultAsync(x => x.AppId == targetAppId && x.Id == serviceId && x.DeletedAt == null, cancellationToken);
         if (service is null)
         {
             return EndpointResults.NotFound("service_not_found", "Service was not found.");
@@ -122,17 +155,26 @@ public sealed class SecretsController : ControllerBase
     public async Task<IResult> ListSecrets(
         [FromQuery] string appId,
         [FromQuery] string? service,
+        [FromServices] MinicloudDbContext db,
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] AppServiceSecretService secrets,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), appId, OrganizationAction.ReadSecrets, cancellationToken))
+        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), targetAppId, OrganizationAction.ReadSecrets, cancellationToken))
         {
             return EndpointResults.Forbidden();
         }
 
-        return Results.Ok(await secrets.ListAsync(appId, service, cancellationToken));
+        return Results.Ok(await secrets.ListAsync(targetAppId, service, cancellationToken));
     }
 
     [HttpPost]
@@ -143,10 +185,18 @@ public sealed class SecretsController : ControllerBase
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] AppServiceSecretService secrets,
         [FromServices] ILogger<SecretsController> logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        var app = await db.Apps.SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
+        var app = await db.Apps.SingleOrDefaultAsync(x => x.Id == targetAppId, cancellationToken);
         if (app is null)
         {
             return EndpointResults.NotFound("app_not_found", "App was not found.");
@@ -165,11 +215,11 @@ public sealed class SecretsController : ControllerBase
                 return EndpointResults.ValidationProblem("Secret request is invalid.", result.Validation!);
             }
 
-            return Results.Created($"/v1/secrets/{result.Secret!.Id}?appId={Uri.EscapeDataString(appId)}", result.Secret);
+            return Results.Created($"/api/secrets/{result.Secret!.Id}?appId={Uri.EscapeDataString(targetAppId)}", result.Secret);
         }
         catch (SecretStoreUnavailableException ex)
         {
-            logger.LogWarning(ex, "Secret store unavailable while setting secret {SecretName} for app {AppId} service {ServiceName}.", request.Name, appId, request.ServiceName);
+            logger.LogWarning(ex, "Secret store unavailable while setting secret {SecretName} for app {AppId} service {ServiceName}.", request.Name, targetAppId, request.ServiceName);
             return EndpointResults.Problem("secret_store_unavailable", $"Minicloud could not save this secret right now: {ex.Message}", StatusCodes.Status503ServiceUnavailable);
         }
     }
@@ -183,10 +233,18 @@ public sealed class SecretsController : ControllerBase
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] AppServiceSecretService secrets,
         [FromServices] ILogger<SecretsController> logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        var secret = await db.AppServiceSecrets.SingleOrDefaultAsync(x => x.AppId == appId && x.Id == secretId && x.DeletedAt == null, cancellationToken);
+        var secret = await db.AppServiceSecrets.SingleOrDefaultAsync(x => x.AppId == targetAppId && x.Id == secretId && x.DeletedAt == null, cancellationToken);
         if (secret is null)
         {
             return EndpointResults.NotFound("secret_not_found", "Secret was not found.");
@@ -209,7 +267,7 @@ public sealed class SecretsController : ControllerBase
         }
         catch (SecretStoreUnavailableException ex)
         {
-            logger.LogWarning(ex, "Secret store unavailable while updating secret {SecretId} for app {AppId}.", secretId, appId);
+            logger.LogWarning(ex, "Secret store unavailable while updating secret {SecretId} for app {AppId}.", secretId, targetAppId);
             return EndpointResults.Problem("secret_store_unavailable", $"Minicloud could not save this secret right now: {ex.Message}", StatusCodes.Status503ServiceUnavailable);
         }
     }
@@ -222,10 +280,18 @@ public sealed class SecretsController : ControllerBase
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] AppServiceSecretService secrets,
         [FromServices] ILogger<SecretsController> logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        var secret = await db.AppServiceSecrets.SingleOrDefaultAsync(x => x.AppId == appId && x.Id == secretId && x.DeletedAt == null, cancellationToken);
+        var secret = await db.AppServiceSecrets.SingleOrDefaultAsync(x => x.AppId == targetAppId && x.Id == secretId && x.DeletedAt == null, cancellationToken);
         if (secret is null)
         {
             return EndpointResults.NotFound("secret_not_found", "Secret was not found.");
@@ -243,7 +309,7 @@ public sealed class SecretsController : ControllerBase
         }
         catch (SecretStoreUnavailableException ex)
         {
-            logger.LogWarning(ex, "Secret store unavailable while deleting secret {SecretId} for app {AppId}.", secretId, appId);
+            logger.LogWarning(ex, "Secret store unavailable while deleting secret {SecretId} for app {AppId}.", secretId, targetAppId);
             return EndpointResults.Problem("secret_store_unavailable", $"Minicloud could not remove this secret right now: {ex.Message}", StatusCodes.Status503ServiceUnavailable);
         }
     }

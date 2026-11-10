@@ -17,11 +17,18 @@ public sealed class AppEnvironmentServiceTests : IClassFixture<SqliteTestHarness
         var organization = new Organization { Id = "org_env", Name = "Test", Slug = "env" };
         var parent = new MinicloudApp { Id = "app_env", Organization = organization, OrganizationId = organization.Id,
             Name = "Store", Slug = "store", Plan = AppPlan.P0H0, Database = DatabaseMode.Postgres, EnvironmentName = "prod" };
+        var application = new MinicloudApplication { Id = $"application_{parent.Id}", Organization = organization,
+            OrganizationId = organization.Id, Name = parent.Name, Slug = parent.Slug, NormalizedSlug = parent.Slug,
+            DefaultEnvironmentId = parent.Id };
+        parent.Application = application;
+        parent.ApplicationId = application.Id;
+        parent.NormalizedEnvironmentName = parent.EnvironmentName;
+        db.Applications.Add(application);
         db.Apps.Add(parent);
         db.AppSecrets.Add(new AppSecret { Id = "secret_env", OrganizationId = organization.Id, App = parent, AppId = parent.Id, Name = "TOKEN", EncryptedValue = "encrypted" });
         await db.SaveChangesAsync();
         var service = new AppEnvironmentService(db, new Ids(), TimeProvider.System);
-        var staging = await service.CreateAsync(parent, new("staging", "p0-v-0"), default);
+        var staging = await service.CreateForApplicationAsync(application, new("staging", "p0-v-0", "postgres"), default);
         Assert.Equal(AppPlan.P0V0, staging.Plan);
         Assert.Equal(AppPlan.P0H0, parent.Plan);
         Assert.Equal(DatabaseMode.Postgres, staging.Database);
@@ -43,10 +50,9 @@ public sealed class AppEnvironmentServiceTests : IClassFixture<SqliteTestHarness
         Assert.Equal("Store (qa)", staging.Name);
         var renamedDomain = Assert.Single(await domains.EnsureDefaultBindingsAsync(organization, staging, [web], default));
         Assert.Equal(stagingDomain.Hostname, renamedDomain.Hostname);
-        var duplicate = await Assert.ThrowsAsync<AppEnvironmentException>(() => service.CreateAsync(parent, new("QA", "p0-h-0"), default));
+        var duplicate = await Assert.ThrowsAsync<AppEnvironmentException>(() => service.CreateForApplicationAsync(application, new("QA", "p0-h-0"), default));
         Assert.Equal("environment_name_taken", duplicate.Code);
-        await Assert.ThrowsAsync<AppEnvironmentException>(() => service.CreateAsync(parent, new("prod", "p0-v-0"), default));
-        await Assert.ThrowsAsync<AppEnvironmentException>(() => service.CreateAsync(staging, new("nested", "p0-v-0"), default));
+        await Assert.ThrowsAsync<AppEnvironmentException>(() => service.CreateForApplicationAsync(application, new("prod", "p0-v-0"), default));
         await Assert.ThrowsAsync<AppEnvironmentException>(() => service.RenameAsync(staging, "PROD", default));
     }
 
@@ -73,6 +79,13 @@ public sealed class AppEnvironmentServiceTests : IClassFixture<SqliteTestHarness
         db.ProviderAccounts.AddRange(first, second);
         var parent = new MinicloudApp { Id = "app_named_env", Organization = organization, OrganizationId = organization.Id,
             Name = "Shop", Slug = "named-shop", Database = DatabaseMode.None, EnvironmentName = "production" };
+        var application = new MinicloudApplication { Id = $"application_{parent.Id}", Organization = organization,
+            OrganizationId = organization.Id, Name = parent.Name, Slug = parent.Slug, NormalizedSlug = parent.Slug,
+            DefaultEnvironmentId = parent.Id };
+        parent.Application = application;
+        parent.ApplicationId = application.Id;
+        parent.NormalizedEnvironmentName = parent.EnvironmentName;
+        db.Applications.Add(application);
         db.Apps.Add(parent);
         await db.SaveChangesAsync();
         var catalog = new ProviderCatalogService(db, ids, TimeProvider.System);
@@ -82,7 +95,7 @@ public sealed class AppEnvironmentServiceTests : IClassFixture<SqliteTestHarness
         await catalog.BindAsync(parent, primary.Name, default);
         await db.SaveChangesAsync();
         var service = new AppEnvironmentService(db, ids, TimeProvider.System, catalog);
-        var staging = await service.CreateAsync(parent, new("staging", "Produção econômica"), default);
+        var staging = await service.CreateForApplicationAsync(application, new("staging", "Produção econômica"), default);
         Assert.Equal(secondary.Id, staging.PlanId);
         Assert.Equal(second.Id, staging.SelectedPlan!.ProviderAccountId);
         Assert.Equal(primary.Id, parent.PlanId);
@@ -91,7 +104,7 @@ public sealed class AppEnvironmentServiceTests : IClassFixture<SqliteTestHarness
         await db.SaveChangesAsync();
         Assert.Equal(secondary.Id, staging.ToResponse().PlanId);
         Assert.Equal("Secondary renamed", staging.ToResponse().Plan);
-        var invalid = await Assert.ThrowsAsync<AppEnvironmentException>(() => service.CreateAsync(parent, new("invalid-plan", "missing"), default));
+        var invalid = await Assert.ThrowsAsync<AppEnvironmentException>(() => service.CreateForApplicationAsync(application, new("invalid-plan", "missing"), default));
         Assert.Equal("plan_not_found", invalid.Code);
         Assert.DoesNotContain(db.Apps, x => x.EnvironmentName == "invalid-plan");
     }

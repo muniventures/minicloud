@@ -63,6 +63,7 @@ public sealed class PostgresDeploymentQueueConsumer : BackgroundService, IDeploy
                     SELECT d.* FROM deployments d JOIN apps a ON a.id = d.app_id
                     WHERE (d.status = 'queued' OR d.status = 'Queued')
                       AND a.deletion_status IS NULL
+                      AND NOT EXISTS (SELECT 1 FROM applications application WHERE application.id = a.application_id AND application.deletion_status IS NOT NULL)
                       AND NOT EXISTS (
                         SELECT 1 FROM deployments active
                         WHERE active.app_id = d.app_id
@@ -86,7 +87,7 @@ public sealed class PostgresDeploymentQueueConsumer : BackgroundService, IDeploy
                         .ThenInclude(a => a.Organization)
                     .Include(d => d.Services)
                         .ThenInclude(s => s.Artifact)
-                    .Where(d => d.Status == DeploymentStatus.Queued && d.App.DeletionStatus == null)
+                    .Where(d => d.Status == DeploymentStatus.Queued && d.App.DeletionStatus == null && (d.App.Application == null || d.App.Application.DeletionStatus == null))
                     .ToListAsync(cancellationToken);
 
                 deployment = queuedDeployments

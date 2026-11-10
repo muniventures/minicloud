@@ -9,7 +9,7 @@ using Minicloud.Common.Services;
 
 namespace Minicloud.Api.Controllers;
 
-[ApiController, Authorize, Route("v1/plans")]
+[ApiController, Authorize, Route("api/plans")]
 public sealed class PlansController(MinicloudDbContext db, ControlPlaneAuthorization authorization,
     ProviderCatalogService catalog, AuditEventService audit) : ControllerBase
 {
@@ -42,7 +42,7 @@ public sealed class PlansController(MinicloudDbContext db, ControlPlaneAuthoriza
             var plan = await catalog.CreateAsync(request, ct);
             await SaveAuditAsync(plan, "plan.created", ct);
             await tx.CommitAsync(ct);
-            return Results.Created($"/v1/plans/{plan.Id}", ToResponse(plan));
+            return Results.Created($"/api/plans/{plan.Id}", ToResponse(plan));
         });
     }
 

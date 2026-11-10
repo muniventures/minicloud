@@ -1,6 +1,6 @@
 # Application, environment, and service model
 
-Status: specification; not implemented.
+Status: implemented locally; hosted rollout and live qualification remain separate.
 Date: 2026-11-09.
 
 ## Outcome
@@ -80,7 +80,7 @@ An application has no plan, database mode, domain collection, latest deployment,
 - `kind`: `persistent` or `preview`. Production and staging are names, not special kinds.
 - Nullable `sourceBranch` and `sourceEnvironmentId` for preview provenance; neither implies ongoing inheritance.
 - Existing plan/provider binding, database configuration, placement/runtime references, timestamps, and deletion status/error.
-- Stable runtime routing identity and legacy ID mappings described below.
+- Stable environment runtime routing identity; persisted migration metadata remains internal.
 
 Production has no structural privilege over staging. Either may be created first, renamed, or deleted independently. Application creation offers one initial persistent environment, named `production` by default, and creates both records atomically. Creation does not itself provision infrastructure.
 
@@ -94,15 +94,15 @@ Retain the current authoritative service configuration and deployment materializ
 
 Deployments target exactly one environment and one or more services within it. Domains, secret references, storage associations, runtime registrations, build targets, operation locks, cancellation, and deletion jobs must resolve the same environment identity. Organization-owned provider accounts and plans remain organization-owned; the selected plan belongs to the environment binding.
 
-No implicit shared secrets, database, storage, or network is created between environments. New persistent environments begin with empty secrets. Preview creation preserves the existing explicitly documented branch provisioning/secret-copy behavior during compatibility rollout; do not silently apply that behavior to persistent environments. Existing materialized secrets and resource bindings remain unchanged.
+No implicit shared secrets, database, storage, or network is created between environments. New persistent environments begin with empty secrets. Preview creation preserves the existing explicitly documented branch provisioning/secret-copy behavior within their selected source environment; do not silently apply that behavior to persistent environments. Existing materialized secrets and resource bindings remain unchanged.
 
 ## Dashboard
 
 ### Apps list
 
-Show one row/card per application. Each contains the app name, environment count, and compact environment summaries: environment name, observed runtime state, latest deployment result, and observation/completion timestamps where available. Persistent environments appear first; previews may be collapsed behind a count.
+Show one table group per application, following the approved [Apps and operations UX](apps-operations-ux.md). Each contains the app name, slug, environment count, and compact environment subrows: environment name, latest deployment result and completion/start timestamps where available. Columns are App, Environment, Latest deployment and Actions. Do not display Plan or Runtime columns or filters in the Apps list. Plans and runtime observations belong inside the selected environment. Persistent environments appear first; previews may be collapsed behind a count.
 
-Do not show one app-level plan, database, runtime badge, or deployment result as if it describes every environment. Deployment success and runtime health remain separate observations. Missing/stale runtime observations must remain visibly unavailable/stale.
+Do not show one app-level plan, database, runtime badge, or deployment result as if it describes every environment. Inside an environment, deployment success and runtime health remain separate observations. Missing/stale runtime observations must remain visibly unavailable/stale.
 
 Search includes app name/slug, environment names, and associated domains, but returns each application once. Environment-based filters match an application when at least one environment meets all selected environment filters; show which environment matched. App counts count applications. Remove the current main/branch app filter; preview filtering uses environment kind.
 
@@ -140,30 +140,23 @@ Support narrow 320–390px screens: app/environment context remains visible, the
 
 “Delete environment” names one target and affects only its resources. “Delete app” lists every affected environment, including previews, and deletes them through existing lifecycle safeguards. Preserve retained-volume behavior and explain retained billable resources. Failed environment deletion remains visible under its app with its error and retry action. Application deletion completes only after all required child cleanup completes. Reject new environments/deployments while application deletion is active; worker execution rechecks lifecycle state.
 
-## API contract and compatibility
+## API contract
 
-Use an additive `/v2` API to separate identities without changing the meaning of existing `/v1` runtime app IDs:
+User correction on 2026-11-10: this prelaunch product has no API compatibility requirement. There is one unversioned first-party API. Do not add versioned aliases, mixed clients, or legacy identity resolvers.
 
 | Endpoint | Responsibility |
 | --- | --- |
-| `GET /v2/apps?organizationId=...` | Applications with environment summaries; never environment records as apps. |
-| `POST /v2/apps` | Atomically create an app and initial environment. |
-| `GET/PATCH /v2/apps/{applicationId}` | App metadata/default-environment selection. |
-| `DELETE /v2/apps/{applicationId}` | Application lifecycle across all environments. |
-| `GET/POST /v2/apps/{applicationId}/environments` | List/create environments. |
-| `GET/PATCH/DELETE /v2/apps/{applicationId}/environments/{environmentId}` | Read/update/delete exactly one environment. |
+| `GET/POST /api/apps` | List applications with bounded environment summaries; create an application and initial environment. |
+| `GET/PATCH/DELETE /api/apps/{applicationId}` | Application metadata, default selection, and lifecycle. |
+| `GET/POST /api/apps/{applicationId}/environments` | List/create environments. |
+| `GET/PATCH/DELETE /api/apps/{applicationId}/environments/{environmentId}` | Exactly one scoped environment. |
+| `GET /api/environments/{environmentId}` | Environment runtime descriptor for operational clients. |
 
-App creation nests initial environment settings; app updates reject environment-specific plan/database fields. Environment responses expose `applicationId`, environment identity/kind, configuration, lifecycle, and operational summary. Deployment creation uses explicit `applicationId` and `environmentId`; response/event records preserve both. Service/resource endpoints use the same nested scope or an explicit environment ID verified against the application. Inventory every operational endpoint during implementation, including upload/preparation, secrets, storage, domains, logs, console, runtime registration, cancellation, and deletion retry.
-
-Reject application/environment ownership mismatches before side effects. Keep existing organization permissions and API-key scopes; do not grant new authority through aliases. Return stable machine-readable errors for missing environment selection, unknown environment, duplicate name, deleting target, and target mismatch. Database uniqueness constraints enforce concurrent name creation/rename.
-
-`/v1` remains a compatibility adapter over the migrated model. Each old runtime app ID maps to exactly one environment. Existing root-ID behavior for listing environments, creating environments, branch operations, and application-wide deletion remains unchanged; existing child deletion remains scoped as before. Capture these actual contracts in tests before changing storage. Do not reinterpret old root-ID resource operations as targeting the dashboard default.
-
-Compatibility DTOs may retain old fields and synthesized parent/branch relationships. New dashboard and CLI code consume explicit application/environment contracts. Document deprecation only after the new backend and clients are qualified; no removal is included here.
+Application creation nests initial environment configuration. Runtime operations use environment IDs, never application-ID aliases or the dashboard default. Keep authorization, ownership checks and explicit environment selection. Existing standard protocols (Docker Registry and OTLP) and third-party provider API versions are outside this first-party contract. Persisted data migration preserves resources; it does not expose compatibility API routes.
 
 ## CLI and configuration
 
-Keep `app` and `appId` in `minicloud.yml`. New configs identify the logical application. Resolve migrated root and child legacy IDs through an explicit server-provided identity map, never by matching a name or parsing an ID prefix. Preserve existing behavior where a child legacy config resolves its application before named selection.
+Keep `app` and `appId` in `minicloud.yml`. New configs identify the logical application. Configurations identify a canonical application ID. Fetch that application directly; reject missing or invalid IDs without attempting legacy aliases. Select deployment environments explicitly when multiple active persistent environments exist.
 
 ```sh
 minicloud deploy --environment production
@@ -177,7 +170,7 @@ These commands retain their current syntax. The application config is the shared
 
 Resolve identity, environment, authorization, and plan before build/upload/secret preparation or allocation. Existing plan precedence remains CLI override, YAML, then selected environment's saved binding. Selecting a plan does not move an existing server.
 
-Console, logs, secrets, domain, storage, and other environment-sensitive CLI operations use the same resolution rule when supported; preserve existing explicit deployment/service IDs where those already identify one immutable target. Output names the selected app/environment. Preview deploy/destroy commands retain their syntax and existing restriction against combining branch deployment with `--environment`; resolve their source from the legacy/root-equivalent environment until a separate source-selection feature is specified.
+Console, logs, secrets, domain, storage, and other environment-sensitive CLI operations use the same resolution rule when supported; preserve existing explicit deployment/service IDs where those already identify one immutable target. Output names the selected app/environment. Preview deploy/destroy commands select their persistent source with `--environment` when multiple persistent environments exist. Never infer a source from root placement or the dashboard default.
 
 ## Preview environments
 
@@ -191,42 +184,42 @@ Do not normalize legacy branch names into persistent environment names blindly. 
 2. **Additive backfill:** create one logical application per existing customer root and one explicit environment per root/child runtime record. Preserve existing environment names, including roots named staging. Null root names use the existing `production` fallback. Existing branch children become previews. Persist durable, unique legacy-runtime-ID → environment → application mappings.
 3. **Preserve identity:** retain all existing runtime IDs, external server/volume IDs, generated hostnames, custom domains, deployment history, secret-store paths/versions, and resource ownership. New application IDs are distinct from runtime environment IDs. Renaming app/environment metadata does not regenerate routing identities or move infrastructure. Do not copy secret values merely to rename a scope.
 4. **Lifecycle cutover:** use an explicit API/worker maintenance boundary: stop admission of new mutations, drain active jobs or verify a tested resume adapter, stop incompatible workers, run migration/backfill and reconciliation, then start compatible API/workers. Reads may be temporarily unavailable. Avoid unsupported mixed-version writers. Re-running backfill is idempotent. Reconcile counts and every ownership mapping before reopening writes.
-5. **Compatibility:** serve `/v1` adapters and old browser links. An old `/apps/{legacy-runtime-id}` link redirects to its exact application/environment route, preserving supported tab state. A new application ID at that route opens the app landing behavior. Namespace resolution uses stored identity, not heuristics.
-6. **Client rollout:** deploy and verify backend/migration/worker compatibility before publishing the new CLI or dashboard. Verify mixed old/new clients against the same migrated installation. Hosted workflow changes belong in `minicloud-services`; product implementation belongs here.
+5. **Canonical API:** expose only `/api` application/environment contracts. Remove old route and browser identity aliases. Unknown or environment IDs supplied as application IDs fail explicitly.
+6. **Client rollout:** publish matching backend, worker, CLI and dashboard builds together. Mixed old/new clients are unsupported. Hosted workflow changes belong in `minicloud-services`; product implementation belongs here.
 
 Independent legacy apps are not merged based on similar names. In particular, grouping MuniPages control/delivery/backups requires a separately reviewed explicit mapping and compatible placement behavior. This migration groups existing parent/child environments only. A future consolidation feature may be designed separately.
 
-Before reopening writes, rollback may use a verified backup and previous binaries. After reopening writes, use a forward repair or a tested reverse migration covering newly created identities and resources; do not restore a stale snapshot over live changes. Maintain durable compatibility mappings until old consumers are retired explicitly.
+Before reopening writes, rollback may use a verified backup and previous binaries. After reopening writes, use a forward repair or a tested reverse migration covering newly created identities and resources; do not restore a stale snapshot over live changes. Retain migration bookkeeping only where required to preserve stored resources; it grants no API aliases.
 
 ## Scope boundaries
 
-Include the explicit model, full resource ownership propagation, dashboard navigation, API compatibility, CLI selection, preview mapping, deletion semantics, migration, documentation, and acceptance below.
+Include the explicit model, full resource ownership propagation, dashboard navigation, API ownership, CLI selection, preview mapping, deletion semantics, migration, documentation, and acceptance below.
 
 Exclude deployment promotion, automatic environment cloning, cross-environment database copying, shared secrets, new RBAC, independent-app consolidation, new orchestration/scheduling capabilities, provider migration, resizing, and automatic production/staging provisioning. No implementation, commit, push, deployment, or provider mutation is authorized by this specification-writing task.
 
 ## Implementation sequence
 
-1. Capture legacy API/CLI/lifecycle contracts in focused regression tests; inventory all runtime app-ID consumers and internal app records.
-2. Add explicit entities, constraints, compatibility mappings, migration preflight/backfill, and PostgreSQL migration tests.
-3. Update resource authorization, admission, workers, runtime/registry paths, locks, events, secret resolution, and deletion around environment ownership; add `/v2` and `/v1` adapters.
+1. Capture canonical API/CLI/lifecycle contracts in focused regression tests; inventory all runtime app-ID consumers and internal app records.
+2. Add explicit entities, constraints, migration preflight/backfill, and PostgreSQL migration tests.
+3. Update resource authorization, admission, workers, runtime/registry paths, locks, events, secret resolution, and deletion around environment ownership; use the single `/api` namespace.
 4. Update dashboard list, scoped routes/header/selector, settings, creation/deletion, and empty/error states.
-5. Update CLI identity resolution and documentation; preserve existing config and command syntax.
-6. Qualify migration and mixed clients locally, then conduct separately authorized hosted rollout and live acceptance.
+5. Update CLI identity resolution and documentation; use canonical application IDs and command syntax.
+6. Qualify migration and canonical clients locally, then conduct separately authorized hosted rollout and live acceptance.
 
 ## Acceptance and evidence
 
 | ID | Required result |
 | --- | --- |
-| A1 | One app with production and staging appears once in both Apps layouts; counts/search/filter results represent applications and identify matching environments. |
+| A1 | One app with production and staging appears once in the Apps table, without Plan or Runtime columns; counts/search/filter results represent applications and identify matching environments. |
 | A2 | App header and breadcrumb show app plus selected environment above services. Switching tabs/environments, refresh, deep links, browser back/forward, and organization changes preserve correct scope. |
 | A3 | Slow previous-environment responses never replace current data; pending mutations retain their original target; console switches close the prior connection. |
 | A4 | Different plans, database modes, service sets, secrets, domains, deployment results, and runtime observations remain independent. Missing/stale observations are not reported as healthy. |
 | A5 | Application/environment rename preserves IDs, existing URLs, resources, secret references, and history; names are unique case-insensitively under concurrent writes. |
-| A6 | Delete staging leaves production intact. Delete the initial/root-equivalent environment leaves its application and siblings intact through `/v2`. Last-environment deletion leaves a valid empty app. |
-| A7 | Application deletion covers all environments/previews, blocks new writes, preserves retained-volume policy, and exposes/retries failed cleanup without falsely reporting completion. Legacy deletion behavior remains compatible. |
+| A6 | Delete staging leaves production intact. Delete the initial/root-equivalent environment leaves its application and siblings intact through the canonical scoped API. Last-environment deletion leaves a valid empty app. |
+| A7 | Application deletion covers all environments/previews, blocks new writes, preserves retained-volume policy, and exposes/retries failed cleanup without falsely reporting completion. |
 | A8 | App creation atomically creates an initial environment; environment creation uses the plan catalog and starts without persistent-environment secrets or copied data. |
 | A9 | CLI selects the sole active environment, requires a name for multiple, errors for none/unknown/deleting, and resolves before any build/upload/allocation. Dashboard default never changes CLI targeting. |
-| A10 | Existing root and child `appId` configs, old `/v1` clients, and old browser links resolve to their intended targets; new application IDs work without exposing environments as apps. |
+| A10 | Canonical application IDs work end to end. Old versioned product routes, runtime-ID application aliases, and legacy identity resolvers are absent; unsupported IDs fail without client fallback. |
 | A11 | Populated PostgreSQL migration preserves runtime/provider IDs, domains/TLS bindings, storage, secret-store references, pending-operation handling, and deployment history. Re-run produces no duplicates; conflicts fail preflight. |
 | A12 | Existing branches become previews under one app, preserving source semantics and URLs; naming conflicts require explicit mapping. Independently named apps remain separate. |
 | A13 | Crafted cross-organization or mismatched app/environment/service IDs fail before side effects across API, console, uploads, registry/runtime registration, cancellation, and deletion. |
@@ -234,3 +227,7 @@ Exclude deployment promotion, automatic environment cloning, cross-environment d
 | A15 | Compatible API/workers and old/new clients operate against the migrated database. Rollout/rollback gates are demonstrated on a representative synthetic fixture before hosted release. |
 
 Verification must include focused .NET API/worker/CLI tests, real PostgreSQL migration/constraint tests, dashboard interaction tests and build, and browser acceptance of the scoped workflows. Follow `README.md` for checks. Source tests prove local behavior; hosted migration, live routing/provider identity, and customer browser flows require separate release evidence.
+
+## Local implementation and release evidence
+
+Implementation and validation reports are local execution output in `.local/artifacts/reports/`, not versioned specifications. Follow the [upgrade guide](../application-environment-upgrade.md) before a separately authorized rollout. Subsequent user instructions authorized local implementation and validation.

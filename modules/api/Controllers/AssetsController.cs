@@ -9,7 +9,7 @@ using static Minicloud.Api.Controllers.EndpointResults;
 
 namespace Minicloud.Api.Controllers;
 
-[ApiController, Authorize, Route("v1/assets")]
+[ApiController, Authorize, Route("api/assets")]
 public sealed class AssetsController : ControllerBase
 {
     [HttpPost]
@@ -17,7 +17,10 @@ public sealed class AssetsController : ControllerBase
         [FromServices] ControlPlaneAuthorization authorization, [FromServices] AssetReleaseService releases,
         [FromServices] DeploymentPreparationService preparations, CancellationToken ct)
     {
-        var app = await db.Apps.SingleOrDefaultAsync(x => x.Id == request.AppId, ct);
+        var ownershipError = await VerifyTargetOwnershipAsync(db, request.AppId, request.ApplicationId, request.EnvironmentId, ct);
+        if (ownershipError is not null) { return ownershipError; }
+        var targetAppId = !string.IsNullOrWhiteSpace(request.EnvironmentId) ? request.EnvironmentId! : request.AppId;
+        var app = await db.Apps.SingleOrDefaultAsync(x => x.Id == targetAppId, ct);
         if (app is null) { return EndpointResults.NotFound("app_not_found", "App was not found."); }
         if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), app.Id, OrganizationAction.CreateDeployments, ct))
         { return EndpointResults.Forbidden(); }
@@ -30,7 +33,7 @@ public sealed class AssetsController : ControllerBase
                 if (await preparations.HasActiveAsync(app.Id, null, ct))
                     return EndpointResults.Conflict("deployment_active", "This app already has an active deployment or local build.");
                 var (release, deployment) = await releases.PublishAsync(app, request, ct);
-                return Results.Created($"/v1/assets/{release.Id}", AssetReleaseService.Response(release, deployment));
+                return Results.Created($"/api/assets/{release.Id}", AssetReleaseService.Response(release, deployment));
             }, ct);
         }
         catch (ProviderCatalogException ex) { return EndpointResults.Problem(ex.Code, ex.Message, StatusCodes.Status400BadRequest); }

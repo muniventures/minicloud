@@ -307,7 +307,7 @@ public sealed class CliDeploymentChangeDetectionTests
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/v1/me")
+            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/api/me")
             {
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
@@ -323,13 +323,17 @@ public sealed class CliDeploymentChangeDetectionTests
                 };
             }
 
-            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/v1/apps/app_main")
+            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/api/apps/app_main")
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(CliApiFixtures.Application("app_main", "org_1", "app_main")) };
+
+            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/api/environments/app_main")
             {
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = JsonContent.Create(new
                     {
                         id = "app_main",
+                        applicationId = "app_main",
                         organizationId = "org_1",
                         name = "Demo",
                         slug = "demo",
@@ -340,7 +344,7 @@ public sealed class CliDeploymentChangeDetectionTests
                 };
             }
 
-            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/v1/domains/services")
+            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/api/domains/services")
             {
                 var services = deployedHashes.Select(kvp => new
                 {
@@ -360,7 +364,7 @@ public sealed class CliDeploymentChangeDetectionTests
                 };
             }
 
-            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/v1/deployments")
+            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/api/deployments")
             {
                 DeploymentsCreatedCount++;
                 LastCreatedRequest = await request.Content!.ReadFromJsonAsync<CreateDeploymentRequest>(cancellationToken: cancellationToken);
@@ -375,7 +379,7 @@ public sealed class CliDeploymentChangeDetectionTests
                 };
             }
 
-            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/v1/artifacts")
+            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/api/artifacts")
             {
                 ArtifactsCreatedCount++;
                 return new HttpResponseMessage(HttpStatusCode.Created)
@@ -386,12 +390,12 @@ public sealed class CliDeploymentChangeDetectionTests
                         appId = "app_main",
                         serviceName = "web",
                         status = "uploading",
-                        uploadUrl = "/v1/artifacts/art_upload_test/file"
+                        uploadUrl = "/api/artifacts/art_upload_test/file"
                     })
                 };
             }
 
-            if (request.Method == HttpMethod.Put && request.RequestUri!.AbsolutePath == "/v1/artifacts/art_upload_test/file")
+            if (request.Method == HttpMethod.Put && request.RequestUri!.AbsolutePath == "/api/artifacts/art_upload_test/file")
             {
                 return failArtifactUpload
                     ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
@@ -413,7 +417,7 @@ public sealed class CliDeploymentChangeDetectionTests
                     };
             }
 
-            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/v1/deployments/dep_test_123/refresh")
+            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/api/deployments/dep_test_123/refresh")
             {
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {

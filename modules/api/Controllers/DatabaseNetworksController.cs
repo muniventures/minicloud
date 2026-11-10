@@ -9,7 +9,7 @@ using static Minicloud.Api.Controllers.EndpointResults;
 
 namespace Minicloud.Api.Controllers;
 
-[ApiController, Authorize, Route("v1/database-networks")]
+[ApiController, Authorize, Route("api/database-networks")]
 public sealed class DatabaseNetworksController(MinicloudDbContext db, DatabaseManagementService databases, DatabaseNetworkService networks, TimeProvider clock) : ControllerBase
 {
     [HttpGet]
@@ -23,7 +23,7 @@ public sealed class DatabaseNetworksController(MinicloudDbContext db, DatabaseMa
     public Task<IResult> Create(CreateDatabaseNetworkRequest request, CancellationToken ct) => DatabasesController.Handle(async () =>
     {
         var network = await networks.CreateAsync(request, RequirePrincipal(HttpContext).ToActorIdentity(), ct);
-        return Results.Accepted($"/v1/database-networks/{network.Id}", network);
+        return Results.Accepted($"/api/database-networks/{network.Id}", network);
     });
 
     [HttpGet("{id}")]
@@ -41,7 +41,7 @@ public sealed class DatabaseNetworksController(MinicloudDbContext db, DatabaseMa
         var actor = RequirePrincipal(HttpContext).ToActorIdentity();
         await databases.RequireAsync(actor, network.OrganizationId, true, ct);
         if (network.Status == "deleted") { return Results.NoContent(); }
-        if (network.Status == "creating" || await db.DatabaseOperations.AnyAsync(x =>
+        if (await db.DatabaseOperations.AnyAsync(x =>
                 (x.Kind == "create-network" || x.Kind == "delete-network") && x.RequestJson.Contains(network.Id) &&
                 (x.Status == "queued" || x.Status == "running" || x.Status == "cancelling"), ct))
         { throw new InvalidOperationException("Wait for active network operations before requesting deletion."); }

@@ -12,7 +12,7 @@ namespace Minicloud.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("v1/apps/{appId}")]
+[Route("api/environments/{appId}")]
 public sealed class ImagePublicationsController(MinicloudDbContext db, ControlPlaneAuthorization authorization, ImagePublicationService publications, ImageBuildTargetService targets, TimeProvider clock) : ControllerBase
 {
     [HttpGet("image-build-target")]
@@ -30,7 +30,7 @@ public sealed class ImagePublicationsController(MinicloudDbContext db, ControlPl
         var (app, error) = await App(appId, OrganizationAction.CreateDeployments, ct);
         if (error is not null) { return error; }
         var publication = await publications.CreateAsync(app!, request, EndpointResults.RequirePrincipal(HttpContext).ToActorIdentity(), ct);
-        return Results.Created($"/v1/apps/{appId}/image-publications/{publication.Id}", ImagePublicationService.Response(publication));
+        return Results.Created($"/api/environments/{appId}/image-publications/{publication.Id}", ImagePublicationService.Response(publication));
     });
 
     [HttpGet("image-publications/{id}")]
@@ -85,6 +85,10 @@ public sealed class ImagePublicationsController(MinicloudDbContext db, ControlPl
 
     private async Task<(MinicloudApp?, IResult?)> App(string id, OrganizationAction action, CancellationToken ct)
     {
+        var applicationId = Request.Query["applicationId"].FirstOrDefault();
+        var environmentId = Request.Query["environmentId"].FirstOrDefault();
+        var ownershipError = await EndpointResults.VerifyTargetOwnershipAsync(db, id, applicationId, environmentId, ct);
+        if (ownershipError is not null) { return (null, ownershipError); }
         var app = await db.Apps.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
         if (app is null) { return (null, EndpointResults.NotFound("app_not_found", "App was not found.")); }
         return await authorization.CanAccessAppAsync(EndpointResults.RequirePrincipal(HttpContext).ToActorIdentity(), id, action, ct)

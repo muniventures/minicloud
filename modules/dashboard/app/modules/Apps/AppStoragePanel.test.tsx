@@ -1,8 +1,8 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { listAppStorage } from "@/api/appsApi";
+import { listAppStorage } from "@/api/environmentsApi";
 import { AppStoragePanel } from "./AppStoragePanel";
-vi.mock("@/api/appsApi", () => ({ listAppStorage: vi.fn() }));
+vi.mock("@/api/environmentsApi", () => ({ listAppStorage: vi.fn() }));
 afterEach(cleanup);
 
 it("shows retained disks without claiming mount health and provides configuration", async () => {

@@ -42,7 +42,7 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
         using var client = _factory!.CreateClient();
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.RuntimeToken);
-        var ingest = await client.PostAsJsonAsync("/v1/runtime/ingest/logs", new
+        var ingest = await client.PostAsJsonAsync("/api/runtime/ingest/logs", new
         {
             records = new[]
             {
@@ -72,7 +72,7 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
         Assert.Equal(2, ingestDocument.RootElement.GetProperty("accepted").GetInt32());
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
-        var logs = await client.GetFromJsonAsync<RuntimeLogDto[]>($"/v1/runtime/logs?appId={seed.AppId}&tail=10");
+        var logs = await client.GetFromJsonAsync<RuntimeLogDto[]>($"/api/runtime/logs?appId={seed.AppId}&tail=10");
 
         Assert.NotNull(logs);
         Assert.Equal(2, logs!.Length);
@@ -89,7 +89,7 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
         using var client = _factory!.CreateClient();
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seedA.RuntimeToken);
-        var ingest = await client.PostAsJsonAsync("/v1/runtime/ingest/logs", new
+        var ingest = await client.PostAsJsonAsync("/api/runtime/ingest/logs", new
         {
             organizationId = seedB.OrganizationId,
             appId = seedB.AppId,
@@ -109,11 +109,11 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, ingest.StatusCode);
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seedB.ApiKeyToken);
-        var logsForB = await client.GetFromJsonAsync<RuntimeLogDto[]>($"/v1/runtime/logs?appId={seedB.AppId}&tail=10");
+        var logsForB = await client.GetFromJsonAsync<RuntimeLogDto[]>($"/api/runtime/logs?appId={seedB.AppId}&tail=10");
         Assert.Empty(logsForB!);
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seedA.ApiKeyToken);
-        var logsForA = await client.GetFromJsonAsync<RuntimeLogDto[]>($"/v1/runtime/logs?appId={seedA.AppId}&tail=10");
+        var logsForA = await client.GetFromJsonAsync<RuntimeLogDto[]>($"/api/runtime/logs?appId={seedA.AppId}&tail=10");
         Assert.Single(logsForA!);
     }
 
@@ -125,7 +125,7 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.RuntimeToken);
 
-        var response = await client.PostAsJsonAsync("/v1/runtime/heartbeat", new { agentVersion = "0.1.0", observedAt = now });
+        var response = await client.PostAsJsonAsync("/api/runtime/heartbeat", new { agentVersion = "0.1.0", observedAt = now });
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -176,7 +176,7 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
 
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seedA.RuntimeToken);
-        var routing = await client.GetFromJsonAsync<RuntimeRoutingDto>("/v1/runtime/routing");
+        var routing = await client.GetFromJsonAsync<RuntimeRoutingDto>("/api/runtime/routing");
 
         Assert.NotNull(routing);
         var route = Assert.Single(routing!.Routes);
@@ -184,7 +184,7 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
         Assert.Equal("api", route.ServiceName);
         Assert.Equal(8080, route.ServicePort);
 
-        var apply = await client.PostAsJsonAsync("/v1/runtime/routing/apply-results", new
+        var apply = await client.PostAsJsonAsync("/api/runtime/routing/apply-results", new
         {
             version = routing.Version,
             results = new[]
@@ -221,7 +221,7 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
         bindingA.Status = DomainBindingService.StatusDisabled;
         bindingA.UpdatedAt = DateTimeOffset.UtcNow;
         await verifyDb.SaveChangesAsync();
-        var staleApply = await client.PostAsJsonAsync("/v1/runtime/routing/apply-results", new
+        var staleApply = await client.PostAsJsonAsync("/api/runtime/routing/apply-results", new
         {
             version = routing.Version,
             results = new[] { new { bindingId = bindingA.Id, applyStatus = "applied", sslStatus = "ready", observedAt = now.AddMinutes(1) } }
@@ -261,8 +261,8 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
         }
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.RuntimeToken);
-        var routing = await client.GetFromJsonAsync<RuntimeRoutingDto>("/v1/runtime/routing");
-        var response = await client.PostAsJsonAsync("/v1/runtime/routing/apply-results", new
+        var routing = await client.GetFromJsonAsync<RuntimeRoutingDto>("/api/runtime/routing");
+        var response = await client.PostAsJsonAsync("/api/runtime/routing/apply-results", new
         {
             version = routing!.Version,
             results = new[] { new { bindingId = "dom_runtime_dns", applyStatus = "applied", sslStatus = "ready", observedAt = now } }
@@ -287,8 +287,8 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
         }
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.RuntimeToken);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.GetAsync("/v1/runtime/routing")).StatusCode);
-        var heartbeat = await client.PostAsJsonAsync("/v1/runtime/heartbeat", new { agentVersion = "0.2.0", observedAt = DateTimeOffset.UtcNow });
+        Assert.Equal(HttpStatusCode.Conflict, (await client.GetAsync("/api/runtime/routing")).StatusCode);
+        var heartbeat = await client.PostAsJsonAsync("/api/runtime/heartbeat", new { agentVersion = "0.2.0", observedAt = DateTimeOffset.UtcNow });
         Assert.Equal(HttpStatusCode.OK, heartbeat.StatusCode);
         await using (var scope = _factory.Services.CreateAsyncScope())
         {
@@ -298,7 +298,7 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
             deployment.OwnershipToken = null;
             await db.SaveChangesAsync();
         }
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/v1/runtime/routing")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/runtime/routing")).StatusCode);
     }
 
     [Fact]
@@ -317,17 +317,17 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
         }
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new("Bearer", a.ApiKeyToken);
-        var registered = await client.PostAsJsonAsync($"/v1/custom-domains?appId={a.AppId}", new { hostname = "remove.example.com" });
+        var registered = await client.PostAsJsonAsync($"/api/custom-domains?appId={a.AppId}", new { hostname = "remove.example.com" });
         Assert.Equal(HttpStatusCode.OK, registered.StatusCode);
         var row = (await registered.Content.ReadFromJsonAsync<Minicloud.Common.Contracts.CustomDomainRegistrationResponse>())!;
-        var path = $"/v1/custom-domains/{row.Id}?appId={a.AppId}";
+        var path = $"/api/custom-domains/{row.Id}?appId={a.AppId}";
         client.DefaultRequestHeaders.Authorization = new("Bearer", b.ApiKeyToken);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.DeleteAsync(path)).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/v1/custom-domains/{row.Id}?appId={b.AppId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/api/custom-domains/{row.Id}?appId={b.AppId}")).StatusCode);
         client.DefaultRequestHeaders.Authorization = new("Bearer", a.ApiKeyToken);
         Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync(path)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync(path)).StatusCode);
-        Assert.Empty((await client.GetFromJsonAsync<Minicloud.Common.Contracts.CustomDomainRegistrationResponse[]>($"/v1/custom-domains?appId={a.AppId}"))!);
+        Assert.Empty((await client.GetFromJsonAsync<Minicloud.Common.Contracts.CustomDomainRegistrationResponse[]>($"/api/custom-domains?appId={a.AppId}"))!);
     }
 
     [Fact]
@@ -350,9 +350,9 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
         }
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new("Bearer", a.ApiKeyToken);
-        var rejected = await client.PostAsJsonAsync($"/v1/domains?appId={a.AppId}", new { serviceName = "api", hostname = "EXAMPLE.COM" });
+        var rejected = await client.PostAsJsonAsync($"/api/domains?appId={a.AppId}", new { serviceName = "api", hostname = "EXAMPLE.COM" });
         Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
-        var registrationResponse = await client.PostAsJsonAsync($"/v1/custom-domains?appId={a.AppId}", new { hostname = "EXAMPLE.COM" });
+        var registrationResponse = await client.PostAsJsonAsync($"/api/custom-domains?appId={a.AppId}", new { hostname = "EXAMPLE.COM" });
         Assert.Equal(HttpStatusCode.OK, registrationResponse.StatusCode);
         var registration = (await registrationResponse.Content.ReadFromJsonAsync<Minicloud.Common.Contracts.CustomDomainRegistrationResponse>())!;
         Assert.Equal(a.AppId, registration.AppId);
@@ -363,36 +363,36 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
             db.Apps.Add(new MinicloudApp { Id = siblingId, OrganizationId = a.OrganizationId, Name = "Sibling", Slug = "sibling" });
             await db.SaveChangesAsync();
         }
-        var siblingDomains = await client.GetFromJsonAsync<Minicloud.Common.Contracts.CustomDomainRegistrationResponse[]>($"/v1/custom-domains?appId={siblingId}");
+        var siblingDomains = await client.GetFromJsonAsync<Minicloud.Common.Contracts.CustomDomainRegistrationResponse[]>($"/api/custom-domains?appId={siblingId}");
         Assert.Empty(siblingDomains!);
-        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/v1/custom-domains/{registration.Id}/verify?appId={siblingId}", null)).StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync($"/v1/custom-domains?appId={siblingId}", new { hostname = "example.com" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/api/custom-domains/{registration.Id}/verify?appId={siblingId}", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync($"/api/custom-domains?appId={siblingId}", new { hostname = "example.com" })).StatusCode);
         await using (var scope = _factory.Services.CreateAsyncScope())
         {
             Assert.Empty(await scope.ServiceProvider.GetRequiredService<MinicloudDbContext>().Domains.ToListAsync());
         }
         client.DefaultRequestHeaders.Authorization = new("Bearer", b.ApiKeyToken);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync($"/v1/custom-domains/{registration.Id}/verify?appId={a.AppId}", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync($"/api/custom-domains/{registration.Id}/verify?appId={a.AppId}", null)).StatusCode);
         client.DefaultRequestHeaders.Authorization = new("Bearer", a.ApiKeyToken);
-        var notVerified = await client.PostAsync($"/v1/custom-domains/{registration.Id}/verify?appId={a.AppId}", null);
+        var notVerified = await client.PostAsync($"/api/custom-domains/{registration.Id}/verify?appId={a.AppId}", null);
         Assert.Equal("pending", (await notVerified.Content.ReadFromJsonAsync<Minicloud.Common.Contracts.CustomDomainRegistrationResponse>())!.Status);
         _factory.Dns.Token = registration.VerificationToken;
-        var stillUnverified = await client.PostAsJsonAsync($"/v1/domains?appId={a.AppId}", new { serviceName = "api", hostname = "example.com" });
+        var stillUnverified = await client.PostAsJsonAsync($"/api/domains?appId={a.AppId}", new { serviceName = "api", hostname = "example.com" });
         Assert.Equal(HttpStatusCode.BadRequest, stillUnverified.StatusCode);
-        var proof = await client.PostAsync($"/v1/custom-domains/{registration.Id}/verify?appId={a.AppId}", null);
+        var proof = await client.PostAsync($"/api/custom-domains/{registration.Id}/verify?appId={a.AppId}", null);
         Assert.Equal("verified", (await proof.Content.ReadFromJsonAsync<Minicloud.Common.Contracts.CustomDomainRegistrationResponse>())!.Status);
-        var created = await client.PostAsJsonAsync($"/v1/domains?appId={a.AppId}", new { serviceName = "api", hostname = "EXAMPLE.COM" });
+        var created = await client.PostAsJsonAsync($"/api/domains?appId={a.AppId}", new { serviceName = "api", hostname = "EXAMPLE.COM" });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var binding = (await created.Content.ReadFromJsonAsync<Minicloud.Common.Contracts.DomainBindingResponse>())!;
         Assert.Equal("example.com", binding.Hostname);
         Assert.Equal("192.0.2.10", binding.TargetIp);
         Assert.Equal("pending_dns", binding.Status);
         Assert.NotNull(binding.VerificationToken);
-        var verifyUrl = $"/v1/domains/{binding.Id}/verify?appId={a.AppId}";
+        var verifyUrl = $"/api/domains/{binding.Id}/verify?appId={a.AppId}";
         client.DefaultRequestHeaders.Authorization = new("Bearer", b.ApiKeyToken);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync(verifyUrl, null)).StatusCode);
         client.DefaultRequestHeaders.Authorization = new("Bearer", a.RuntimeToken);
-        var pending = await client.GetFromJsonAsync<Minicloud.Common.Contracts.RuntimeDesiredRoutingResponse>("/v1/runtime/routing");
+        var pending = await client.GetFromJsonAsync<Minicloud.Common.Contracts.RuntimeDesiredRoutingResponse>("/api/runtime/routing");
         Assert.Empty(pending!.Routes);
         client.DefaultRequestHeaders.Authorization = new("Bearer", a.ApiKeyToken);
         _factory.Dns.Token = "wrong";
@@ -402,15 +402,15 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
         var verified = await client.PostAsync(verifyUrl, null);
         Assert.Equal("verified", (await verified.Content.ReadFromJsonAsync<Minicloud.Common.Contracts.DomainBindingResponse>())!.DnsStatus);
         client.DefaultRequestHeaders.Authorization = new("Bearer", a.RuntimeToken);
-        var active = await client.GetFromJsonAsync<Minicloud.Common.Contracts.RuntimeDesiredRoutingResponse>("/v1/runtime/routing");
+        var active = await client.GetFromJsonAsync<Minicloud.Common.Contracts.RuntimeDesiredRoutingResponse>("/api/runtime/routing");
         Assert.Equal("example.com", Assert.Single(active!.Routes).Hostname);
         client.DefaultRequestHeaders.Authorization = new("Bearer", b.RuntimeToken);
-        Assert.Empty((await client.GetFromJsonAsync<Minicloud.Common.Contracts.RuntimeDesiredRoutingResponse>("/v1/runtime/routing"))!.Routes);
+        Assert.Empty((await client.GetFromJsonAsync<Minicloud.Common.Contracts.RuntimeDesiredRoutingResponse>("/api/runtime/routing"))!.Routes);
         client.DefaultRequestHeaders.Authorization = new("Bearer", a.ApiKeyToken);
-        await client.PatchAsJsonAsync($"/v1/domains/{binding.Id}?appId={a.AppId}", new { disabled = true });
+        await client.PatchAsJsonAsync($"/api/domains/{binding.Id}?appId={a.AppId}", new { disabled = true });
         await client.PostAsync(verifyUrl, null);
         client.DefaultRequestHeaders.Authorization = new("Bearer", a.RuntimeToken);
-        Assert.Empty((await client.GetFromJsonAsync<Minicloud.Common.Contracts.RuntimeDesiredRoutingResponse>("/v1/runtime/routing"))!.Routes);
+        Assert.Empty((await client.GetFromJsonAsync<Minicloud.Common.Contracts.RuntimeDesiredRoutingResponse>("/api/runtime/routing"))!.Routes);
     }
 
     [Fact]
@@ -437,11 +437,11 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
         }
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
-        var forged = await client.PostAsJsonAsync($"/v1/runtime/servers?appId={seed.AppId}",
+        var forged = await client.PostAsJsonAsync($"/api/runtime/servers?appId={seed.AppId}",
             new { provider = "hetzner", providerAccountId = "runtime-catalog-account", providerServerId = "another-account-resource" });
         Assert.Equal(HttpStatusCode.Conflict, forged.StatusCode);
         Assert.Contains("runtime_server_conflict", await forged.Content.ReadAsStringAsync());
-        var valid = await client.PostAsJsonAsync($"/v1/runtime/servers?appId={seed.AppId}",
+        var valid = await client.PostAsJsonAsync($"/api/runtime/servers?appId={seed.AppId}",
             new { provider = "hetzner", providerAccountId = "runtime-catalog-account", providerServerId = "owned-resource" });
         Assert.Equal(HttpStatusCode.Created, valid.StatusCode);
         await using (var scope = _factory!.Services.CreateAsyncScope())
@@ -450,7 +450,7 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
             (await db.Apps.SingleAsync(x => x.Id == seed.AppId)).PlanId = null;
             await db.SaveChangesAsync();
         }
-        var legacyAccountInjection = await client.PostAsJsonAsync($"/v1/runtime/servers?appId={seed.AppId}",
+        var legacyAccountInjection = await client.PostAsJsonAsync($"/api/runtime/servers?appId={seed.AppId}",
             new { provider = "hetzner", providerAccountId = "runtime-catalog-account", providerServerId = "owned-resource" });
         Assert.Equal(HttpStatusCode.Conflict, legacyAccountInjection.StatusCode);
         Assert.Contains("runtime_account_conflict", await legacyAccountInjection.Content.ReadAsStringAsync());

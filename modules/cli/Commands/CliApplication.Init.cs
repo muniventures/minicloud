@@ -39,7 +39,7 @@ public sealed partial class CliApplication
                 var existingConfig = existingResult.Config!;
                 try
                 {
-                    var app = await _apiClient.GetAppAsync(existingConfig.AppId!, cancellationToken);
+                    var app = await GetApplicationContextAsync(existingConfig.AppId!, cancellationToken);
                     if (!string.Equals(app.Slug, existingConfig.App, StringComparison.OrdinalIgnoreCase))
                     {
                         _console.WriteError($"Config file '{outputPath}' points to appId '{existingConfig.AppId}' ({app.Slug}), but app is '{existingConfig.App}'.");
@@ -135,7 +135,7 @@ public sealed partial class CliApplication
         var app = allowCreateApp
             ? await PromptAppSelectionAsync(organization, requestedApp, cancellationToken)
             : await PromptExistingAppSelectionAsync(organization, requestedApp, cancellationToken);
-        var database = app.Database;
+        var database = app.Environments.Count == 1 ? app.Environments[0].Database : null;
 
         var serviceDrafts = PromptServiceDefinitions(app.Slug, advanced);
         if (serviceDrafts.Count == 0)
@@ -149,7 +149,7 @@ public sealed partial class CliApplication
         var config = new MinicloudConfig(app.Slug, database, null, services)
         {
             AppId = app.Id,
-            Plan = app.Plan
+            Plan = null
         };
         var diagnostics = MinicloudConfigValidator.Validate(config);
         if (diagnostics.Count > 0)
@@ -187,7 +187,10 @@ public sealed partial class CliApplication
         var optionsWithValues = new HashSet<string>(StringComparer.Ordinal)
         {
             "--app",
-            "--config"
+            "--config",
+            "--environment",
+            "--plan",
+            "--database"
         };
 
         for (var i = 0; i < args.Count; i++)

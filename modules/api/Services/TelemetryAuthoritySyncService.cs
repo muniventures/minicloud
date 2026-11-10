@@ -170,7 +170,7 @@ public sealed class TelemetryAuthoritySyncService(
 
         var client = httpClients.CreateClient();
         var baseUrl = options.Value.TelemetryServiceUrl.TrimEnd('/');
-        var syncUrl = $"{baseUrl}/internal/v1/telemetry/sync";
+        var syncUrl = $"{baseUrl}/internal/api/telemetry/sync";
 
         using var syncMsg = new HttpRequestMessage(HttpMethod.Post, syncUrl)
         {
@@ -192,7 +192,7 @@ public sealed class TelemetryAuthoritySyncService(
         }
 
         // 2. Poll reverse status
-        var statusUrl = $"{baseUrl}/internal/v1/telemetry/status";
+        var statusUrl = $"{baseUrl}/internal/api/telemetry/status";
         using var statusMsg = new HttpRequestMessage(HttpMethod.Get, statusUrl);
         statusMsg.Headers.TryAddWithoutValidation("X-Telemetry-Management-Key", options.Value.ManagementApiKey);
 

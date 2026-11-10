@@ -16,7 +16,7 @@ namespace Minicloud.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("v1/[controller]")]
+[Route("api/[controller]")]
 public sealed class ApiKeysController : ControllerBase
 {
     [HttpGet]
@@ -66,7 +66,7 @@ public sealed class ApiKeysController : ControllerBase
         db.ApiKeys.Add(key);
         await db.SaveChangesAsync(cancellationToken);
 
-        return Results.Created($"/v1/api-keys/{key.Id}", new ApiKeyCreateResponse(key.Id, key.Name, key.KeyPrefix, token.Token, request.Scopes, key.CreatedAt, key.ExpiresAt));
+        return Results.Created($"/api/api-keys/{key.Id}", new ApiKeyCreateResponse(key.Id, key.Name, key.KeyPrefix, token.Token, request.Scopes, key.CreatedAt, key.ExpiresAt));
     }
 
     [HttpDelete("{apiKeyId}")]

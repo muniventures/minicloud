@@ -10,7 +10,7 @@ import {
   deleteAppServiceSecretService,
   deleteAppServiceSecret,
   disableAppDomain,
-  getApp,
+  getEnvironmentDetail,
   listAppServices,
   listAppServiceSecrets,
   listAppServiceSecretServices,
@@ -18,11 +18,16 @@ import {
   setAppDomainPrimary,
   setAppServiceSecret,
   updateAppServiceSecret
-} from "../../api/appsApi";
+} from "../../api/environmentsApi";
+import { getApplication } from "../../api/applicationsApi";
+import type { Application } from "../../models/application";
 import { listDeployments } from "../../api/deploymentsApi";
 
-vi.mock("../../api/appsApi", () => ({
-  getApp: vi.fn(),
+vi.mock("../../api/applicationsApi", () => ({ getApplication: vi.fn() }));
+vi.mock("../../api/applicationsFixtures", () => ({ appsFixturesEnabled: () => false }));
+
+vi.mock("../../api/environmentsApi", () => ({
+  getEnvironmentDetail: vi.fn(),
   listAppServices: vi.fn(),
   checkAppDomainAvailability: vi.fn(),
   createAppDomain: vi.fn(),
@@ -45,7 +50,7 @@ vi.mock("../../api/deploymentsApi", () => ({
 
 vi.mock("../../core/auth/AuthProvider", () => ({
   useAuth: () => ({
-    selectedOrganization: { id: "org_123", name: "Org" }
+    selectedOrganization: { id: "org_123", name: "Org", role: "owner" }
   })
 }));
 
@@ -60,7 +65,13 @@ describe("AppDetailModule", () => {
   });
 
   beforeEach(() => {
-    vi.mocked(getApp).mockResolvedValue({
+    vi.mocked(getApplication).mockResolvedValue({
+      id: "application_123", organizationId: "org_123", name: "Demo", slug: "demo", defaultEnvironmentId: "app_123",
+      deletionStatus: null, deletionError: null, environmentCount: 1, persistentEnvironmentCount: 1, previewEnvironmentCount: 0, createdAt: "2026-05-18T12:00:00Z", updatedAt: "2026-05-18T12:00:00Z",
+      environments: [{ id: "app_123", applicationId: "application_123", organizationId: "org_123", name: "production", kind: "persistent", runtimeSlug: "demo", plan: "p0", planId: null, database: "sqlite", sourceBranch: null, sourceEnvironmentId: null, domains: [], latestDeployment: null, deletionStatus: null, deletionError: null, placementLocked: false, createdAt: "2026-05-18T12:00:00Z", updatedAt: "2026-05-18T12:00:00Z", runtimeObservation: { state: "unprovisioned", connected: false, stale: false, observedAt: null, lastSeenAt: null, totalServices: 0, healthyServices: 0 } }]
+    } as Application);
+
+    vi.mocked(getEnvironmentDetail).mockResolvedValue({
       id: "app_123",
       organizationId: "org_123",
       name: "Demo",
@@ -206,49 +217,52 @@ describe("AppDetailModule", () => {
     };
     vi.mocked(listDeployments).mockResolvedValue([deployment]);
     await act(async () => {
-      render(<MemoryRouter initialEntries={["/apps/app_123"]}><Routes>
-        <Route path="/apps/:appId" element={<AppDetailModule />} />
+      render(<MemoryRouter initialEntries={["/apps/application_123/environments/app_123/overview"]}><Routes>
+        <Route path="/apps/:applicationId/environments/:environmentId/:tab" element={<AppDetailModule />} />
       </Routes></MemoryRouter>);
     });
     const secretReads = vi.mocked(listAppServiceSecretServices).mock.calls.length;
-    const appReads = vi.mocked(getApp).mock.calls.length;
+    const appReads = vi.mocked(getEnvironmentDetail).mock.calls.length;
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Deployments" }), { button: 0 });
     fireEvent.click(screen.getByRole("tab", { name: "Deployments" }));
     for (const status of ["waiting_for_build", "queued", "succeeded"] as const) {
       vi.mocked(listDeployments).mockResolvedValue([{ ...deployment, id: "new-build", status }]);
       await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-      expect(screen.getAllByText(status === "waiting_for_build" ? "Waiting for build" : status).length).toBeGreaterThanOrEqual(2);
+      expect(screen.getAllByText(status === "waiting_for_build" ? "Waiting for build" : status).length).toBeGreaterThanOrEqual(1);
       expect(screen.getByText("new-build")).toBeInTheDocument();
     }
     expect(listAppServiceSecretServices).toHaveBeenCalledTimes(secretReads);
-    expect(getApp).toHaveBeenCalledTimes(appReads);
+    expect(getEnvironmentDetail).toHaveBeenCalledTimes(appReads);
   });
 
   it("shows service URLs in the overview and keeps deletion behind More", async () => {
     render(
-      <MemoryRouter initialEntries={["/apps/app_123"]}>
+      <MemoryRouter initialEntries={["/apps/application_123/environments/app_123/overview"]}>
         <Routes>
-          <Route path="/apps/:appId" element={<AppDetailModule />} />
+          <Route path="/apps/:applicationId/environments/:environmentId/:tab" element={<AppDetailModule />} />
         </Routes>
       </MemoryRouter>,
     );
 
     await screen.findByRole("heading", { name: "Demo" });
-    expect(screen.getByRole("button", { name: "Refresh Demo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Refresh/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Deployment history" })).not.toBeInTheDocument();
+    // Overview is compact: one preferred address as a real link with a
+    // Details navigation, not a wall of URL links.
     expect(screen.getByRole("link", { name: "https://org-demo-web.app.muni.dev" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Details" }).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Internal only")).toBeInTheDocument();
     expect(screen.queryByText(/Image: ghcr\.io/)).not.toBeInTheDocument();
-    fireEvent.pointerDown(screen.getByRole("button", { name: "More" }), { button: 0, ctrlKey: false });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete application" }));
-    expect(screen.getByRole("heading", { name: "Delete Demo?" })).toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "More actions for Demo production" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete Demo / production environment…" }));
+    expect(screen.getByRole("heading", { name: "Delete Demo / production?" })).toBeInTheDocument();
   });
 
   it("renders service routing without custom-domain controls", async () => {
     render(
-      <MemoryRouter initialEntries={["/apps/app_123"]}>
+      <MemoryRouter initialEntries={["/apps/application_123/environments/app_123/overview"]}>
         <Routes>
-          <Route path="/apps/:appId" element={<AppDetailModule />} />
+          <Route path="/apps/:applicationId/environments/:environmentId/:tab" element={<AppDetailModule />} />
         </Routes>
       </MemoryRouter>
     );
@@ -257,14 +271,17 @@ describe("AppDetailModule", () => {
     switchTab("Services");
     await waitFor(() => expect(screen.getByText("Service routing")).toBeInTheDocument());
 
-    expect(screen.getByRole("columnheader", { name: "URL" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Primary address" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Runtime" })).toBeInTheDocument();
     expect(screen.getAllByText("web").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("worker").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Public")).toBeInTheDocument();
     expect(screen.getByText("Private")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "https://org-demo-web.app.muni.dev" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy web URL" })).toBeInTheDocument();
+    // Collapsed row: one preferred address only, second hostname collapsed to +N.
+    expect(screen.getByRole("link", { name: "web primary address https://org-demo-web.app.muni.dev" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "https://org-demo-web.app.muni.dev" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy web primary URL" })).toBeInTheDocument();
+    expect(screen.queryByText(/hostnames/)).not.toBeInTheDocument();
     expect(screen.getByText("Internal only")).toBeInTheDocument();
     expect(screen.getByRole("table")).toHaveClass("table-fixed");
 
@@ -272,6 +289,8 @@ describe("AppDetailModule", () => {
     expect(webDetailsButton).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(webDetailsButton);
     expect(webDetailsButton).toHaveAttribute("aria-expanded", "true");
+    // Full URLs and routing/TLS detail belong in the expanded row.
+    expect(screen.getByRole("link", { name: "org-demo-web.app.muni.dev" })).toBeInTheDocument();
     expect(screen.getByText("Image reference")).toBeInTheDocument();
     expect(screen.getByText("ghcr.io/example/web:sha")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Actions for web" })).toBeInTheDocument();
@@ -280,49 +299,11 @@ describe("AppDetailModule", () => {
     expect(screen.queryByText(/path prefix/i)).not.toBeInTheDocument();
   });
 
-  it("renders branch deployments as child apps", async () => {
-    vi.mocked(getApp).mockResolvedValue({
-      id: "app_123",
-      organizationId: "org_123",
-      name: "Demo",
-      slug: "demo",
-      plan: "p0",
-      database: "sqlite",
-      domains: [],
-      branches: [{
-        id: "app_branch",
-        name: "Demo (feature-cart)",
-        slug: "demo-feature-cart",
-        branchName: "feature-cart",
-        plan: "p0-v-0",
-        database: "sqlite",
-        websiteUrl: "https://old-main.example",
-        urls: ["https://org-demo-web-feature-cart.app.muni.dev", "https://org-demo-api-feature-cart.app.muni.dev"],
-        createdAt: "2026-07-14T12:00:00Z"
-      }],
-      latestDeployment: null
-    });
-
-    render(
-      <MemoryRouter initialEntries={["/apps/app_123"]}>
-        <Routes>
-          <Route path="/apps/:appId" element={<AppDetailModule />} />
-        </Routes>
-      </MemoryRouter>
-    );
-
-    expect(await screen.findByText("feature-cart")).toBeInTheDocument();
-    expect(screen.getByText("p0-v-0")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "https://org-demo-api-feature-cart.app.muni.dev" })).toBeInTheDocument();
-    expect(screen.queryByText("https://old-main.example")).not.toBeInTheDocument();
-    expect(screen.getByText("https://org-demo-web-feature-cart.app.muni.dev")).toBeInTheDocument();
-  });
-
   it("checks availability before saving a subdomain", async () => {
     render(
-      <MemoryRouter initialEntries={["/apps/app_123"]}>
+      <MemoryRouter initialEntries={["/apps/application_123/environments/app_123/overview"]}>
         <Routes>
-          <Route path="/apps/:appId" element={<AppDetailModule />} />
+          <Route path="/apps/:applicationId/environments/:environmentId/:tab" element={<AppDetailModule />} />
         </Routes>
       </MemoryRouter>
     );
@@ -390,9 +371,9 @@ describe("AppDetailModule", () => {
     ]);
 
     render(
-      <MemoryRouter initialEntries={["/apps/app_123"]}>
+      <MemoryRouter initialEntries={["/apps/application_123/environments/app_123/overview"]}>
         <Routes>
-          <Route path="/apps/:appId" element={<AppDetailModule />} />
+          <Route path="/apps/:applicationId/environments/:environmentId/:tab" element={<AppDetailModule />} />
         </Routes>
       </MemoryRouter>
     );
@@ -412,9 +393,9 @@ describe("AppDetailModule", () => {
 
   it("opens service secrets without rendering secret values", async () => {
     render(
-      <MemoryRouter initialEntries={["/apps/app_123"]}>
+      <MemoryRouter initialEntries={["/apps/application_123/environments/app_123/overview"]}>
         <Routes>
-          <Route path="/apps/:appId" element={<AppDetailModule />} />
+          <Route path="/apps/:applicationId/environments/:environmentId/:tab" element={<AppDetailModule />} />
         </Routes>
       </MemoryRouter>
     );
@@ -441,9 +422,9 @@ describe("AppDetailModule", () => {
     vi.mocked(listAppServiceSecretServices).mockResolvedValueOnce([]);
 
     render(
-      <MemoryRouter initialEntries={["/apps/app_123"]}>
+      <MemoryRouter initialEntries={["/apps/application_123/environments/app_123/overview"]}>
         <Routes>
-          <Route path="/apps/:appId" element={<AppDetailModule />} />
+          <Route path="/apps/:applicationId/environments/:environmentId/:tab" element={<AppDetailModule />} />
         </Routes>
       </MemoryRouter>
     );
@@ -460,9 +441,9 @@ describe("AppDetailModule", () => {
 
   it("renames a service used for secrets", async () => {
     render(
-      <MemoryRouter initialEntries={["/apps/app_123"]}>
+      <MemoryRouter initialEntries={["/apps/application_123/environments/app_123/overview"]}>
         <Routes>
-          <Route path="/apps/:appId" element={<AppDetailModule />} />
+          <Route path="/apps/:applicationId/environments/:environmentId/:tab" element={<AppDetailModule />} />
         </Routes>
       </MemoryRouter>
     );

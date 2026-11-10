@@ -22,7 +22,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         Handler.requests.append((parsed.path, parsed.query, self.headers.get("Authorization")))
-        if parsed.path == "/v1/instance":
+        if parsed.path == "/api/instance":
             self.respond({"product": "minicloud", "protocolVersion": 1, "appDomain": "apps.example.invalid"})
             return
         if self.headers.get("Authorization") != f"Bearer {TOKEN}":
@@ -30,7 +30,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        if parsed.path == "/v1/me":
+        if parsed.path == "/api/me":
             self.respond({
                 "id": "release-smoke-user",
                 "email": "release-smoke@example.invalid",
@@ -44,19 +44,35 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
-        if parsed.path == "/v1/apps" and parsed.query == "organizationId=release-smoke-org":
+        if parsed.path == "/api/apps" and parsed.query == "organizationId=release-smoke-org":
             self.respond([{
                 "id": "release-smoke-app",
                 "organizationId": "release-smoke-org",
                 "name": "Release Smoke",
                 "slug": "release-smoke",
-                "parentAppId": None,
-                "branchName": None,
-                "plan": "p0",
-                "database": "none",
-                "domains": [],
-                "branches": [],
-                "latestDeployment": None,
+                "defaultEnvironmentId": "release-smoke-environment",
+                "environmentCount": 1,
+                "persistentEnvironmentCount": 1,
+                "previewEnvironmentCount": 0,
+                "environments": [{
+                    "id": "release-smoke-environment",
+                    "applicationId": "release-smoke-app",
+                    "organizationId": "release-smoke-org",
+                    "name": "production",
+                    "kind": "persistent",
+                    "runtimeSlug": "release-smoke-production",
+                    "plan": "Small",
+                    "database": "none",
+                    "domains": [],
+                    "latestDeployment": None,
+                    "runtimeObservation": {
+                        "state": "unprovisioned",
+                        "connected": False,
+                        "stale": False,
+                        "totalServices": 0,
+                        "healthyServices": 0,
+                    },
+                }],
                 "deletionStatus": None,
                 "deletionError": None,
             }])
@@ -124,12 +140,12 @@ def main():
         server.server_close()
         thread.join(timeout=5)
 
-    if "release-smoke\tnone" not in output:
+    if "release-smoke\trelease-smoke-app\t1 environments" not in output:
         raise AssertionError(f"apps list did not render the mocked app: {output}")
     expected_requests = [
-        ("/v1/instance", "", None),
-        ("/v1/me", "", f"Bearer {TOKEN}"),
-        ("/v1/apps", "organizationId=release-smoke-org", f"Bearer {TOKEN}"),
+        ("/api/instance", "", None),
+        ("/api/me", "", f"Bearer {TOKEN}"),
+        ("/api/apps", "organizationId=release-smoke-org", f"Bearer {TOKEN}"),
     ]
     if Handler.requests != expected_requests:
         raise AssertionError(f"unexpected API requests: {Handler.requests}")

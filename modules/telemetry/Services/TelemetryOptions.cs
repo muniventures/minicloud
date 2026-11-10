@@ -18,7 +18,7 @@ public sealed class TelemetryOptions
         get => GrafanaBaseAddress;
         set => GrafanaBaseAddress = value;
     }
-    public string QueryGatewayBaseUrl { get; set; } = "http://telemetry:8080/v1/grafana/query-gateway";
+    public string QueryGatewayBaseUrl { get; set; } = "http://telemetry:8080/api/grafana/query-gateway";
     public string AccessOrigin { get; set; } = "http://localhost:8088";
     public string ProxyCookieName { get; set; } = "minicloud_grafana_session";
     public string ManagementApiKey { get; set; } = "minicloud-telemetry-management-dev-key";

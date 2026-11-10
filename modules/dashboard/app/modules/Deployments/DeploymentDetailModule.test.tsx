@@ -7,7 +7,7 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getApp } from "../../api/appsApi";
+import { getEnvironmentDetail } from "../../api/environmentsApi";
 import {
   dispatchDeployment,
   cancelDeployment,
@@ -20,7 +20,7 @@ import {
 import { DeploymentDetailModule } from "./DeploymentDetailModule";
 import { summarizeEvent } from "./deploymentDetailPresentation";
 
-vi.mock("../../api/appsApi", () => ({ getApp: vi.fn() }));
+vi.mock("../../api/environmentsApi", () => ({ getEnvironmentDetail: vi.fn() }));
 vi.mock("../../api/deploymentsApi", () => ({
   dispatchDeployment: vi.fn(),
   cancelDeployment: vi.fn(),
@@ -61,7 +61,7 @@ describe("DeploymentDetailModule", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
-    vi.mocked(getApp).mockResolvedValue({
+    vi.mocked(getEnvironmentDetail).mockResolvedValue({
       id: "app_123",
       name: "Demo",
     } as never);

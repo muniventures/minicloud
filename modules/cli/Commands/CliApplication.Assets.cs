@@ -16,7 +16,7 @@ public sealed partial class CliApplication
         var config = loaded.Config;
         if (!config.Assets.TryGetValue(args[1], out var asset))
         { throw new CliCommandException(CliExitCodes.ValidationError, "Asset is not declared in minicloud.yml."); }
-        var app = await _apiClient.GetAppAsync(config.AppId!, ct);
+        var app = await ResolveAppOptionAsync(args, ct);
         var plan = GetOption(args, "--plan") ?? config.Plan;
         if (args.Any(x => x == "--plan" || x.StartsWith("--plan=", StringComparison.Ordinal)) && string.IsNullOrWhiteSpace(GetOption(args, "--plan")))
             throw new CliCommandException(CliExitCodes.ValidationError, "--plan requires a plan name.");

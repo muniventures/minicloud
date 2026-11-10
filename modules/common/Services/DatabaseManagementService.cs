@@ -32,6 +32,17 @@ public sealed class DatabaseManagementService(MinicloudDbContext db, ControlPlan
 
     public async Task<ManagedDatabase> CreateDatabaseAsync(CreateManagedDatabaseRequest request, ActorIdentity actor, CancellationToken ct)
     {
+        return await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            var database = await CreateDatabaseCoreAsync(request, actor, ct);
+            await transaction.CommitAsync(ct);
+            return database;
+        });
+    }
+
+    private async Task<ManagedDatabase> CreateDatabaseCoreAsync(CreateManagedDatabaseRequest request, ActorIdentity actor, CancellationToken ct)
+    {
         await RequireAsync(actor, request.OrganizationId, true, ct);
         Name(request.Name);
         if ((request.AppId is null) == (request.ServerId is null)) throw new ArgumentException("Select exactly one application or database server.");
@@ -69,6 +80,17 @@ public sealed class DatabaseManagementService(MinicloudDbContext db, ControlPlan
 
     public async Task<DatabaseBackupPolicy> SetPolicyAsync(string id, BackupPolicyRequest request, ActorIdentity actor, CancellationToken ct)
     {
+        return await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            var policy = await SetPolicyCoreAsync(id, request, actor, ct);
+            await transaction.CommitAsync(ct);
+            return policy;
+        });
+    }
+
+    private async Task<DatabaseBackupPolicy> SetPolicyCoreAsync(string id, BackupPolicyRequest request, ActorIdentity actor, CancellationToken ct)
+    {
         var database = await GetAsync(id, actor, true, ct);
         if (await db.DatabaseOperations.AnyAsync(x => x.DatabaseId == id && x.BackupPolicyId == null && (x.Status == "queued" || x.Status == "running" || x.Status == "cancelling"), ct))
             throw new InvalidOperationException("Wait for active database operations before changing backup policy.");
@@ -88,8 +110,22 @@ public sealed class DatabaseManagementService(MinicloudDbContext db, ControlPlan
     {
         if (request.FrequencyHours is < 1 or > 168 || request.RetentionDays is < 1 or > 3650 || request.MinimumCopies is < 1 or > 100)
             throw new ArgumentException("Backup frequency, retention or minimum copy count is outside supported limits.");
-        if (request.Enabled && (request.RepositoryAppId is null || !await db.Apps.AnyAsync(x => x.Id == request.RepositoryAppId && x.OrganizationId == policy.OrganizationId && x.Database == DatabaseMode.None && x.Slug.StartsWith("dbrepo-") && x.DeletionStatus == null, ct)))
+        if (request.Enabled && request.RepositoryAppId is null)
             throw new ArgumentException("An organization-owned backup repository is required.");
+        var repositoryId = request.RepositoryAppId ?? policy.RepositoryAppId;
+        if (repositoryId is not null)
+        {
+            var repositories = db.Apps.Where(x => x.Id == repositoryId && x.OrganizationId == policy.OrganizationId);
+            if (db.Database.IsNpgsql())
+            {
+                repositories = db.Apps.FromSqlInterpolated($"SELECT * FROM apps WHERE id = {repositoryId} AND organization_id = {policy.OrganizationId} FOR UPDATE");
+            }
+            var repository = await repositories.SingleOrDefaultAsync(ct);
+            if (repository is not null) { await db.Entry(repository).ReloadAsync(ct); }
+            if (repository?.DeletionStatus is not null ||
+                (request.Enabled || request.RepositoryAppId is not null) && (repository is null || repository.Database != DatabaseMode.None || !repository.Slug.StartsWith("dbrepo-", StringComparison.Ordinal)))
+                throw new ArgumentException("An available organization-owned backup repository is required.");
+        }
         var source = db.ManagedDatabases.Local.SingleOrDefault(x => x.Id == policy.DatabaseId) ?? await db.ManagedDatabases.SingleOrDefaultAsync(x => x.Id == policy.DatabaseId, ct);
         if (request.RepositoryAppId is not null && source?.AppId == request.RepositoryAppId) throw new ArgumentException("Repository must be off-server.");
         policy.Enabled = request.Enabled;

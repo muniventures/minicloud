@@ -41,7 +41,7 @@ public sealed class CliInitCommandTests
             var exitCode = await app.RunAsync(["init", "--config", configPath], CancellationToken.None);
 
             Assert.Equal(CliExitCodes.Success, exitCode);
-            Assert.Equal(["GET /v1/apps/app_123"], handler.Requests);
+            Assert.Equal(["GET /api/apps/app_123"], handler.Requests);
             Assert.Contains($"Using existing {configPath}", console.Output);
             Assert.Contains("App: AS Tools (as-tools, app_123)", console.Output);
         }
@@ -82,7 +82,7 @@ public sealed class CliInitCommandTests
             var exitCode = await app.RunAsync(["init", "--config", configPath], CancellationToken.None);
 
             Assert.Equal(CliExitCodes.Success, exitCode);
-            Assert.Equal(["GET /v1/apps/app_denied"], handler.Requests);
+            Assert.Equal(["GET /api/apps/app_denied"], handler.Requests);
             Assert.Contains("cannot access that app", console.Errors);
             Assert.Contains($"Update '{configPath}' now? [y/N]:", console.Output);
             Assert.Contains("Init canceled.", console.Output);
@@ -134,9 +134,10 @@ public sealed class CliInitCommandTests
 
             Assert.Equal(CliExitCodes.Success, result);
             var expected = original;
-            if (oldId != "app_123")
+            var expectedId = "app_123";
+            if (oldId != expectedId)
             {
-                expected = expected.Replace($"appId: {oldId}", "appId: \"app_123\"");
+                expected = expected.Replace($"appId: {oldId}", $"appId: \"{expectedId}\"");
             }
             if (oldSlug != "as-tools")
             {
@@ -168,21 +169,21 @@ public sealed class CliInitCommandTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests.Add($"{request.Method.Method} {request.RequestUri!.PathAndQuery}");
-            if (request.RequestUri.AbsolutePath == "/v1/me")
+            if (request.RequestUri.AbsolutePath == "/api/me")
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent("""{"id":"usr_1","email":"dev@example.com","organizations":[{"id":"org_123","name":"Test","slug":"test","role":"owner"}]}""")
                 });
             }
-            if (request.RequestUri.PathAndQuery == "/v1/apps?organizationId=org_123")
+            if (request.RequestUri.PathAndQuery == "/api/apps?organizationId=org_123")
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent("""[{"id":"app_123","organizationId":"org_123","name":"AS Tools","slug":"as-tools","plan":"p0","database":"none","branches":[]}]""")
                 });
             }
-            if (request.RequestUri.PathAndQuery == "/v1/apps/app_denied")
+            if (request.RequestUri.PathAndQuery == "/api/apps/app_denied")
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden)
                 {
@@ -192,7 +193,7 @@ public sealed class CliInitCommandTests
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("""{"id":"app_123","organizationId":"org_123","name":"AS Tools","slug":"as-tools","parentAppId":null,"branchName":null,"plan":"p0","database":"postgres","branches":[],"latestDeployment":null}""")
+                Content = new StringContent("""{"id":"app_123","organizationId":"org_123","name":"AS Tools","slug":"as-tools","parentAppId":null,"branchName":null,"plan":"p0","database":"postgres","environments":[],"latestDeployment":null}""")
             });
         }
     }

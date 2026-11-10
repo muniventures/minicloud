@@ -154,7 +154,7 @@ public sealed class LocalBuildConfigTests
             var application = new CliApplication(console, environment, tokens, new MinicloudApiClient(environment, tokens, http));
             Assert.Equal(CliExitCodes.ValidationError, await application.RunAsync(["deploy", "--config", path], default));
             Assert.Contains("local_build_unavailable", console.Output);
-            Assert.Equal(["GET /v1/me", "GET /v1/apps/app_demo", "GET /v1/apps/app_demo/image-build-target"], handler.Requests);
+            Assert.Equal(["GET /api/me", "GET /api/apps/app_demo", "GET /api/environments/app_demo", "GET /api/environments/app_demo/image-build-target"], handler.Requests);
             Assert.False(File.Exists(Path.Combine(directory.FullName, "Dockerfile")));
         }
         finally { directory.Delete(true); }
@@ -198,7 +198,7 @@ public sealed class LocalBuildConfigTests
             var console = new TestConsole();
             var application = new CliApplication(console, environment, tokens, new MinicloudApiClient(environment, tokens, http));
             Assert.NotEqual(CliExitCodes.Success, await application.RunAsync(["assets", "publish", "cli", "--config", path], default));
-            Assert.True(handler.Requests.SequenceEqual(["GET /v1/apps/app_demo", "POST /v1/artifacts"]), console.Output);
+            Assert.True(handler.Requests.SequenceEqual(["GET /api/apps/app_demo", "GET /api/environments/app_demo", "POST /api/artifacts"]), console.Output);
             Assert.DoesNotContain("Local build requires", console.Output);
         }
         finally { directory.Delete(true); }
@@ -213,10 +213,11 @@ public sealed class LocalBuildConfigTests
             Requests.Add($"{request.Method} {path}");
             var json = path switch
             {
-                "/v1/me" => """{"id":"user","organizations":[{"id":"org","name":"Org","slug":"org","role":"owner"}]}""",
-                "/v1/apps/app_demo" => """{"id":"app_demo","organizationId":"org","name":"Demo","slug":"demo","plan":"p0","branches":[]}""",
-                "/v1/apps/app_demo/image-build-target" => null,
-                "/v1/artifacts" => null,
+                "/api/me" => """{"id":"user","organizations":[{"id":"org","name":"Org","slug":"org","role":"owner"}]}""",
+                "/api/apps/app_demo" => System.Text.Json.JsonSerializer.Serialize(CliApiFixtures.Application("app_demo", "org", "app_demo")),
+                "/api/environments/app_demo" => """{"id":"app_demo","applicationId":"app_demo","organizationId":"org","name":"Demo","slug":"demo","plan":"p0","branches":[]}""",
+                "/api/environments/app_demo/image-build-target" => null,
+                "/api/artifacts" => null,
                 _ => throw new InvalidOperationException($"Unexpected request: {request.Method} {path}")
             };
             return Task.FromResult(new HttpResponseMessage(json is null ? System.Net.HttpStatusCode.NotFound : System.Net.HttpStatusCode.OK)

@@ -6,7 +6,7 @@ using static Minicloud.Api.Controllers.EndpointResults;
 
 namespace Minicloud.Api.Controllers;
 
-[ApiController, Authorize, Route("v1/databases/{id}/backups/{artifactId}/files/{fileName}")]
+[ApiController, Authorize, Route("api/databases/{id}/backups/{artifactId}/files/{fileName}")]
 public sealed class DatabaseBackupDownloadsController(DatabaseBackupDownloadService downloads) : ControllerBase
 {
     [HttpGet]

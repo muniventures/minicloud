@@ -26,22 +26,22 @@ export type IssueTelemetryCredentialRequest = {
 };
 
 export function getTelemetrySettings(appId: string, signal?: AbortSignal) {
-  return apiRequest<TelemetrySettingsResponse>(`/v1/apps/${encodeURIComponent(appId)}/telemetry`, { signal });
+  return apiRequest<TelemetrySettingsResponse>(`/api/environments/${encodeURIComponent(appId)}/telemetry`, { signal });
 }
 
 export function updateTelemetrySettings(appId: string, enabled: boolean) {
-  return apiRequest<TelemetrySettingsResponse>(`/v1/apps/${encodeURIComponent(appId)}/telemetry`, {
+  return apiRequest<TelemetrySettingsResponse>(`/api/environments/${encodeURIComponent(appId)}/telemetry`, {
     method: "PUT",
     body: { enabled }
   });
 }
 
 export function listTelemetryCredentials(appId: string, signal?: AbortSignal) {
-  return apiRequest<TelemetryCredentialResponse[]>(`/v1/apps/${encodeURIComponent(appId)}/telemetry/credentials`, { signal });
+  return apiRequest<TelemetryCredentialResponse[]>(`/api/environments/${encodeURIComponent(appId)}/telemetry/credentials`, { signal });
 }
 
 export function issueTelemetryCredential(appId: string, request: IssueTelemetryCredentialRequest) {
-  return apiRequest<TelemetryCredentialIssueResponse>(`/v1/apps/${encodeURIComponent(appId)}/telemetry/credentials`, {
+  return apiRequest<TelemetryCredentialIssueResponse>(`/api/environments/${encodeURIComponent(appId)}/telemetry/credentials`, {
     method: "POST",
     body: {
       serviceName: request.serviceName,
@@ -52,7 +52,7 @@ export function issueTelemetryCredential(appId: string, request: IssueTelemetryC
 }
 
 export function revokeTelemetryCredential(appId: string, credentialId: string) {
-  return apiRequest<void>(`/v1/apps/${encodeURIComponent(appId)}/telemetry/credentials/${encodeURIComponent(credentialId)}`, {
+  return apiRequest<void>(`/api/environments/${encodeURIComponent(appId)}/telemetry/credentials/${encodeURIComponent(credentialId)}`, {
     method: "DELETE"
   });
 }
@@ -64,12 +64,12 @@ export function queryApplicationLogs(appId: string, query: TelemetryLogQuery, si
   if (query.q) search.set("q", query.q);
   if (query.traceId) search.set("traceId", query.traceId);
   if (query.limit) search.set("limit", String(query.limit));
-  return apiRequest<TelemetryLogsResponse>(`/v1/apps/${encodeURIComponent(appId)}/logs?${search.toString()}`, { signal });
+  return apiRequest<TelemetryLogsResponse>(`/api/environments/${encodeURIComponent(appId)}/logs?${search.toString()}`, { signal });
 }
 
 export function issueTelemetryReadToken(appId: string, signal?: AbortSignal) {
   return apiRequest<{ readToken: string; expiresAt: string; queryUrl: string }>(
-    `/v1/apps/${encodeURIComponent(appId)}/telemetry/read-token`,
+    `/api/environments/${encodeURIComponent(appId)}/telemetry/read-token`,
     {
       method: "POST",
       signal
@@ -111,7 +111,7 @@ export async function queryApplicationLogsDirect(
 }
 
 export function launchGrafanaSession(appId: string, destination = "/explore") {
-  return apiRequest<GrafanaLaunchResponse>(`/v1/apps/${encodeURIComponent(appId)}/grafana-session`, {
+  return apiRequest<GrafanaLaunchResponse>(`/api/environments/${encodeURIComponent(appId)}/grafana-session`, {
     method: "POST",
     body: { destination }
   });
@@ -126,7 +126,7 @@ export async function exchangeGrafanaLaunch(
   launchCode: string,
   exchangeUrl?: string | null
 ): Promise<GrafanaExchangeResponse> {
-  const targetUrl = exchangeUrl || `${runtimeConfig.apiBaseUrl}/v1/grafana/exchange`;
+  const targetUrl = exchangeUrl || `${runtimeConfig.apiBaseUrl}/api/grafana/exchange`;
   const response = await fetch(targetUrl, {
     method: "POST",
     credentials: "include",

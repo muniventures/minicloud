@@ -7,33 +7,33 @@ export function listDeployments(params: { organizationId: string; appId?: string
     search.set("appId", params.appId);
   }
 
-  return apiRequest<DeploymentResponse[]>(`/v1/deployments?${search.toString()}`, { signal });
+  return apiRequest<DeploymentResponse[]>(`/api/deployments?${search.toString()}`, { signal });
 }
 
 export function getDeployment(deploymentId: string, signal?: AbortSignal) {
-  return apiRequest<DeploymentResponse>(`/v1/deployments/${encodeURIComponent(deploymentId)}`, { signal });
+  return apiRequest<DeploymentResponse>(`/api/deployments/${encodeURIComponent(deploymentId)}`, { signal });
 }
 
 export function dispatchDeployment(deploymentId: string) {
-  return apiRequest<DeploymentResponse>(`/v1/deployments/${encodeURIComponent(deploymentId)}/dispatch`, { method: "POST" });
+  return apiRequest<DeploymentResponse>(`/api/deployments/${encodeURIComponent(deploymentId)}/dispatch`, { method: "POST" });
 }
 
 export function cancelDeployment(deploymentId: string) {
-  return apiRequest<{ id: string; cancellationRequested: boolean }>(`/v1/deployments/${encodeURIComponent(deploymentId)}/cancel`, { method: "POST" });
+  return apiRequest<{ id: string; cancellationRequested: boolean }>(`/api/deployments/${encodeURIComponent(deploymentId)}/cancel`, { method: "POST" });
 }
 
 export function refreshDeployment(deploymentId: string) {
-  return apiRequest<DeploymentResponse>(`/v1/deployments/${encodeURIComponent(deploymentId)}/refresh`, { method: "POST" });
+  return apiRequest<DeploymentResponse>(`/api/deployments/${encodeURIComponent(deploymentId)}/refresh`, { method: "POST" });
 }
 
 export function listDeploymentEvents(deploymentId: string, signal?: AbortSignal) {
-  return apiRequest<DeploymentEventResponse[]>(`/v1/deployments/${encodeURIComponent(deploymentId)}/events`, { signal });
+  return apiRequest<DeploymentEventResponse[]>(`/api/deployments/${encodeURIComponent(deploymentId)}/events`, { signal });
 }
 
 export function listDeploymentActivities(deploymentId: string, signal?: AbortSignal) {
-  return apiRequest<DeploymentActivityResponse[]>(`/v1/deployments/${encodeURIComponent(deploymentId)}/activities`, { signal });
+  return apiRequest<DeploymentActivityResponse[]>(`/api/deployments/${encodeURIComponent(deploymentId)}/activities`, { signal });
 }
 
 export function listDeploymentLogs(deploymentId: string, signal?: AbortSignal) {
-  return apiRequest<DeploymentLogResponse[]>(`/v1/deployments/${encodeURIComponent(deploymentId)}/logs`, { signal });
+  return apiRequest<DeploymentLogResponse[]>(`/api/deployments/${encodeURIComponent(deploymentId)}/logs`, { signal });
 }

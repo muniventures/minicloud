@@ -98,7 +98,7 @@ public sealed class ArtifactRetrieverTests : IDisposable
         using var reader = new StreamReader(stream);
         var content = await reader.ReadToEndAsync();
 
-        Assert.Equal("/v1/artifacts/art_remote999/file", capturedUri);
+        Assert.Equal("/api/artifacts/art_remote999/file", capturedUri);
         Assert.Equal("api zip stream", content);
     }
 

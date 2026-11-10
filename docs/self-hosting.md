@@ -24,7 +24,7 @@ then create an app using that plan. Several accounts of the same provider can
 coexist. See [Providers and plans](providers.md), including the explicit import
 procedure for existing installations. Point the CLI at
 the main service hostname; it derives the API by prefixing `api.` and validates
-`GET /v1/instance` before saving the instance. The API returns the installation's
+`GET /api/instance` before saving the instance. The API returns the installation's
 application domain, so the CLI does not need a separate domain setting.
 
 ```sh

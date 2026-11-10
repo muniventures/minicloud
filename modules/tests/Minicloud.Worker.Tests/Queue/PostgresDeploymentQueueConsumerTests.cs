@@ -18,6 +18,24 @@ public sealed class PostgresDeploymentQueueConsumerTests : IClassFixture<WorkerS
         _harness = harness;
     }
 
+    [Fact]
+    public async Task ApplicationDeletionBlocksClaimsEvenBeforeEnvironmentStatusChanges()
+    {
+        var (org, app) = await _harness.SeedOrgAndAppAsync("logical-deletion-claim");
+        await using (var db = _harness.CreateDbContext())
+        {
+            var application = new MinicloudApplication { Id = "appl-claim", OrganizationId = org.Id,
+                Name = "Logical", Slug = "logical", NormalizedSlug = "logical", DeletionStatus = "queued" };
+            db.Applications.Add(application);
+            var environment = await db.Apps.SingleAsync(x => x.Id == app.Id);
+            environment.Application = application;
+            environment.ApplicationId = application.Id;
+            db.Deployments.Add(CreateDeployment("dep-logical-delete", org.Id, app.Id, DeploymentStatus.Queued, DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+        Assert.Null(await CreateConsumer().TryClaimNextDeploymentAsync(default));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

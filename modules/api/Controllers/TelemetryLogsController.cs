@@ -9,7 +9,7 @@ namespace Minicloud.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("v1/apps/{appId}/logs")]
+[Route("api/environments/{appId}/logs")]
 public sealed class TelemetryLogsController : ControllerBase
 {
     private static IResult HiddenNotFound() =>

@@ -7,7 +7,7 @@ using Minicloud.Telemetry.Services;
 namespace Minicloud.Telemetry.Controllers;
 
 [ApiController]
-[Route("internal/v1/telemetry")]
+[Route("internal/api/telemetry")]
 public sealed class TelemetryManagementController(
     TelemetryAuthorityService authority,
     TelemetryStatusReporter reporter,

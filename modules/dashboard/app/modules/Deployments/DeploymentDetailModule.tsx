@@ -1,4 +1,4 @@
-import { getApp } from "@/api/appsApi";
+import { getEnvironmentDetail } from "@/api/environmentsApi";
 import { CollectionToolbar } from "@/core/components/CollectionToolbar";
 import { RecordToolbar } from "@/core/components/RecordToolbar";
 import { useRecordCollection } from "@/core/components/useRecordCollection";
@@ -10,7 +10,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { PageScaffold } from "../../core/components/PageScaffold";
 import {
-  buildDashboardPath,
   dashboardRoutes,
 } from "../../core/routing/dashboardRoutes";
 import { StatusBadge } from "../../core/components/StatusBadge";
@@ -25,7 +24,7 @@ import { DeploymentProgressPanel } from "./components/DeploymentProgressPanel";
 import { DeploymentServicesTable } from "./components/DeploymentServicesTable";
 
 export function DeploymentDetailModule() {
-  const { appId, deploymentId } = useParams();
+  const { deploymentId } = useParams();
   const [appName, setAppName] = useState("Deployment");
   const {
     snapshot,
@@ -44,7 +43,7 @@ export function DeploymentDetailModule() {
   useEffect(() => {
     if (!deployment?.appId) return;
     let canceled = false;
-    void getApp(deployment.appId)
+    void getEnvironmentDetail(deployment.appId)
       .then((app) => {
         if (!canceled) setAppName(app.name);
       })
@@ -91,42 +90,14 @@ export function DeploymentDetailModule() {
 
   return (
     <PageScaffold
-      breadcrumbs={
-        appId
-          ? [
-              { label: "Apps", to: dashboardRoutes.apps.path },
-              {
-                label: appName,
-                to: buildDashboardPath(dashboardRoutes.appDetail, {
-                  appId: deployment.appId,
-                }),
-              },
-              {
-                label: "Deployments",
-                to: buildDashboardPath(dashboardRoutes.appDeployments, {
-                  appId: deployment.appId,
-                }),
-              },
-              { label: "Deployment details" },
-            ]
-          : [
-              { label: "Deployments", to: dashboardRoutes.deployments.path },
-              { label: "Deployment details" },
-            ]
-      }
+      breadcrumbs={[
+        { label: "Deployments", to: dashboardRoutes.deployments.path },
+        { label: "Deployment details" },
+      ]}
       header={
         <RecordToolbar
           title={appName}
-          back={{
-            to: appId
-              ? buildDashboardPath(dashboardRoutes.appDeployments, {
-                  appId: deployment.appId,
-                })
-              : dashboardRoutes.deployments.path,
-            label: appId
-              ? `Back to ${appName} deployments`
-              : "Back to deployments",
-          }}
+          back={{ to: dashboardRoutes.deployments.path, label: "Back to deployments" }}
           status={<StatusBadge status={activeDeployment && deployment.cancellationRequestedAt ? "canceling" : deployment.status} />}
           metadata={
             <>

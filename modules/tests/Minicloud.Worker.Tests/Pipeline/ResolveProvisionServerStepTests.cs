@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Minicloud.Common.Models;
+using Minicloud.Common.Services;
 using Minicloud.Worker.Pipeline;
 using Minicloud.Worker.Pipeline.Steps;
 using Minicloud.Common.Providers;
@@ -321,6 +322,20 @@ public sealed class ResolveProvisionServerStepTests : IClassFixture<WorkerSqlite
     public void ServerNamePreservesProductionIdentity()
     {
         Assert.Equal("minicloud-muni-production-example-suite", ResolveProvisionServerStep.BuildServerName("muni", "example-suite"));
+    }
+
+    [Theory]
+    [InlineData("db-0123456789abcdef01234567")]
+    [InlineData("dbrepo-0123456789abcdef01234567")]
+    public void GeneratedDatabaseServerNamesUseTheSharedDiscoveryIdentity(string appSlug)
+    {
+        const string organization = "minicloud-staging";
+        var name = ResolveProvisionServerStep.BuildServerName(organization, appSlug);
+        Assert.Equal(ManagedServerName.ForApp(organization, appSlug), name);
+        Assert.InRange(name.Length, 1, 63);
+        var longOrganization = new string('o', 55);
+        Assert.Contains("hostname: " + ManagedServerName.ForHostname(longOrganization, appSlug),
+            ResolveProvisionServerStep.BuildCloudInit(longOrganization, appSlug));
     }
 
     [Theory]
