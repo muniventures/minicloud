@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc.ApplicationModels;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.Text.RegularExpressions;
 using Minicloud.Api.Auth;
 using Minicloud.Common.Data;
@@ -52,14 +53,6 @@ public static class MinicloudApiServiceCollectionExtensions
         {
             options.AddPolicy("Dashboard", policy =>
             {
-                policy.AllowAnyHeader().AllowAnyMethod();
-
-                if (environment.IsDevelopment())
-                {
-                    policy.AllowAnyOrigin();
-                    return;
-                }
-
                 var origins = configuration
                     .GetSection("Cors:AllowedOrigins")
                     .Get<string[]>()
@@ -68,13 +61,16 @@ public static class MinicloudApiServiceCollectionExtensions
 
                 if (origins is { Length: > 0 })
                 {
-                    policy.WithOrigins(origins);
+                    policy.WithOrigins(origins).AllowCredentials();
                 }
+
+                policy.AllowAnyHeader().AllowAnyMethod();
             });
         });
 
-        services.Configure<FirebaseAuthenticationOptions>(
-            configuration.GetSection(FirebaseAuthenticationOptions.SectionName));
+        services.Configure<KratosOptions>(
+            configuration.GetSection(KratosOptions.SectionName));
+        services.AddSingleton<AccountOriginValidator>();
         services.Configure<SecretEncryptionOptions>(
             configuration.GetSection(SecretEncryptionOptions.SectionName));
         services.Configure<OpenBaoSecretStoreOptions>(
@@ -92,7 +88,8 @@ public static class MinicloudApiServiceCollectionExtensions
 
             if (databaseProvider.Equals("Sqlite", StringComparison.OrdinalIgnoreCase))
             {
-                options.UseSqlite(SqliteDatabaseConfigurator.ConfigureConnectionString(connectionString ?? "Data Source=minicloud-dev.db"));
+                options.UseSqlite(SqliteDatabaseConfigurator.ConfigureConnectionString(connectionString ?? "Data Source=minicloud-dev.db"))
+                    .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
                 return;
             }
 
@@ -136,7 +133,14 @@ public static class MinicloudApiServiceCollectionExtensions
         services.Configure<ProviderCatalogOptions>(configuration.GetSection("Providers"));
         services.AddScoped<ProviderLegacyImportService>();
         services.AddScoped<IRuntimeTokenService, RuntimeTokenService>();
-        services.AddSingleton<IFirebaseTokenVerifier, FirebaseTokenVerifier>();
+        services.AddHttpClient<IKratosSessionValidator, KratosSessionValidator>(client =>
+            client.Timeout = TimeSpan.FromSeconds(10))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                AllowAutoRedirect = false,
+                UseCookies = false
+            });
+        services.AddScoped<BrowserSessionService>();
         services.AddScoped<DeploymentLifecycleService>();
         services.AddScoped<DeploymentCancellationService>();
         services.AddScoped<DeploymentPreparationService>();

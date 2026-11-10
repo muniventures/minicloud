@@ -481,6 +481,129 @@ namespace Minicloud.Common.Migrations
                     b.ToTable("audit_events", (string)null);
                 });
 
+            modelBuilder.Entity("Minicloud.Common.Models.BootstrapRecord", b =>
+                {
+                    b.Property<string>("InstallationId")
+                        .HasColumnType("text")
+                        .HasColumnName("installation_id");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("KratosIdentityId")
+                        .HasColumnType("text")
+                        .HasColumnName("kratos_identity_id");
+
+                    b.Property<string>("OperationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("operation_id");
+
+                    b.Property<string>("OrganizationId")
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset?>("SetupTokenExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("setup_token_expires_at");
+
+                    b.Property<string>("SetupTokenHash")
+                        .HasColumnType("text")
+                        .HasColumnName("setup_token_hash");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("state");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UserId")
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("InstallationId");
+
+                    b.HasIndex("OperationId")
+                        .IsUnique();
+
+                    b.ToTable("bootstrap_records", (string)null);
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.BrowserSession", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CsrfTokenHash")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("csrf_token_hash");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<DateTimeOffset>("IdleExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("idle_expires_at");
+
+                    b.Property<string>("KratosIdentityId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kratos_identity_id");
+
+                    b.Property<string>("KratosSessionId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kratos_session_id");
+
+                    b.Property<DateTimeOffset>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_seen_at");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("revoked_at");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("token_hash");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KratosSessionId")
+                        .IsUnique();
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("UserId", "RevokedAt", "IdleExpiresAt");
+
+                    b.ToTable("browser_sessions", (string)null);
+                });
+
             modelBuilder.Entity("Minicloud.Common.Models.CliLoginSession", b =>
                 {
                     b.Property<string>("Id")
@@ -2138,15 +2261,15 @@ namespace Minicloud.Common.Migrations
                         .HasColumnType("text")
                         .HasColumnName("plan_id");
 
-                    b.Property<string>("Slug")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("slug");
-
                     b.Property<string>("RuntimeParentSlug")
                         .HasMaxLength(63)
                         .HasColumnType("character varying(63)")
                         .HasColumnName("runtime_parent_slug");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("slug");
 
                     b.Property<string>("SourceBranch")
                         .HasMaxLength(63)
@@ -3255,10 +3378,9 @@ namespace Minicloud.Common.Migrations
                         .HasColumnType("text")
                         .HasColumnName("email");
 
-                    b.Property<string>("FirebaseUid")
-                        .IsRequired()
+                    b.Property<string>("KratosIdentityId")
                         .HasColumnType("text")
-                        .HasColumnName("firebase_uid");
+                        .HasColumnName("kratos_identity_id");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -3269,7 +3391,7 @@ namespace Minicloud.Common.Migrations
                     b.HasIndex("Email")
                         .IsUnique();
 
-                    b.HasIndex("FirebaseUid")
+                    b.HasIndex("KratosIdentityId")
                         .IsUnique();
 
                     b.ToTable("users", (string)null);
@@ -3405,6 +3527,17 @@ namespace Minicloud.Common.Migrations
                     b.Navigation("App");
 
                     b.Navigation("Organization");
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.BrowserSession", b =>
+                {
+                    b.HasOne("Minicloud.Common.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Minicloud.Common.Models.CliLoginSession", b =>

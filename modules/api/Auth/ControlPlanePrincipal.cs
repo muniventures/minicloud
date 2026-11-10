@@ -13,9 +13,10 @@ public sealed record ControlPlanePrincipal(
     string? UserId,
     string? ApiKeyId,
     string? OrganizationId,
-    IReadOnlySet<string> Scopes)
+    IReadOnlySet<string> Scopes,
+    string? BrowserSessionId = null)
 {
-    public bool IsDashboardUser => Kind == "firebase";
+    public bool IsDashboardUser => Kind == "browser_session";
     public bool IsApiKey => Kind == "api_key";
 }
 
@@ -45,9 +46,9 @@ public static class ControlPlanePrincipalExtensions
 public sealed class ControlPlanePrincipalResolver(
     MinicloudDbContext db,
     IApiKeyTokenService apiKeyTokenService,
-    IFirebaseTokenVerifier firebaseTokenVerifier,
-    IIdGenerator ids,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    BrowserSessionService browserSessions,
+    IKratosSessionValidator kratosSessions)
 {
     public async Task<ControlPlanePrincipal?> ResolveAsync(string bearerToken, CancellationToken cancellationToken)
     {
@@ -56,7 +57,35 @@ public sealed class ControlPlanePrincipalResolver(
             return await ResolveApiKeyAsync(bearerToken, cancellationToken);
         }
 
-        return await ResolveFirebaseTokenAsync(bearerToken, cancellationToken);
+        return null;
+    }
+
+    public async Task<ControlPlanePrincipal?> ResolveBrowserSessionAsync(
+        string cookie,
+        CancellationToken cancellationToken)
+    {
+        var session = await browserSessions.ValidateAsync(cookie, cancellationToken);
+        if (session is null)
+        {
+            return null;
+        }
+
+        if (!await kratosSessions.IsSessionActiveAsync(
+                session.KratosSessionId,
+                session.KratosIdentityId,
+                cancellationToken))
+        {
+            await browserSessions.RevokeAsync(cookie, cancellationToken);
+            return null;
+        }
+
+        return new ControlPlanePrincipal(
+            "browser_session",
+            session.UserId,
+            null,
+            null,
+            new HashSet<string>(StringComparer.Ordinal),
+            session.Id);
     }
 
     private async Task<ControlPlanePrincipal?> ResolveApiKeyAsync(string token, CancellationToken cancellationToken)
@@ -93,34 +122,6 @@ public sealed class ControlPlanePrincipalResolver(
         }
 
         return null;
-    }
-
-    private async Task<ControlPlanePrincipal?> ResolveFirebaseTokenAsync(string token, CancellationToken cancellationToken)
-    {
-        var verifiedToken = await firebaseTokenVerifier.VerifyAsync(token, cancellationToken);
-        if (verifiedToken is null)
-        {
-            return null;
-        }
-
-        var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.FirebaseUid == verifiedToken.Uid, cancellationToken);
-        if (user is null)
-        {
-            var now = timeProvider.GetUtcNow();
-            user = new User
-            {
-                Id = ids.NewId("usr"),
-                FirebaseUid = verifiedToken.Uid,
-                Email = verifiedToken.Email,
-                DisplayName = verifiedToken.DisplayName,
-                CreatedAt = now,
-                UpdatedAt = now
-            };
-            db.Users.Add(user);
-            await db.SaveChangesAsync(cancellationToken);
-        }
-
-        return new ControlPlanePrincipal("firebase", user.Id, null, null, new HashSet<string>(StringComparer.Ordinal));
     }
 
     private static string? ExtractApiKeyPrefix(string token)

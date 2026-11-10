@@ -6,12 +6,45 @@ public sealed class User
 {
     [Key]
     public string Id { get; set; } = default!;
-    public string FirebaseUid { get; set; } = default!;
+    public string? KratosIdentityId { get; set; }
     public string Email { get; set; } = default!;
     public string? DisplayName { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public List<OrganizationMember> Memberships { get; set; } = [];
+}
+
+public sealed class BrowserSession
+{
+    [Key]
+    public string Id { get; set; } = default!;
+    public string UserId { get; set; } = default!;
+    public User User { get; set; } = default!;
+    public string KratosIdentityId { get; set; } = default!;
+    public string KratosSessionId { get; set; } = default!;
+    public string TokenHash { get; set; } = default!;
+    public string CsrfTokenHash { get; set; } = default!;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset LastSeenAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset IdleExpiresAt { get; set; }
+    public DateTimeOffset? RevokedAt { get; set; }
+}
+
+public sealed class BootstrapRecord
+{
+    [Key]
+    public string InstallationId { get; set; } = default!;
+    public string OperationId { get; set; } = default!;
+    public string State { get; set; } = default!;
+    public string? SetupTokenHash { get; set; }
+    public DateTimeOffset? SetupTokenExpiresAt { get; set; }
+    public string? KratosIdentityId { get; set; }
+    public string? UserId { get; set; }
+    public string? OrganizationId { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 }
 
 public sealed class Organization

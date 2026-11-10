@@ -21,18 +21,48 @@ public sealed class ControlPlaneAuthenticationHandler(
             return AuthenticateResult.NoResult();
         }
         var authorization = Request.Headers.Authorization.ToString();
-        if (string.IsNullOrWhiteSpace(authorization) || !authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(authorization))
+        {
+            if (!authorization.StartsWith("Bearer", StringComparison.OrdinalIgnoreCase))
+            {
+                return AuthenticateResult.NoResult();
+            }
+
+            if (authorization.Length <= "Bearer".Length ||
+                !char.IsWhiteSpace(authorization["Bearer".Length]))
+            {
+                return AuthenticateResult.Fail("Invalid bearer token.");
+            }
+
+            var token = authorization["Bearer".Length..].Trim();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return AuthenticateResult.Fail("Invalid bearer token.");
+            }
+
+            var bearerPrincipal = await principalResolver.ResolveAsync(token, Context.RequestAborted);
+            return bearerPrincipal is null
+                ? AuthenticateResult.Fail("Invalid bearer token.")
+                : AuthenticateResult.Success(CreateTicket(bearerPrincipal));
+        }
+
+        var cookie = Request.Cookies["__Host-minicloud-session"];
+        if (string.IsNullOrWhiteSpace(cookie))
         {
             return AuthenticateResult.NoResult();
         }
 
-        var token = authorization["Bearer ".Length..].Trim();
-        var principal = await principalResolver.ResolveAsync(token, Context.RequestAborted);
+        var principal = await principalResolver.ResolveBrowserSessionAsync(cookie, Context.RequestAborted);
         if (principal is null)
         {
-            return AuthenticateResult.Fail("Invalid bearer token.");
+            return AuthenticateResult.NoResult();
         }
 
+        return AuthenticateResult.Success(CreateTicket(principal));
+    }
+
+    private static AuthenticationTicket CreateTicket(ControlPlanePrincipal principal)
+    {
         var claims = new List<Claim> { new("auth_kind", principal.Kind) };
         if (principal.UserId is not null)
         {
@@ -46,9 +76,13 @@ public sealed class ControlPlaneAuthenticationHandler(
         {
             claims.Add(new Claim("organization_id", principal.OrganizationId));
         }
+        if (principal.BrowserSessionId is not null)
+        {
+            claims.Add(new Claim("browser_session_id", principal.BrowserSessionId));
+        }
         claims.AddRange(principal.Scopes.Select(scope => new Claim("scope", scope)));
 
-        var identity = new ClaimsIdentity(claims, SchemeName);
-        return AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName));
+        var identity = new ClaimsIdentity(claims, ControlPlaneAuthenticationHandler.SchemeName);
+        return new AuthenticationTicket(new ClaimsPrincipal(identity), ControlPlaneAuthenticationHandler.SchemeName);
     }
 }

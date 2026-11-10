@@ -47,7 +47,7 @@ public sealed class GrafanaProvisioningService(
     {
         if (!principal.IsDashboardUser || principal.UserId is null)
         {
-            return Unavailable(0, "Grafana access requires a Firebase-authenticated dashboard user.");
+            return Unavailable(0, "Grafana access requires an authenticated browser session.");
         }
 
         var app = await db.Apps.AsNoTracking().SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);

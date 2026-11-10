@@ -366,7 +366,7 @@ public sealed class TelemetryQueryTests : IClassFixture<SqliteTestHarness>
         db.Users.Add(new User
         {
             Id = userId,
-            FirebaseUid = $"firebase_{userId}",
+            KratosIdentityId = $"kratos_{userId}",
             Email = $"{userId}@example.com",
             CreatedAt = now,
             UpdatedAt = now
@@ -381,7 +381,7 @@ public sealed class TelemetryQueryTests : IClassFixture<SqliteTestHarness>
             UpdatedAt = now
         });
         await db.SaveChangesAsync();
-        return new ControlPlanePrincipal("firebase", userId, null, null, new HashSet<string>(StringComparer.Ordinal));
+        return new ControlPlanePrincipal("browser_session", userId, null, null, new HashSet<string>(StringComparer.Ordinal));
     }
 
     private sealed class MutableTimeProvider(DateTimeOffset now) : TimeProvider

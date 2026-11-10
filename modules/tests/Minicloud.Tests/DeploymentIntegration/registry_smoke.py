@@ -328,7 +328,6 @@ services:
             api_container = compose("ps", "-q", "api").stdout.strip()
             api_image = component.run("docker", "inspect", api_container, "--format", "{{.Config.Image}}").stdout.strip()
             restore_env = {"ASPNETCORE_ENVIRONMENT": "Production", "Database__Provider": "Postgres", "Database__RunMigrationsOnStartup": "false",
-                           "Firebase__ProjectId": "minicloud-test",
                            "ConnectionStrings__Minicloud": "Host=postgres;Database=registry_restore;Username=minicloud;Password=" + component.ENV["TEST_POSTGRES_PASSWORD"],
                            "Registry__Enabled": "true", "Registry__AllowInsecureLoopback": "true", "Registry__PublicUrl": f"http://127.0.0.1:{restore_port}",
                            "Registry__BackendUrl": f"http://{restore_registry}:5000", "Registry__CertificatePath": "/auth/cert.pem", "Registry__KeyPath": "/auth/key.pem", "Registry__StoragePath": "/registry-data"}

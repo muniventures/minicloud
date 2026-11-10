@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Minicloud.Api.Auth;
 using Minicloud.Common.Data;
 using Minicloud.Api.Providers;
 
@@ -35,7 +36,9 @@ public static class MinicloudApplicationExtensions
 
         app.UseHttpsRedirection();
         app.UseCors("Dashboard");
+        app.UseMiddleware<KratosUnavailableMiddleware>();
         app.UseAuthentication();
+        app.UseMiddleware<BrowserRequestSecurityMiddleware>();
         app.UseAuthorization();
     }
 }
