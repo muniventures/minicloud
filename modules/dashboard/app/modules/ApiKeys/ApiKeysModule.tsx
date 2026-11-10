@@ -47,6 +47,10 @@ import { PageScaffold } from "../../core/components/PageScaffold";
 import type { ApiKeyResponse, ApiKeyScope } from "../../models/controlPlane";
 
 const scopes: ApiKeyScope[] = [
+  "databases:read",
+  "databases:manage",
+  "secrets:read",
+  "secrets:write",
   "apps:read",
   "apps:write",
   "deployments:create",
