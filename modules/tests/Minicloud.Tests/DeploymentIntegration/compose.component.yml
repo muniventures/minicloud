@@ -33,7 +33,6 @@ services:
       openbao: {condition: service_healthy}
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      Firebase__ProjectId: minicloud-test
       Database__Provider: Postgres
       Database__RunMigrationsOnStartup: "true"
       # This fixture deliberately seeds the pre-catalog schema/plan contract.

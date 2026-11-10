@@ -25,7 +25,7 @@ public sealed class SqliteTestHarnessTests : IClassFixture<SqliteTestHarness>
             var user = new User
             {
                 Id = "usr_sqlite_test",
-                FirebaseUid = "firebase_sqlite_test",
+                KratosIdentityId = "kratos_sqlite_test",
                 Email = "sqlite-test@example.com",
                 DisplayName = "SQLite Test",
                 CreatedAt = now,

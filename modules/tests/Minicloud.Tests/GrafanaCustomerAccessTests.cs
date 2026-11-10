@@ -511,7 +511,7 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
     private static DateTimeOffset Now() => new(2026, 9, 8, 12, 0, 0, TimeSpan.Zero);
 
     private static ControlPlanePrincipal FirebasePrincipal(string userId) =>
-        new("firebase", userId, null, null, new HashSet<string>(StringComparer.Ordinal));
+        new("browser_session", userId, null, null, new HashSet<string>(StringComparer.Ordinal));
 
     private async Task<(Organization Org, MinicloudApp App)> SeedOrgAppAsync(MinicloudDbContext db, string tag, string slug)
     {
@@ -526,7 +526,7 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
         db.Apps.Add(app);
         if (!await db.Users.AnyAsync(x => x.Id == $"usr_{tag}"))
         {
-            db.Users.Add(new User { Id = $"usr_{tag}", FirebaseUid = $"firebase_usr_{tag}", Email = $"usr_{tag}@example.com", CreatedAt = now, UpdatedAt = now });
+            db.Users.Add(new User { Id = $"usr_{tag}", KratosIdentityId = $"kratos_usr_{tag}", Email = $"usr_{tag}@example.com", CreatedAt = now, UpdatedAt = now });
         }
 
         db.OrganizationMembers.Add(new OrganizationMember
@@ -548,7 +548,7 @@ public sealed class GrafanaCustomerAccessTests : IClassFixture<SqliteTestHarness
     {
         if (!await db.Users.AnyAsync(x => x.Id == userId))
         {
-            db.Users.Add(new User { Id = userId, FirebaseUid = $"firebase_{userId}", Email = $"{userId}@example.com", CreatedAt = now, UpdatedAt = now });
+            db.Users.Add(new User { Id = userId, KratosIdentityId = $"kratos_{userId}", Email = $"{userId}@example.com", CreatedAt = now, UpdatedAt = now });
         }
 
         db.OrganizationMembers.Add(new OrganizationMember

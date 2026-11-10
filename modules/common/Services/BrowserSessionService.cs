@@ -30,10 +30,11 @@ public sealed class BrowserSessionService(
 
         var now = timeProvider.GetUtcNow();
         var cookie = CreateSecret();
-        var csrfToken = CreateSecret();
+        var sessionId = ids.NewId("bsess");
+        var csrfToken = CreateCsrfToken(cookie, sessionId);
         var session = new BrowserSession
         {
-            Id = ids.NewId("bsess"),
+            Id = sessionId,
             UserId = userId,
             KratosIdentityId = kratosIdentityId,
             KratosSessionId = kratosSessionId,
@@ -95,6 +96,28 @@ public sealed class BrowserSessionService(
         }
     }
 
+    public async Task RevokeByIdAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var session = await db.BrowserSessions
+            .SingleOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
+        if (session is not null && session.RevokedAt is null)
+        {
+            session.RevokedAt = timeProvider.GetUtcNow();
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public string? GetCsrfToken(BrowserSession session, string cookie)
+    {
+        var csrfToken = CreateCsrfToken(cookie, session.Id);
+        return VerifySecret(session.CsrfTokenHash, csrfToken) ? csrfToken : null;
+    }
+
+    public async Task<BrowserSession?> FindByIdAsync(string sessionId, CancellationToken cancellationToken) =>
+        await db.BrowserSessions
+            .Include(x => x.User)
+            .SingleOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
+
     public async Task RevokeUserSessionsAsync(string userId, CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
@@ -105,14 +128,7 @@ public sealed class BrowserSessionService(
 
     public bool ValidateCsrf(BrowserSession session, string? csrfToken)
     {
-        if (string.IsNullOrWhiteSpace(csrfToken))
-        {
-            return false;
-        }
-
-        var expected = Convert.FromHexString(session.CsrfTokenHash);
-        var supplied = SHA256.HashData(Encoding.UTF8.GetBytes(csrfToken));
-        return expected.Length == supplied.Length && CryptographicOperations.FixedTimeEquals(expected, supplied);
+        return !string.IsNullOrWhiteSpace(csrfToken) && VerifySecret(session.CsrfTokenHash, csrfToken);
     }
 
     public static string HashSecret(string secret) =>
@@ -123,6 +139,23 @@ public sealed class BrowserSessionService(
             .TrimEnd('=')
             .Replace('+', '-')
             .Replace('/', '_');
+
+    private static string CreateCsrfToken(string cookie, string sessionId)
+    {
+        var key = Encoding.UTF8.GetBytes(cookie);
+        var value = Encoding.UTF8.GetBytes(sessionId);
+        return Convert.ToBase64String(HMACSHA256.HashData(key, value))
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+    }
+
+    private static bool VerifySecret(string storedHash, string secret)
+    {
+        var expected = Convert.FromHexString(storedHash);
+        var supplied = SHA256.HashData(Encoding.UTF8.GetBytes(secret));
+        return expected.Length == supplied.Length && CryptographicOperations.FixedTimeEquals(expected, supplied);
+    }
 
     private static DateTimeOffset Min(DateTimeOffset left, DateTimeOffset right) =>
         left < right ? left : right;

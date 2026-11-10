@@ -57,7 +57,7 @@ public sealed class GrafanaSessionService(
     {
         if (!principal.IsDashboardUser || principal.UserId is null)
         {
-            return new GrafanaLaunchOutcome(false, null, null, null, "firebase_required");
+            return new GrafanaLaunchOutcome(false, null, null, null, "browser_session_required");
         }
 
         var safeDestination = string.IsNullOrWhiteSpace(destination) ? "/explore" : destination.Trim();
@@ -236,6 +236,17 @@ public sealed class GrafanaSessionService(
         }
     }
 
+    public async Task RevokeUserSessionsAsync(string userId, CancellationToken cancellationToken)
+    {
+        var now = timeProvider.GetUtcNow();
+        await db.GrafanaProxySessions
+            .Where(x => x.MinicloudUserId == userId && x.RevokedAt == null)
+            .ExecuteUpdateAsync(update => update.SetProperty(x => x.RevokedAt, now), cancellationToken);
+        await db.GrafanaLaunchCodes
+            .Where(x => x.MinicloudUserId == userId && x.ConsumedAt == null)
+            .ExecuteUpdateAsync(update => update.SetProperty(x => x.ConsumedAt, now), cancellationToken);
+    }
+
     /// <summary>
     /// Server-generated Explore launch URL only: relative, fixed path, no caller
     /// input beyond the app identity resolved from storage. Never an open redirect.
@@ -289,7 +300,7 @@ public sealed class GrafanaSessionService(
         bool isMember;
         try
         {
-            var principal = new ControlPlanePrincipal("firebase", userId, null, null, new HashSet<string>(StringComparer.Ordinal));
+            var principal = new ControlPlanePrincipal("browser_session", userId, null, null, new HashSet<string>(StringComparer.Ordinal));
             isMember = await authorization.CanAccessOrganizationAsync(principal.ToActorIdentity(), organizationId, OrganizationAction.ReadApplicationLogs, cancellationToken);
         }
         catch (Exception ex)

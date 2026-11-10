@@ -12,7 +12,7 @@ using static Minicloud.Api.Controllers.EndpointResults;
 namespace Minicloud.Api.Controllers;
 
 /// <summary>
-/// T20 Firebase-authorized Grafana launch/exchange/logout endpoints. The launch
+/// Browser-session-authorized Grafana launch/exchange/logout endpoints. The launch
 /// endpoint provisions idempotently and returns a single-use 60-second code; the
 /// POST-only exchange sets the Secure/HttpOnly/SameSite=Lax host-only proxy
 /// cookie (15m idle / 1h absolute) after Origin validation.
@@ -112,7 +112,7 @@ public sealed class GrafanaSessionController(
             {
                 "unknown_app" => HiddenNotFound(),
                 "invalid_destination" => Results.BadRequest(new ErrorResponse(new ErrorBody("validation_failed", "Destination must be /explore or /d/{uid}.", []))),
-                "firebase_required" => EndpointResults.Forbidden(),
+                "browser_session_required" => EndpointResults.Forbidden(),
                 _ => EndpointResults.Problem("grafana_unavailable", "Log browsing is temporarily unavailable; retry with backoff.", StatusCodes.Status503ServiceUnavailable)
             };
         }

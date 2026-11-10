@@ -103,7 +103,7 @@ public sealed class TelemetryControlPlaneTests : IClassFixture<SqliteTestHarness
 
         var svc = CreateTelemetryService(db, time);
         var manager = ManagePrincipal($"usr_{tag}");
-        var viewer = new ControlPlanePrincipal("firebase", $"viewer_{tag}", null, null, new HashSet<string>(StringComparer.Ordinal));
+        var viewer = new ControlPlanePrincipal("browser_session", $"viewer_{tag}", null, null, new HashSet<string>(StringComparer.Ordinal));
         await EnsureUserAsync(db, $"viewer_{tag}", time.GetUtcNow());
         db.OrganizationMembers.Add(new OrganizationMember
         {
@@ -334,8 +334,8 @@ public sealed class TelemetryControlPlaneTests : IClassFixture<SqliteTestHarness
         Assert.False(await authorization.CanAccessOrganizationAsync(logsReader.ToActorIdentity(), org.Id, OrganizationAction.ManageTelemetry, ct));
         Assert.True(await authorization.CanAccessOrganizationAsync(telemetryManager.ToActorIdentity(), org.Id, OrganizationAction.ManageTelemetry, ct));
 
-        var viewer = new ControlPlanePrincipal("firebase", $"viewer_{tag}", null, null, new HashSet<string>(StringComparer.Ordinal));
-        var developer = new ControlPlanePrincipal("firebase", $"dev_{tag}", null, null, new HashSet<string>(StringComparer.Ordinal));
+        var viewer = new ControlPlanePrincipal("browser_session", $"viewer_{tag}", null, null, new HashSet<string>(StringComparer.Ordinal));
+        var developer = new ControlPlanePrincipal("browser_session", $"dev_{tag}", null, null, new HashSet<string>(StringComparer.Ordinal));
         await EnsureUserAsync(db, $"viewer_{tag}", now);
         await EnsureUserAsync(db, $"dev_{tag}", now);
         db.OrganizationMembers.Add(new OrganizationMember
@@ -360,7 +360,7 @@ public sealed class TelemetryControlPlaneTests : IClassFixture<SqliteTestHarness
     private static DateTimeOffset Now() => new(2026, 9, 8, 12, 0, 0, TimeSpan.Zero);
 
     private static ControlPlanePrincipal ManagePrincipal(string userId) =>
-        new("firebase", userId, null, null, new HashSet<string>(StringComparer.Ordinal));
+        new("browser_session", userId, null, null, new HashSet<string>(StringComparer.Ordinal));
 
     private async Task<(Organization Org, MinicloudApp App)> SeedOrgAppAsync(
         MinicloudDbContext db, string tag, string slug, Organization? existingOrg = null)
@@ -462,7 +462,7 @@ public sealed class TelemetryControlPlaneTests : IClassFixture<SqliteTestHarness
         db.Users.Add(new User
         {
             Id = userId,
-            FirebaseUid = $"firebase_{userId}",
+            KratosIdentityId = $"kratos_{userId}",
             Email = $"{userId}@example.com",
             CreatedAt = now,
             UpdatedAt = now

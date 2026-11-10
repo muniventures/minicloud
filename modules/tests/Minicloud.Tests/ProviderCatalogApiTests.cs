@@ -28,6 +28,7 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
     private readonly SqliteConnection _connection = new("Data Source=:memory:");
     private CatalogApiFactory _factory = default!;
     private string _managementToken = default!;
+    private readonly Dictionary<string, string> _dashboardCsrf = new(StringComparer.Ordinal);
     private const string OrganizationId = "org_provider_catalog";
 
     public async Task InitializeAsync()
@@ -395,7 +396,17 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
     private HttpClient Client(string? token = null)
     {
         var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token ?? _managementToken);
+        var credential = token ?? _managementToken;
+        if (_dashboardCsrf.TryGetValue(credential, out var csrf))
+        {
+            client.DefaultRequestHeaders.Add("Cookie", $"__Host-minicloud-session={credential}");
+            client.DefaultRequestHeaders.Add("Origin", "https://dashboard.example.test");
+            client.DefaultRequestHeaders.Add("X-Minicloud-CSRF", csrf);
+        }
+        else
+        {
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", credential);
+        }
         return client;
     }
 
@@ -438,14 +449,17 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
     }
     private async Task<string> AddDashboardUserAsync(OrganizationRole role)
     {
-        var token = "dashboard_" + role;
+        var identityId = "identity_" + role;
         await using var scope = _factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
-        var user = new User { Id = token, FirebaseUid = token, Email = token + "@example.test" };
+        var user = new User { Id = "user_" + role, KratosIdentityId = identityId, Email = role + "@example.test" };
         db.Users.Add(user);
         db.OrganizationMembers.Add(new OrganizationMember { Id = "member_" + role, OrganizationId = OrganizationId, UserId = user.Id, Role = role });
         await db.SaveChangesAsync();
-        return token;
+        var sessions = scope.ServiceProvider.GetRequiredService<BrowserSessionService>();
+        var session = await sessions.CreateAsync(user.Id, identityId, "session_" + role, CancellationToken.None);
+        _dashboardCsrf.Add(session.Cookie, session.CsrfToken);
+        return session.Cookie;
     }
     public async Task DisposeAsync() { await _factory.DisposeAsync(); await _connection.DisposeAsync(); }
 
@@ -459,7 +473,8 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Database:Provider"] = "Sqlite", ["Database:RunMigrationsOnStartup"] = "false",
-                ["ConnectionStrings:Minicloud"] = "Data Source=:memory:", ["Firebase:ProjectId"] = "minicloud-test",
+                ["ConnectionStrings:Minicloud"] = "Data Source=:memory:",
+                ["Cors:AllowedOrigins:0"] = "https://dashboard.example.test",
                 ["OpenBao:EnvironmentPrefix"] = "provider-catalog-tests"
             }));
             builder.ConfigureTestServices(services =>
@@ -468,15 +483,18 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
                 services.RemoveAll<Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptionsConfiguration<MinicloudDbContext>>();
                 services.AddDbContext<MinicloudDbContext>(options => options.UseSqlite(connection));
                 services.RemoveAll<ISecretStore>(); services.AddSingleton<ISecretStore>(Secrets);
-                services.RemoveAll<IFirebaseTokenVerifier>(); services.AddSingleton<IFirebaseTokenVerifier>(new FakeFirebase());
+                services.RemoveAll<IKratosSessionValidator>(); services.AddSingleton<IKratosSessionValidator>(new FakeKratos());
                 services.AddHttpClient(ProviderAccountClientFactory.HttpClientName).ConfigurePrimaryHttpMessageHandler(() => Cloud);
             });
         }
     }
-    private sealed class FakeFirebase : IFirebaseTokenVerifier
+    private sealed class FakeKratos : IKratosSessionValidator
     {
-        public Task<VerifiedFirebaseToken?> VerifyAsync(string token, CancellationToken cancellationToken) =>
-            Task.FromResult(token.StartsWith("dashboard_", StringComparison.Ordinal) ? new VerifiedFirebaseToken(token, token + "@example.test", null) : null);
+        public Task<bool> IsSessionActiveAsync(string sessionId, string identityId, CancellationToken cancellationToken) =>
+            Task.FromResult(sessionId.StartsWith("session_", StringComparison.Ordinal));
+
+        public Task RevokeSessionAsync(string sessionId, CancellationToken cancellationToken) =>
+            Task.CompletedTask;
     }
     private sealed class FakeSecrets : ISecretStore
     {

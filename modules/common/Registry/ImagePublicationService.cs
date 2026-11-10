@@ -169,7 +169,7 @@ public sealed class ImagePublicationService(
             var actor = new ActorIdentity("api_key", null, key.Id, key.OrganizationId, JsonSerializer.Deserialize<HashSet<string>>(key.ScopesJson) ?? []);
             return await authorization.CanAccessAppAsync(actor, session.AppId, OrganizationAction.CreateDeployments, ct) ? session : null;
         }
-        var user = new ActorIdentity("firebase", session.SubjectId, null, null, new HashSet<string>());
+        var user = new ActorIdentity("browser_session", session.SubjectId, null, null, new HashSet<string>());
         return await authorization.CanAccessAppAsync(user, session.AppId, OrganizationAction.CreateDeployments, ct) ? session : null;
     }
 
