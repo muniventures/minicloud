@@ -261,6 +261,42 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DispatchRejectsActiveDeploymentWithStructuredCodeAndPreservesOwnership()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var seed = await SeedAsync("org_active_redispatch", "app_active_redispatch", now);
+        const string deploymentId = "dep_active_redispatch";
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+            db.Deployments.Add(new Deployment
+            {
+                Id = deploymentId,
+                OrganizationId = seed.OrganizationId,
+                AppId = seed.AppId,
+                Status = DeploymentStatus.Deploying,
+                OwnershipToken = "synthetic-active-owner",
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var response = await client.PostAsync($"/api/deployments/{deploymentId}/dispatch", null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var error = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("deployment_active", error.RootElement.GetProperty("error").GetProperty("code").GetString());
+        await using var verifyScope = _factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+        var deployment = await verifyDb.Deployments.SingleAsync(x => x.Id == deploymentId);
+        Assert.Equal(DeploymentStatus.Deploying, deployment.Status);
+        Assert.Equal("synthetic-active-owner", deployment.OwnershipToken);
+    }
+
+    [Fact]
     public async Task LocalBuildPreparation_IsVisibleIdempotentAndCompletesSameRecord()
     {
         var seed = await SeedAsync("org_local_prepare", "app_local_prepare", DateTimeOffset.UtcNow);
