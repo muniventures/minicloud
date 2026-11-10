@@ -56,3 +56,5 @@ dist/
 *.tsbuildinfo
 __pycache__/
 *.pyc
+
+**/.vite/
