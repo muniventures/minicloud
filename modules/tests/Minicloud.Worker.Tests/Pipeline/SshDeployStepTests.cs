@@ -24,6 +24,76 @@ public sealed class SshDeployStepTests : IClassFixture<WorkerSqliteTestHarness>
     }
 
     [Fact]
+    public async Task RedispatchGateWaitsForCurrentPreparationInsteadOfStaleMarker()
+    {
+        if (OperatingSystem.IsWindows()) { return; }
+        var (org, app) = await _harness.SeedOrgAndAppAsync("redispatch-gate");
+        var now = DateTimeOffset.UtcNow;
+        var deployment = Deployment("dep-redispatch-gate", org.Id, app.Id, DeploymentStatus.Deploying, now);
+        deployment.OwnershipToken = "owner-current-attempt";
+        await using (var db = _harness.CreateDbContext())
+        {
+            db.Deployments.Add(deployment);
+            await db.SaveChangesAsync();
+        }
+        var directory = Directory.CreateTempSubdirectory("minicloud-redispatch-gate-");
+        var preparation = Path.Combine(directory.FullName, "preparation.ready");
+        var gate = Path.Combine(directory.FullName, "rollout.ready");
+        await File.WriteAllTextAsync(preparation, "ready\n");
+        var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        try
+        {
+            var ssh = new MockSshDeploymentClient(commandCallback: async command =>
+            {
+                var info = new System.Diagnostics.ProcessStartInfo("bash")
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                info.ArgumentList.Add("-c");
+                info.ArgumentList.Add("sleep() { echo waiting; command sleep 0.01; }; " + command);
+                using var process = System.Diagnostics.Process.Start(info)!;
+                var output = Task.Run(async () =>
+                {
+                    while (await process.StandardOutput.ReadLineAsync(timeout.Token) is { } line)
+                    {
+                        if (line == "waiting") { waiting.TrySetResult(); }
+                    }
+                });
+                try
+                {
+                    await process.WaitForExitAsync(timeout.Token);
+                    await output;
+                    return process.ExitCode;
+                }
+                finally
+                {
+                    if (!process.HasExited) { process.Kill(entireProcessTree: true); }
+                }
+            });
+            var options = Options.Create(new DeploymentPipelineOptions());
+            var step = new SshDeployStep(_harness.CreateScopeFactory(), new MockArtifactRetriever([]), ssh,
+                Options.Create(new SshDeploymentOptions { PrivateKeyContent = "MOCK_KEY" }), options,
+                new TestHostEnvironment(), TimeProvider.System);
+            var task = step.ReleaseRolloutGateAsync(new PipelineStepContext
+            {
+                DeploymentId = deployment.Id, OrganizationId = org.Id, AppId = app.Id,
+                OwnershipToken = deployment.OwnershipToken, ServerIp = "192.0.2.77", RemoteDirectory = directory.FullName
+            }, timeout.Token);
+            Assert.Same(waiting.Task, await Task.WhenAny(waiting.Task, task).WaitAsync(timeout.Token));
+            Assert.False(File.Exists(gate));
+            // The retry uploader clears old markers before publishing current preparation.
+            File.Delete(preparation);
+            File.Delete(gate);
+            await File.WriteAllTextAsync(preparation, deployment.OwnershipToken + "\n", timeout.Token);
+            await task.WaitAsync(timeout.Token);
+            Assert.True(File.Exists(gate));
+        }
+        finally { directory.Delete(true); }
+    }
+
+    [Fact]
     public async Task UnpinnedAssetsResolveOnlySuccessfulPublicationsInTheOwningApp()
     {
         var (org, app) = await _harness.SeedOrgAndAppAsync("asset-current");

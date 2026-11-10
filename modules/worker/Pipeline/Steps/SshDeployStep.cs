@@ -256,7 +256,7 @@ public sealed partial class SshDeployStep : IPipelineStep
     public async Task ReleaseRolloutGateAsync(PipelineStepContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (string.IsNullOrWhiteSpace(context.ServerIp) || string.IsNullOrWhiteSpace(context.RemoteDirectory))
+        if (string.IsNullOrWhiteSpace(context.ServerIp) || string.IsNullOrWhiteSpace(context.RemoteDirectory) || string.IsNullOrWhiteSpace(context.OwnershipToken))
         {
             throw new PipelineStepException(FailureCode, "Cannot release rollout gate before SSH preparation starts.");
         }
@@ -265,10 +265,11 @@ public sealed partial class SshDeployStep : IPipelineStep
         var username = string.IsNullOrWhiteSpace(context.SshUsername) ? _sshOptions.Username : context.SshUsername;
         var preparationPath = $"{context.RemoteDirectory}/preparation.ready";
         var gatePath = $"{context.RemoteDirectory}/rollout.ready";
+        var preparationReady = $"test \"$(cat {EscapeShell(preparationPath)} 2>/dev/null)\" = {EscapeShell(context.OwnershipToken)}";
         var waitCommand =
-            $"umask 077; i=0; while ! test -f {EscapeShell(preparationPath)} && test $i -lt 720; " +
+            $"umask 077; i=0; while ! {preparationReady} && test $i -lt 720; " +
             "do sleep 1; i=$((i+1)); done; " +
-            $"test -f {EscapeShell(preparationPath)}";
+            preparationReady;
         var exitCode = await _sshClient.ExecuteCommandAsync(
             context.ServerIp, username, privateKey, waitCommand, (_, _) => Task.CompletedTask, cancellationToken);
         if (exitCode != 0)

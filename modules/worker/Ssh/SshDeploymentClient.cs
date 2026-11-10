@@ -331,7 +331,7 @@ public sealed class SshDeploymentClient : ISshDeploymentClient
                     readySftp.ChangePermissions($"{remoteDir}/worker.lease", PrivatePayloadFileMode);
                 }
                 var readyPath = $"{remoteDir}/preparation.ready";
-                UploadText(readySftp, readyPath, "ready\n");
+                UploadText(readySftp, readyPath, ownershipToken + "\n");
                 readySftp.ChangePermissions(readyPath, PrivatePayloadFileMode);
             }
             finally
