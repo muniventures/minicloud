@@ -25,7 +25,7 @@ it("selects a custom organization plan by name without a provider field", async 
 it("blocks creation and links to provider setup when no plans exist", async () => {
   vi.mocked(listPlans).mockResolvedValue([]);
   render(<MemoryRouter><CreateAppModule /></MemoryRouter>);
-  expect(await screen.findByRole("link", { name: "Configure a provider and plan" })).toHaveAttribute("href", "/providers");
+  expect(await screen.findByRole("link", { name: "Configure a provider and plan" })).toHaveAttribute("href", "/plans");
   expect(screen.getByRole("button", { name: "Create app" })).toBeDisabled();
 });
 it("shows catalog errors without substituting hardcoded plans", async () => {

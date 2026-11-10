@@ -65,7 +65,7 @@ export function AppEnvironmentsPanel({ app, onUpdated }: { app: AppResponse; onU
         <Button type="submit" disabled={busy || catalog.loading || !catalog.plans.some(item => item.name === plan) || !!root.deletionStatus || root.id === app.id && !!app.parentAppId}>Add environment</Button>
       </form>
       {catalog.error && <p role="alert" className="text-destructive">{catalog.error}</p>}
-      {!catalog.loading && !catalog.error && !catalog.plans.length && <p className="text-sm text-muted-foreground">No enabled plans. <Link className="underline" to="/providers">Configure a provider and plan</Link> first.</p>}
+      {!catalog.loading && !catalog.error && !catalog.plans.length && <p className="text-sm text-muted-foreground">No enabled plans. <Link className="underline" to="/plans">Configure a provider and plan</Link> first.</p>}
       <p className="text-sm text-muted-foreground">Each environment has its own VPS, deployments, database, domains and secrets.</p>
     </CardContent>
   </Card>;

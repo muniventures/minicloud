@@ -54,7 +54,8 @@ public sealed class ImageBuildTargetService(MinicloudDbContext db, IOptions<Regi
             else
             {
                 var mapping = ProviderPlanMapping.FromAppPlan(app.Plan, plans.Value);
-                registry.Value.PlannedPlatforms.TryGetValue($"{mapping.Provider}_{mapping.Sku}", out platform);
+                var platformKey = $"{mapping.Provider}_{mapping.Sku}".Replace('-', '_');
+                registry.Value.PlannedPlatforms.TryGetValue(platformKey, out platform);
                 identity = new { version = 1, app.Id, app.OrganizationId, app.Plan, mapping.Provider, mapping.Region, mapping.Sku, platform };
             }
         }

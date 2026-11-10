@@ -27,7 +27,9 @@ export const dashboardRoutes = {
   databases: defineRoute({ key: "databases", name: "Databases", path: "/databases", layout: "main", nav: { label: "Databases", icon: Database, group: "main" } }),
   databaseDetail: defineRoute({ key: "databaseDetail", name: "Database", path: "/databases/:databaseId", layout: "main" }),
   appCreate: defineRoute({ key: "appCreate", name: "Create app", path: "/apps/new", layout: "main" }),
-  providers: defineRoute({ key: "providers", name: "Providers", path: "/providers", layout: "main", nav: { label: "Providers", icon: Server, group: "main" } }),
+  plans: defineRoute({ key: "plans", name: "Plans", path: "/plans", layout: "main", nav: { label: "Plans", icon: Server, group: "main" } }),
+  providerAccounts: defineRoute({ key: "providerAccounts", name: "Provider accounts", path: "/plans/accounts", layout: "main" }),
+  providers: defineRoute({ key: "providers", name: "Providers", path: "/providers", layout: "main" }),
   appDetail: defineRoute({ key: "appDetail", name: "App detail", path: "/apps/:appId", layout: "main" }),
   appDeployments: defineRoute({ key: "appDeployments", name: "App deployments", path: "/apps/:appId/deployments", layout: "main" }),
   appDeploymentDetail: defineRoute({

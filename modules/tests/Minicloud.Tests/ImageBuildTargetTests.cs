@@ -53,6 +53,25 @@ public sealed class ImageBuildTargetTests : IAsyncLifetime
         Assert.NotEqual(first.Version, (await Targets().ResolveAsync(_app, default)).Version);
     }
 
+    [Theory]
+    [InlineData(AppPlan.P0D0, "DigitalOcean_s_1vcpu_512mb_10gb", "linux/amd64")]
+    [InlineData(AppPlan.P0D1, "DigitalOcean_s_1vcpu_1gb", "linux/amd64")]
+    [InlineData(AppPlan.P0D2, "DigitalOcean_s_1vcpu_2gb", "linux/amd64")]
+    [InlineData(AppPlan.P0D0, "DigitalOcean_s_1vcpu_512mb_10gb", "linux/arm64")]
+    public async Task New_DigitalOcean_app_uses_environment_safe_sku_key_and_configured_platform(
+        AppPlan plan, string platformKey, string platform)
+    {
+        _app.Plan = plan;
+        await Assert.ThrowsAsync<RegistryImageValidationException>(() => Targets().ResolveAsync(_app, default));
+
+        var options = new RegistryOptions();
+        options.PlannedPlatforms[platformKey] = platform;
+        var target = await Targets(options).ResolveAsync(_app, default);
+
+        Assert.Equal(platform, target.Platform);
+        Assert.Empty(await _db.ServerInstances.ToListAsync());
+    }
+
     [Fact]
     public async Task Foreign_server_registration_cannot_supply_a_build_platform()
     {

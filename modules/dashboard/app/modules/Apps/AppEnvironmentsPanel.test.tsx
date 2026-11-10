@@ -26,6 +26,7 @@ it.each([
   expect(screen.getByRole("link", { name: `prod · p0-h-0 (${label})` })).toHaveAttribute("href", "/apps/root");
   expect(screen.getByRole("link", { name: "staging · p0-v-0" })).toHaveAttribute("href", "/apps/staging-id");
   await waitFor(() => expect(screen.getByText("No enabled plans.", { exact: false })).toBeInTheDocument());
+  expect(screen.getByRole("link", { name: "Configure a provider and plan" })).toHaveAttribute("href", "/plans");
 });
 it("links to separate environment runtimes and creates with the chosen provider plan", async () => {
   vi.mocked(listPlans).mockResolvedValue([{ id: "dynamic", name: "Custom small", enabled: true, accountEnabled: true }] as ProviderPlan[]);
