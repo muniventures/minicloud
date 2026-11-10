@@ -2068,6 +2068,10 @@ namespace Minicloud.Common.Migrations
                         .HasColumnType("text")
                         .HasColumnName("id");
 
+                    b.Property<string>("ApplicationId")
+                        .HasColumnType("text")
+                        .HasColumnName("application_id");
+
                     b.Property<string>("BranchName")
                         .HasColumnType("text")
                         .HasColumnName("branch_name");
@@ -2093,6 +2097,14 @@ namespace Minicloud.Common.Migrations
                         .HasColumnType("text")
                         .HasColumnName("environment_key");
 
+                    b.Property<string>("EnvironmentKind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("persistent")
+                        .HasColumnName("environment_kind");
+
                     b.Property<string>("EnvironmentName")
                         .HasMaxLength(63)
                         .HasColumnType("character varying(63)")
@@ -2102,6 +2114,11 @@ namespace Minicloud.Common.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("name");
+
+                    b.Property<string>("NormalizedEnvironmentName")
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("normalized_environment_name");
 
                     b.Property<string>("OrganizationId")
                         .IsRequired()
@@ -2126,6 +2143,20 @@ namespace Minicloud.Common.Migrations
                         .HasColumnType("text")
                         .HasColumnName("slug");
 
+                    b.Property<string>("RuntimeParentSlug")
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("runtime_parent_slug");
+
+                    b.Property<string>("SourceBranch")
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("source_branch");
+
+                    b.Property<string>("SourceEnvironmentId")
+                        .HasColumnType("text")
+                        .HasColumnName("source_environment_id");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -2134,6 +2165,11 @@ namespace Minicloud.Common.Migrations
 
                     b.HasIndex("EnvironmentKey")
                         .IsUnique();
+
+                    b.HasIndex("ApplicationId", "NormalizedEnvironmentName")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "ApplicationId");
 
                     b.HasIndex("OrganizationId", "PlanId");
 
@@ -2144,6 +2180,73 @@ namespace Minicloud.Common.Migrations
                         .IsUnique();
 
                     b.ToTable("apps", (string)null);
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.MinicloudApplication", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DefaultEnvironmentId")
+                        .HasColumnType("text")
+                        .HasColumnName("default_environment_id");
+
+                    b.Property<string>("DeletionError")
+                        .HasColumnType("text")
+                        .HasColumnName("deletion_error");
+
+                    b.Property<string>("DeletionStatus")
+                        .HasColumnType("text")
+                        .HasColumnName("deletion_status");
+
+                    b.Property<string>("LegacyRootAppId")
+                        .HasColumnType("text")
+                        .HasColumnName("legacy_root_app_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("NormalizedSlug")
+                        .IsRequired()
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("normalized_slug");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("slug");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LegacyRootAppId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "NormalizedSlug")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "Slug")
+                        .IsUnique();
+
+                    b.ToTable("applications", (string)null);
                 });
 
             modelBuilder.Entity("Minicloud.Common.Models.Organization", b =>
@@ -3626,17 +3729,36 @@ namespace Minicloud.Common.Migrations
                         .HasForeignKey("ParentAppId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Minicloud.Common.Models.MinicloudApplication", "Application")
+                        .WithMany("Environments")
+                        .HasForeignKey("OrganizationId", "ApplicationId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Minicloud.Common.Models.ProviderPlan", "SelectedPlan")
                         .WithMany()
                         .HasForeignKey("OrganizationId", "PlanId")
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.Navigation("Application");
+
                     b.Navigation("Organization");
 
                     b.Navigation("ParentApp");
 
                     b.Navigation("SelectedPlan");
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.MinicloudApplication", b =>
+                {
+                    b.HasOne("Minicloud.Common.Models.Organization", "Organization")
+                        .WithMany("Applications")
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Organization");
                 });
 
             modelBuilder.Entity("Minicloud.Common.Models.OrganizationMember", b =>
@@ -3823,9 +3945,16 @@ namespace Minicloud.Common.Migrations
                     b.Navigation("ServiceSecrets");
                 });
 
+            modelBuilder.Entity("Minicloud.Common.Models.MinicloudApplication", b =>
+                {
+                    b.Navigation("Environments");
+                });
+
             modelBuilder.Entity("Minicloud.Common.Models.Organization", b =>
                 {
                     b.Navigation("ApiKeys");
+
+                    b.Navigation("Applications");
 
                     b.Navigation("Apps");
 

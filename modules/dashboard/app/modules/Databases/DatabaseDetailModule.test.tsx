@@ -6,7 +6,7 @@ import * as api from "../../api/databasesApi";
 import { downloadDatabaseFile, downloadDatabaseBlob } from "./downloadDatabaseFile";
 vi.mock("./downloadDatabaseFile", () => ({ downloadDatabaseFile: vi.fn(), downloadDatabaseBlob: vi.fn() }));
 vi.mock("../../core/auth/AuthProvider", () => ({ useAuth: () => ({ selectedOrganization: { id: "org-1", role: "owner" } }) }));
-vi.mock("../../api/appsApi", () => ({ listApps: vi.fn().mockResolvedValue([]), listAppServices: vi.fn().mockResolvedValue([]) }));
+vi.mock("../../api/environmentsApi", () => ({ listAppServices: vi.fn().mockResolvedValue([]) }));
 vi.mock("../../api/databasesApi", () => ({ getDatabase: vi.fn(), getBackupPolicy: vi.fn(), listBackups: vi.fn(), listDatabaseOperations: vi.fn(), listRepositories: vi.fn(), listDatabaseServers: vi.fn(), getDatabaseCapabilities: vi.fn(), requestDatabaseOperation: vi.fn(), setDatabaseAccess: vi.fn(), setBackupPolicy: vi.fn(), revealDatabaseConnection: vi.fn(), exportBackupRecoveryMaterial: vi.fn(), cancelDatabaseBackup: vi.fn(), downloadBackupFile: vi.fn(), purgeDatabaseBackups: vi.fn(), listDatabaseBindings: vi.fn().mockResolvedValue([]), bindDatabase: vi.fn() }));
 beforeEach(() => {
   vi.mocked(api.getDatabase).mockResolvedValue({ id: "db-1", name: "Orders", engine: "postgres", engineVersion: "16", placement: "shared", status: "ready", accessMode: "internal", allowedCidrsJson: "[]" });
@@ -130,3 +130,4 @@ it("retires indefinite retention for a deleted source without resuming captures 
   fireEvent.click(screen.getByRole("button", { name: "Save backup policy" }));
   await waitFor(() => expect(api.setBackupPolicy).toHaveBeenCalledWith("db-1", { ...retainedPolicy, enabled: false, keepLastCopies: false }));
 });
+vi.mock("../../api/applicationsApi", () => ({ listApplications: vi.fn().mockResolvedValue([]) }));

@@ -200,6 +200,17 @@ public sealed partial class DatabaseOperationProcessor(
             operation.ErrorCode = operation.Kind == "migrate" ? "database_migration_reconciliation_required" : error is DatabaseRemoteOperationException remote ? remote.Code : error is UnauthorizedAccessException ? "database_authority_changed" : "database_operation_failed";
             operation.ErrorMessage = operation.Kind == "migrate" ? "Migration requires explicit reconciliation. The source may remain fenced; inspect source and target before reopening writers." : "Database operation failed; source data was not replaced. Inspect its current state before retrying.";
             operation.CompletedAt = clock.GetUtcNow();
+            if (operation.Kind == "create-server" && operation.ServerId is not null)
+            {
+                var failedServer = await db.ManagedDatabaseServers.SingleOrDefaultAsync(x =>
+                    x.Id == operation.ServerId && x.OrganizationId == operation.OrganizationId && x.Status == "creating", ct);
+                if (failedServer is not null)
+                {
+                    failedServer.Status = "failed";
+                    failedServer.Revision++;
+                    failedServer.UpdatedAt = clock.GetUtcNow();
+                }
+            }
             if (cancelled)
             {
                 operation.ErrorCode = "database_cancelled";
@@ -223,7 +234,7 @@ public sealed partial class DatabaseOperationProcessor(
         {
             var plan = await db.ProviderPlans.SingleAsync(x => x.Id == server.PlanId && x.OrganizationId == operation.OrganizationId && x.Enabled, ct);
             var slug = "db-" + server.Id["dbserver_".Length..];
-            var app = new MinicloudApp { Id = ids.NewId("app"), OrganizationId = operation.OrganizationId, Name = server.Name, Slug = slug, PlanId = plan.Id, Database = DatabaseMode.Postgres, EnvironmentName = "production", CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow() };
+            var app = new MinicloudApp { Id = ids.NewId("app"), OrganizationId = operation.OrganizationId, Name = server.Name, Slug = slug, PlanId = plan.Id, Database = DatabaseMode.Postgres, EnvironmentName = "production", EnvironmentKind = EnvironmentKinds.Internal, CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow() };
             app.EnvironmentKey = app.Id + ":production";
             db.Apps.Add(app);
             var request = new CreateDeploymentRequest(app.Id, "postgres", null, []);

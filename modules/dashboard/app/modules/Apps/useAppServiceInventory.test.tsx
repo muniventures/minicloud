@@ -1,8 +1,8 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { listAppServices } from "@/api/appsApi";
+import { listAppServices } from "@/api/environmentsApi";
 import { useAppServiceInventory } from "./useAppServiceInventory";
-vi.mock("@/api/appsApi", () => ({ listAppServices: vi.fn() }));
+vi.mock("@/api/environmentsApi", () => ({ listAppServices: vi.fn() }));
 afterEach(() => {
   cleanup();
   vi.useRealTimers();

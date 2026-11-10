@@ -291,6 +291,12 @@ public sealed class DeploymentPipelineExecutor : IDeploymentPipelineExecutor
             throw new InvalidOperationException($"Deployment {deploymentId} is already terminal ({deployment.Status}).");
         }
 
+        if (await db.Apps.AnyAsync(x => x.Id == deployment.AppId &&
+            (x.DeletionStatus != null || (x.Application != null && x.Application.DeletionStatus != null)), cancellationToken))
+        {
+            throw new InvalidOperationException($"Deployment {deploymentId} targets a deleting application or environment.");
+        }
+
         return new PipelineStepContext
         {
             DeploymentId = deployment.Id,

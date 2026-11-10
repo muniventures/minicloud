@@ -4,9 +4,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { createApp } from "../../api/appsApi";
+import { createApplication } from "../../api/applicationsApi";
 import { useAuth } from "../../core/auth/AuthProvider";
 import { PageScaffold } from "../../core/components/PageScaffold";
 import { dashboardRoutes } from "../../core/routing/dashboardRoutes";
@@ -15,13 +15,20 @@ import { planDescription, usePlanCatalog } from "../Providers/usePlanCatalog";
 
 export function CreateAppModule() {
   const { selectedOrganization } = useAuth();
+  const currentOrganizationId = useRef(selectedOrganization?.id);
+  currentOrganizationId.current = selectedOrganization?.id;
+  const canCreate = ["owner", "admin", "developer"].includes(selectedOrganization?.role?.toLowerCase() ?? "");
   const [environmentName, setEnvironmentName] = useState("production");
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [isSlugEdited, setIsSlugEdited] = useState(false);
   const [plan, setPlan] = useState("");
   const catalog = usePlanCatalog(selectedOrganization?.id);
-  useEffect(() => { setPlan(""); }, [selectedOrganization?.id]);
+  useEffect(() => {
+    currentOrganizationId.current = selectedOrganization?.id;
+    setPlan("");
+    return () => { currentOrganizationId.current = undefined; };
+  }, [selectedOrganization?.id]);
   const [database, setDatabase] = useState<DatabaseMode>("sqlite");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -29,24 +36,23 @@ export function CreateAppModule() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!selectedOrganization || !catalog.plans.some(item => item.name === plan)) {
+    if (!canCreate || !selectedOrganization || !catalog.plans.some(item => item.name === plan)) {
       return;
     }
 
+    const organizationId = selectedOrganization.id;
     setError(null);
     setIsSubmitting(true);
     try {
-      const app = await createApp({
-        organizationId: selectedOrganization.id,
-        environmentName,
+      const app = await createApplication({
+        organizationId,
         name,
         slug: slug || slugify(name),
-        plan,
-        database
+        initialEnvironment: { name: environmentName, plan, database }
       });
-      navigate(`/apps/${app.id}`);
+      if (currentOrganizationId.current === organizationId) navigate(`/apps/${app.id}`);
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Unable to create app.");
+      if (currentOrganizationId.current === organizationId) setError(submitError instanceof Error ? submitError.message : "Unable to create app.");
     } finally {
       setIsSubmitting(false);
     }
@@ -62,6 +68,10 @@ export function CreateAppModule() {
   function updateSlug(nextSlug: string) {
     setIsSlugEdited(true);
     setSlug(slugify(nextSlug));
+  }
+
+  if (!canCreate) {
+    return <PageScaffold title="Create app"><p role="alert">You do not have permission to create applications.</p></PageScaffold>;
   }
 
   return (
@@ -84,10 +94,10 @@ export function CreateAppModule() {
               <Label htmlFor="environmentName">Environment name</Label>
               <Input id="environmentName" required maxLength={63} pattern="[A-Za-z0-9][A-Za-z0-9_-]*" value={environmentName} onChange={(event) => setEnvironmentName(event.target.value)} />
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid min-w-0 gap-2 sm:grid-cols-2 [&>*]:min-w-0">
               <div className="grid gap-2">
                 <Label htmlFor="app-plan">Plan</Label>
-                <select id="app-plan" className="h-10 rounded-md border bg-background px-3 text-sm" required disabled={catalog.loading} value={plan} onChange={event => setPlan(event.target.value)}>
+                <select id="app-plan" className="h-10 w-full min-w-0 max-w-full rounded-md border bg-background px-3 text-sm" required disabled={catalog.loading} value={plan} onChange={event => setPlan(event.target.value)}>
                   <option value="">{catalog.loading ? "Loading plans…" : "Select a plan"}</option>
                   {catalog.plans.map(option => <option key={option.id} value={option.name}>{option.name} — {planDescription(option)}</option>)}
                 </select>

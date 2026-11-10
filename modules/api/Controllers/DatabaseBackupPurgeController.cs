@@ -7,7 +7,7 @@ using static Minicloud.Api.Controllers.EndpointResults;
 
 namespace Minicloud.Api.Controllers;
 
-[ApiController, Authorize, Route("v1/databases/{id}/backups")]
+[ApiController, Authorize, Route("api/databases/{id}/backups")]
 public sealed class DatabaseBackupPurgeController(DatabaseBackupPurgeService purge) : ControllerBase
 {
     [HttpDelete]
@@ -17,7 +17,7 @@ public sealed class DatabaseBackupPurgeController(DatabaseBackupPurgeService pur
         return DatabasesController.Handle(async () =>
         {
             var operation = await purge.QueueAsync(id, request, RequirePrincipal(HttpContext).ToActorIdentity(), ct);
-            return Results.Accepted($"/v1/databases/{id}/operations", new { operation.Id, operation.Kind, operation.Status });
+            return Results.Accepted($"/api/databases/{id}/operations", new { operation.Id, operation.Kind, operation.Status });
         });
     }
 }

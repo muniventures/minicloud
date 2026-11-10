@@ -9,7 +9,7 @@ using static Minicloud.Api.Controllers.EndpointResults;
 
 namespace Minicloud.Api.Controllers;
 
-[ApiController, Authorize, Route("v1/databases")]
+[ApiController, Authorize, Route("api/databases")]
 public sealed class DatabasesController(MinicloudDbContext db, DatabaseManagementService service) : ControllerBase
 {
     [HttpGet]
@@ -30,7 +30,7 @@ public sealed class DatabasesController(MinicloudDbContext db, DatabaseManagemen
     public Task<IResult> Create(CreateManagedDatabaseRequest request, CancellationToken ct) => Handle(async () =>
     {
         var database = await service.CreateDatabaseAsync(request, RequirePrincipal(HttpContext).ToActorIdentity(), ct);
-        return Results.Created($"/v1/databases/{database.Id}", database);
+        return Results.Created($"/api/databases/{database.Id}", database);
     });
 
     [HttpGet("{id}")]
@@ -78,7 +78,7 @@ public sealed class DatabasesController(MinicloudDbContext db, DatabaseManagemen
     public Task<IResult> Operate(string id, DatabaseOperationRequest request, CancellationToken ct) => Handle(async () =>
     {
         var operation = await service.OperateAsync(id, request, RequirePrincipal(HttpContext).ToActorIdentity(), ct);
-        return Results.Accepted($"/v1/databases/{id}/operations", new { operation.Id, operation.Kind, operation.Status });
+        return Results.Accepted($"/api/databases/{id}/operations", new { operation.Id, operation.Kind, operation.Status });
     });
 
     internal static async Task<IResult> Handle(Func<Task<IResult>> action)

@@ -15,7 +15,7 @@ using static Minicloud.Api.Controllers.EndpointResults;
 namespace Minicloud.Api.Controllers;
 
 [ApiController]
-[Route("v1/[controller]")]
+[Route("api/[controller]")]
 public sealed class CliLoginSessionsController : ControllerBase
 {
     [HttpPost]
@@ -36,7 +36,7 @@ public sealed class CliLoginSessionsController : ControllerBase
 
         var consoleBaseUrl = consoleUrls.GetConsoleBaseUrl();
         var loginUrl = $"{consoleBaseUrl}/cli/login?session={Uri.EscapeDataString(session.Id)}";
-        return Results.Created($"/v1/cli-login-sessions/{session.Id}", new CliLoginSessionCreateResponse(session.Id, loginUrl, session.Status, session.ExpiresAt));
+        return Results.Created($"/api/cli-login-sessions/{session.Id}", new CliLoginSessionCreateResponse(session.Id, loginUrl, session.Status, session.ExpiresAt));
     }
 
     [HttpGet("{sessionId}")]
@@ -78,7 +78,7 @@ public sealed class CliLoginSessionsController : ControllerBase
 
         if (session.Status != "approved" || string.IsNullOrWhiteSpace(session.RawApiKeyToken) || session.Organization is null || session.ApprovedByUser is null)
         {
-            return Results.Accepted($"/v1/cli-login-sessions/{session.Id}", ToCliLoginSessionResponse(session, now));
+            return Results.Accepted($"/api/cli-login-sessions/{session.Id}", ToCliLoginSessionResponse(session, now));
         }
 
         var token = session.RawApiKeyToken;

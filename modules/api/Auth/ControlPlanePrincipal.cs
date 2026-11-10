@@ -103,11 +103,10 @@ public sealed class ControlPlanePrincipalResolver(
             return null;
         }
 
-        var now = timeProvider.GetUtcNow();
-
-        var user = await db.Users.SingleOrDefaultAsync(x => x.FirebaseUid == verifiedToken.Uid, cancellationToken);
+        var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.FirebaseUid == verifiedToken.Uid, cancellationToken);
         if (user is null)
         {
+            var now = timeProvider.GetUtcNow();
             user = new User
             {
                 Id = ids.NewId("usr"),
@@ -118,15 +117,9 @@ public sealed class ControlPlanePrincipalResolver(
                 UpdatedAt = now
             };
             db.Users.Add(user);
-        }
-        else
-        {
-            user.Email = verifiedToken.Email;
-            user.DisplayName = verifiedToken.DisplayName ?? user.DisplayName;
-            user.UpdatedAt = now;
+            await db.SaveChangesAsync(cancellationToken);
         }
 
-        await db.SaveChangesAsync(cancellationToken);
         return new ControlPlanePrincipal("firebase", user.Id, null, null, new HashSet<string>(StringComparer.Ordinal));
     }
 

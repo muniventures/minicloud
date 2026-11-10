@@ -37,7 +37,7 @@ public sealed class CliPlanSelectionTests
             if (expected is not null)
             {
                 Assert.Equal("app_staging", handler.SelectionApp);
-                Assert.True(handler.Paths.IndexOf("/v1/apps/app_staging/plan") < handler.Paths.IndexOf("/v1/deployments"));
+                Assert.True(handler.Paths.IndexOf("/api/environments/app_staging/plan") < handler.Paths.IndexOf("/api/deployments"));
             }
         }
         finally { directory.Delete(true); }
@@ -70,7 +70,7 @@ public sealed class CliPlanSelectionTests
             var application = new CliApplication(new Console(), environment, tokens, new MinicloudApiClient(environment, tokens, new HttpClient(handler)));
             Assert.Equal(CliExitCodes.ValidationError, await application.RunAsync(["deploy", "web", "--environment", "staging", "--config", path], default));
             Assert.Null(handler.SubmittedApp);
-            Assert.DoesNotContain(handler.Paths, x => x.Contains("artifact", StringComparison.Ordinal) || x.StartsWith("/v1/deployments", StringComparison.Ordinal));
+            Assert.DoesNotContain(handler.Paths, x => x.Contains("artifact", StringComparison.Ordinal) || x.StartsWith("/api/deployments", StringComparison.Ordinal));
         }
         finally { directory.Delete(true); }
     }
@@ -106,8 +106,13 @@ public sealed class CliPlanSelectionTests
         {
             var path = request.RequestUri!.AbsolutePath; Paths.Add(path);
             object response;
-            if (path == "/v1/me") response = new { id = "user", email = "test@example.com", organizations = new[] { new { id = "org", name = "Test", slug = "test", role = "owner" } } };
-            else if (path.StartsWith("/v1/apps/"))
+            if (path == "/api/me") response = new { id = "user", email = "test@example.com", organizations = new[] { new { id = "org", name = "Test", slug = "test", role = "owner" } } };
+            else if (path == "/api/apps/app_main") response = new
+            {
+                id = "app_main", organizationId = "org", name = "Demo", slug = "demo",
+                environments = new[] { CliApiFixtures.EnvironmentSummary("app_main", "production"), CliApiFixtures.EnvironmentSummary("app_staging", "staging") }
+            };
+            else if (path.StartsWith("/api/environments/"))
             {
                 var id = path.Split('/')[3];
                 if (path.EndsWith("/plan"))
@@ -117,18 +122,18 @@ public sealed class CliPlanSelectionTests
                     if (SelectedPlan == "missing")
                         return new(HttpStatusCode.BadRequest) { Content = JsonContent.Create(new { error = new { code = "plan_not_found", message = "Unknown plan." } }) };
                 }
-                response = new { id, organizationId = "org", name = "Demo", slug = "demo", plan = SelectedPlan ?? "saved-plan", database = "sqlite", branches = Array.Empty<object>(),
+                response = new { id, applicationId = "app_main", organizationId = "org", name = "Demo", slug = "demo", plan = SelectedPlan ?? "saved-plan", database = "sqlite", branches = Array.Empty<object>(),
                     environments = new[] { new { id = "app_main", name = "production", plan = "saved-plan", database = "sqlite" }, new { id = "app_staging", name = "staging", plan = "saved-plan", database = "sqlite" } } };
             }
-            else if (path == "/v1/secrets") response = Array.Empty<object>();
-            else if (path == "/v1/deployments")
+            else if (path == "/api/secrets") response = Array.Empty<object>();
+            else if (path == "/api/deployments")
             {
                 using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
                 SubmittedApp = body.RootElement.GetProperty("appId").GetString();
                 SubmittedPlan = body.RootElement.GetProperty("plan").GetString();
                 response = new { id = "dep_plan", appId = SubmittedApp, status = "queued" };
             }
-            else if (path.StartsWith("/v1/deployments/dep_plan"))
+            else if (path.StartsWith("/api/deployments/dep_plan"))
                 response = path.EndsWith("/logs") ? Array.Empty<object>() : new { id = "dep_plan", appId = SubmittedApp, organizationId = "org", database = "sqlite", status = "succeeded", services = Array.Empty<object>() };
             else throw new InvalidOperationException(request.Method + " " + path);
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(response) };

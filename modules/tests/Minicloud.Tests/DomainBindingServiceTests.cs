@@ -84,6 +84,23 @@ public sealed class DomainBindingServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PreviewRoutingRemainsStableAfterSourceEnvironmentIsDeleted()
+    {
+        var now = DateTimeOffset.UtcNow;
+        await using var db = _harness.CreateDbContext();
+        var organization = new Organization { Id = "org_detached_preview", Name = "Detached", Slug = "detached" };
+        var preview = new MinicloudApp { Id = "app_detached_preview", OrganizationId = organization.Id,
+            Organization = organization, Name = "Preview", Slug = "store-preview", BranchName = "feature-cart",
+            RuntimeParentSlug = "store", EnvironmentKind = EnvironmentKinds.Preview };
+        db.Apps.Add(preview);
+        await db.SaveChangesAsync();
+        var service = new DomainBindingService(db, new TestIdGenerator(), new TestTimeProvider(now));
+        var binding = Assert.Single(await service.EnsureDefaultBindingsAsync(organization, preview,
+            [new DeploymentServiceRequest("new-api", "example/api", 8080, true, "/", "/health")], default));
+        Assert.Equal("detached-store-new-api-feature-cart.app.muni.dev", binding.Hostname);
+    }
+
+    [Fact]
     public async Task CreateSubdomainBindingAsync_RejectsPrivateServices()
     {
         var now = new DateTimeOffset(2026, 5, 17, 12, 0, 0, TimeSpan.Zero);

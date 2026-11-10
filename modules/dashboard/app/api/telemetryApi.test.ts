@@ -33,7 +33,7 @@ describe("telemetryApi", () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ appId: "app_1", enabled: true }));
     await getTelemetrySettings("app_1");
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/v1/apps/app_1/telemetry"),
+      expect.stringContaining("/api/environments/app_1/telemetry"),
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: "Bearer firebase-token" })
       })
@@ -42,7 +42,7 @@ describe("telemetryApi", () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse([]));
     await listTelemetryCredentials("app_1");
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/v1/apps/app_1/telemetry/credentials"),
+      expect.stringContaining("/api/environments/app_1/telemetry/credentials"),
       expect.objectContaining({ method: "GET" })
     );
   });
@@ -57,7 +57,7 @@ describe("telemetryApi", () => {
     vi.mocked(fetch).mockResolvedValueOnce({ status: 204, headers: { get: () => "" } } as unknown as Response);
     await revokeTelemetryCredential("app_1", "cred_1");
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/v1/apps/app_1/telemetry/credentials/cred_1"),
+      expect.stringContaining("/api/environments/app_1/telemetry/credentials/cred_1"),
       expect.objectContaining({ method: "DELETE" })
     );
   });
@@ -91,7 +91,7 @@ describe("telemetryApi", () => {
     });
     const [url] = vi.mocked(fetch).mock.calls[0];
     const parsed = new URL(url as string);
-    expect(parsed.pathname).toBe("/v1/apps/app_1/logs");
+    expect(parsed.pathname).toBe("/api/environments/app_1/logs");
     expect(parsed.searchParams.get("service")).toBe("backend");
     expect(parsed.searchParams.get("severity")).toBe("ERROR");
     expect(parsed.searchParams.get("q")).toBe("order-1");
@@ -114,7 +114,7 @@ describe("telemetryApi", () => {
     const exchange = await exchangeGrafanaLaunch("code_1");
     expect(exchange.destination).toBe("/explore?orgId=1");
     const [exchangeUrl, exchangeOptions] = vi.mocked(fetch).mock.calls[1];
-    expect(exchangeUrl).toContain("/v1/grafana/exchange");
+    expect(exchangeUrl).toContain("/api/grafana/exchange");
     expect(exchangeOptions).toMatchObject({ method: "POST", credentials: "include" });
     expect((exchangeOptions as RequestInit).headers).not.toMatchObject({ Authorization: expect.anything() });
   });

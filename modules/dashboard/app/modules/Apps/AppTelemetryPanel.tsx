@@ -16,13 +16,16 @@ import {
   queryApplicationLogs
 } from "../../api/telemetryApi";
 import { EmptyState } from "../../core/components/EmptyState";
-import { ApiError, type AppResponse, type TelemetryLogsResponse, type TelemetrySettingsResponse } from "../../models/controlPlane";
+import { ApiError, type EnvironmentDetailResponse, type TelemetryLogsResponse, type TelemetrySettingsResponse } from "../../models/controlPlane";
 import { TelemetryCredentialsCard } from "./components/TelemetryCredentialsCard";
 import { TelemetrySettingsCard } from "./components/TelemetrySettingsCard";
 
 type Props = {
-  app: AppResponse;
+  app: EnvironmentDetailResponse;
   serviceNames?: string[];
+  // Scoped navigation from Services: "View application logs" sets the exact
+  // environment + service filter. Applied once on mount; user edits win.
+  initialService?: string | null;
 };
 
 const RANGE_PRESETS = [
@@ -38,7 +41,7 @@ const LIMIT_OPTIONS = [100, 200, 500, 1000];
 const SEVERITIES = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"];
 const AUTO_REFRESH_MS = 30_000;
 
-export function AppTelemetryPanel({ app, serviceNames = [] }: Props) {
+export function AppTelemetryPanel({ app, serviceNames = [], initialService }: Props) {
   const [settings, setSettings] = useState<TelemetrySettingsResponse | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -46,6 +49,16 @@ export function AppTelemetryPanel({ app, serviceNames = [] }: Props) {
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState<{ message: string; code?: string } | null>(null);
   const [query,setQuery] = useCollectionQuery(`${app.organizationId}:${app.id}:application-logs`, "timestamp", "desc");
+  // Apply the scoped service filter once (ref-guarded so user edits win).
+  const appliedInitialService = useRef(false);
+  useEffect(() => {
+    if (appliedInitialService.current || !initialService) return;
+    appliedInitialService.current = true;
+    if ((query.filters.service || "") !== initialService) {
+      setQuery({ ...query, filters: { ...query.filters, service: initialService } });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialService]);
   const range = query.filters.range || "15m";
   const service = query.filters.service || "";
   const severity = query.filters.severity || "all";

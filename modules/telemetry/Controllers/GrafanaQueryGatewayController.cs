@@ -8,8 +8,8 @@ public sealed class GrafanaQueryGatewayController(GrafanaQueryGateway gateway) :
 {
     private const long MaxGatewayBodyBytes = 64 * 1024;
 
-    [HttpGet("v1/grafana/query-gateway/{*path}")]
-    [HttpPost("v1/grafana/query-gateway/{*path}")]
+    [HttpGet("api/grafana/query-gateway/{*path}")]
+    [HttpPost("api/grafana/query-gateway/{*path}")]
     public async Task<IActionResult> Query(string? path, CancellationToken cancellationToken)
     {
         if (Request.ContentLength > MaxGatewayBodyBytes)

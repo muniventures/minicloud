@@ -1,5 +1,6 @@
+# Generated execution output (see AGENTS.md)
 artifacts/
-.local
+.local/
 # Ignore build outputs
 bin/
 obj/

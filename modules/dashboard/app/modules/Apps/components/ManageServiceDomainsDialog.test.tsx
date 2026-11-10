@@ -1,12 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createAppCustomDomain, verifyAppDomain } from "@/api/appsApi";
+import { createAppCustomDomain, verifyAppDomain } from "@/api/environmentsApi";
 import { listCustomDomains, registerCustomDomain, verifyCustomDomainOwnership } from "@/api/customDomainsApi";
 import type { CustomDomainRegistrationResponse, DomainBindingResponse } from "@/models/controlPlane";
 import { CustomDomainSetupDialog } from "./CustomDomainSetupDialog";
 import { ManageServiceDomainsDialog } from "./ManageServiceDomainsDialog";
 
-vi.mock("@/api/appsApi", () => ({ createAppCustomDomain: vi.fn(), verifyAppDomain: vi.fn(), checkAppDomainAvailability: vi.fn(), createAppDomain: vi.fn(), deleteAppDomain: vi.fn(), setAppDomainPrimary: vi.fn() }));
+vi.mock("@/api/environmentsApi", () => ({ createAppCustomDomain: vi.fn(), verifyAppDomain: vi.fn(), checkAppDomainAvailability: vi.fn(), createAppDomain: vi.fn(), deleteAppDomain: vi.fn(), setAppDomainPrimary: vi.fn() }));
 vi.mock("@/api/customDomainsApi", () => ({ listCustomDomains: vi.fn(), registerCustomDomain: vi.fn(), verifyCustomDomainOwnership: vi.fn() }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 beforeEach(() => { vi.mocked(listCustomDomains).mockResolvedValue([]); });

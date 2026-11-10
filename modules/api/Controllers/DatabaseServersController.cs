@@ -9,7 +9,7 @@ using static Minicloud.Api.Controllers.EndpointResults;
 
 namespace Minicloud.Api.Controllers;
 
-[ApiController, Authorize, Route("v1/database-servers")]
+[ApiController, Authorize, Route("api/database-servers")]
 public sealed class DatabaseServersController(MinicloudDbContext db, DatabaseManagementService service) : ControllerBase
 {
     [HttpGet]
@@ -46,6 +46,6 @@ public sealed class DatabaseServersController(MinicloudDbContext db, DatabaseMan
     public Task<IResult> Create(CreateDatabaseServerRequest request, CancellationToken ct) => DatabasesController.Handle(async () =>
     {
         var server = await service.CreateServerAsync(request, RequirePrincipal(HttpContext).ToActorIdentity(), ct);
-        return Results.Created($"/v1/database-servers/{server.Id}", server);
+        return Results.Created($"/api/database-servers/{server.Id}", server);
     });
 }

@@ -1,14 +1,14 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { listApps } from "@/api/appsApi";
+import { listApplications } from "@/api/applicationsApi";
 import { listDeployments, refreshDeployment } from "@/api/deploymentsApi";
 import type { DeploymentResponse } from "@/models/controlPlane";
 import { DeploymentsModule } from "./DeploymentsModule";
 import { deploymentCreatedTime, deploymentListDuration } from "./deploymentListPresentation";
 import { deploymentProgress } from "./deploymentProgressPresentation";
 
-vi.mock("@/api/appsApi", () => ({ listApps: vi.fn() }));
+vi.mock("@/api/applicationsApi", () => ({ listApplications: vi.fn() }));
 vi.mock("@/api/deploymentsApi", () => ({
   listDeployments: vi.fn(),
   refreshDeployment: vi.fn(),
@@ -97,7 +97,7 @@ it("uses creation time while waiting for a local build or worker and handles mis
 it("ticks active rows without refetching and freezes after completion", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(start + 59_000);
-  vi.mocked(listApps).mockResolvedValue([]);
+  vi.mocked(listApplications).mockResolvedValue([]);
   vi.mocked(listDeployments).mockResolvedValue([deployment]);
   vi.mocked(refreshDeployment).mockImplementation(async () => {
     const completed = { ...deployment, status: "succeeded" as const, completedAt: new Date(start + 61_000).toISOString() };
@@ -151,7 +151,7 @@ it("updates completed deployment ages and switches to an absolute date at 24 hou
   vi.useFakeTimers();
   const createdAt = Date.parse(deployment.createdAt);
   vi.setSystemTime(createdAt + 59_000);
-  vi.mocked(listApps).mockResolvedValue([]);
+  vi.mocked(listApplications).mockResolvedValue([]);
   vi.mocked(listDeployments).mockResolvedValue([{
     ...deployment, status: "succeeded", completedAt: deployment.startedAt,
   }]);
@@ -173,7 +173,7 @@ it("updates completed deployment ages and switches to an absolute date at 24 hou
 it("shows local builds in deployment history with an active status and elapsed duration", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(start);
-  vi.mocked(listApps).mockResolvedValue([]);
+  vi.mocked(listApplications).mockResolvedValue([]);
   vi.mocked(listDeployments).mockResolvedValue([{
     ...deployment, status: "waiting_for_build", startedAt: null,
   }]);
@@ -192,7 +192,7 @@ it("shows local builds in deployment history with an active status and elapsed d
 
 it("automatically discovers a new CLI build while the old failure history is open", async () => {
   vi.useFakeTimers();
-  vi.mocked(listApps).mockResolvedValue([]);
+  vi.mocked(listApplications).mockResolvedValue([]);
   vi.mocked(listDeployments).mockResolvedValue([{ ...deployment, status: "failed" }]);
   await act(async () => { render(<MemoryRouter><DeploymentsModule /></MemoryRouter>); });
   expect(screen.getByText("failed")).toBeInTheDocument();
@@ -200,5 +200,5 @@ it("automatically discovers a new CLI build while the old failure history is ope
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
   expect(screen.getByText("Waiting for build")).toBeInTheDocument();
   expect(screen.getByText("new-build")).toBeInTheDocument();
-  expect(listApps).toHaveBeenCalledTimes(1);
+  expect(listApplications).toHaveBeenCalledTimes(1);
 });

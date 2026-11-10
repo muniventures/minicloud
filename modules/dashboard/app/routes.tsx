@@ -6,6 +6,8 @@ import { AppShell } from "./core/layout/AppShell";
 import { AuthLayout } from "./core/layout/AuthLayout";
 import { ApiKeysModule } from "./modules/ApiKeys/ApiKeysModule";
 import { AppDetailModule } from "./modules/Apps/AppDetailModule";
+import { AppLandingRedirect } from "./modules/Apps/AppLandingRedirect";
+import { AppSettingsModule } from "./modules/Apps/AppSettingsModule";
 import { AppsModule } from "./modules/Apps/AppsModule";
 import { CreateAppModule } from "./modules/Apps/CreateAppModule";
 import { DeploymentDetailModule } from "./modules/Deployments/DeploymentDetailModule";
@@ -39,9 +41,9 @@ export const routes: RouteObject[] = [
       { path: "/plans", element: <ProvidersModule /> },
       { path: "/plans/accounts", element: <ProviderAccountsModule /> },
       { path: "/providers", element: <Navigate to="/plans" replace /> },
-      { path: "/apps/:appId", element: <AppDetailModule /> },
-      { path: "/apps/:appId/deployments", element: <DeploymentsModule /> },
-      { path: "/apps/:appId/deployments/:deploymentId", element: <DeploymentDetailModule /> },
+      { path: "/apps/:applicationId/settings", element: <AppSettingsModule /> },
+      { path: "/apps/:applicationId", element: <AppLandingRedirect /> },
+      { path: "/apps/:applicationId/environments/:environmentId/:tab", element: <AppDetailModule /> },
       { path: "/deployments", element: <DeploymentsModule /> },
       { path: "/deployments/:deploymentId", element: <DeploymentDetailModule /> },
       { path: "/settings/api-keys", element: <ApiKeysModule /> },

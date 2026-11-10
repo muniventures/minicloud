@@ -10,11 +10,11 @@ using Minicloud.Common.Services;
 
 namespace Minicloud.Api.Controllers;
 
-[ApiController, Authorize, Route("v1/providers")]
+[ApiController, Authorize, Route("api/providers")]
 public sealed class ProvidersController(MinicloudDbContext db, ControlPlaneAuthorization authorization,
     ProviderAccountService accounts, AuditEventService audit) : ControllerBase
 {
-    [HttpGet("/v1/provider-types")]
+    [HttpGet("/api/provider-types")]
     public IResult Types() => Results.Ok(new[]
     {
         new ProviderTypeResponse("hetzner", "Hetzner", true, "ubuntu-24.04"),
@@ -47,7 +47,7 @@ public sealed class ProvidersController(MinicloudDbContext db, ControlPlaneAutho
         {
             var account = await accounts.CreateAsync(request, ct);
             await SaveAuditAsync(account, "provider.created", ct);
-            return Results.Created($"/v1/providers/{account.Id}", ToResponse(account));
+            return Results.Created($"/api/providers/{account.Id}", ToResponse(account));
         });
     }
 

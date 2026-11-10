@@ -91,6 +91,33 @@ public sealed class AppDeletionProcessor(
                 db.DeploymentServices.RemoveRange(await db.DeploymentServices.Where(x => x.Deployment.AppId == app.Id).ToListAsync(ct));
                 db.ImagePublications.RemoveRange(publications);
                 db.ManagedDatabaseBindings.RemoveRange(await db.ManagedDatabaseBindings.Where(x => x.AppId == app.Id && x.OrganizationId == app.OrganizationId && x.Status == "revoked").ToListAsync(ct));
+                if (app.ApplicationId is not null)
+                {
+                    var application = await db.Applications.SingleOrDefaultAsync(x => x.Id == app.ApplicationId, ct);
+                    if (application is not null)
+                    {
+                        var remainingEnvironments = await db.Apps
+                            .Where(x => x.ApplicationId == application.Id && x.Id != app.Id)
+                            .ToListAsync(ct);
+                        if (application.DefaultEnvironmentId == app.Id)
+                        {
+                            application.DefaultEnvironmentId = ApplicationEnvironmentMigrationService.SelectNextDefaultEnvironmentId(remainingEnvironments);
+                        }
+                        if (application.DeletionStatus is not null)
+                        {
+                            if (remainingEnvironments.Count == 0)
+                            {
+                                db.Applications.Remove(application);
+                            }
+                            else if (remainingEnvironments.Any(x => x.DeletionStatus == "failed") && remainingEnvironments.All(x => x.DeletionStatus != "queued"))
+                            {
+                                application.DeletionStatus = "failed";
+                                application.DeletionError = remainingEnvironments.First(x => x.DeletionStatus == "failed").DeletionError
+                                    ?? "Application cleanup failed. Retry deletion; contact support if it continues.";
+                            }
+                        }
+                    }
+                }
                 db.Apps.Remove(app);
                 await db.SaveChangesAsync(ct);
             }
@@ -104,6 +131,15 @@ public sealed class AppDeletionProcessor(
                 var failed = await db.Apps.SingleAsync(x => x.Id == app.Id, ct);
                 failed.DeletionStatus = "failed";
                 failed.DeletionError = "Application cleanup failed. Retry deletion; contact support if it continues.";
+                if (failed.ApplicationId is not null)
+                {
+                    var failedApplication = await db.Applications.SingleOrDefaultAsync(x => x.Id == failed.ApplicationId, ct);
+                    if (failedApplication is not null && failedApplication.DeletionStatus is not null)
+                    {
+                        failedApplication.DeletionStatus = "failed";
+                        failedApplication.DeletionError = failed.DeletionError;
+                    }
+                }
                 await db.SaveChangesAsync(ct);
                 return true;
             }

@@ -8,7 +8,7 @@ using Minicloud.Common.Services;
 namespace Minicloud.Api.Controllers;
 
 [ApiController]
-[Route("v1/instance")]
+[Route("api/instance")]
 public sealed class InstanceController : ControllerBase
 {
     [HttpGet]

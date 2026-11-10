@@ -1,4 +1,4 @@
-import { listApps } from "@/api/appsApi";
+import { listApplications } from "@/api/applicationsApi";
 import { CopyButton } from "@/core/components/CopyButton";
 import { CollectionToolbar } from "@/core/components/CollectionToolbar";
 import {
@@ -27,13 +27,12 @@ import {
 } from "@/components/ui/table";
 import { RotateCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { refreshDeployment } from "../../api/deploymentsApi";
 import { useAuth } from "../../core/auth/AuthProvider";
 import { EmptyState } from "../../core/components/EmptyState";
 import { PageScaffold } from "../../core/components/PageScaffold";
 import {
-  buildDashboardPath,
   dashboardRoutes,
 } from "../../core/routing/dashboardRoutes";
 import { StatusBadge } from "../../core/components/StatusBadge";
@@ -50,10 +49,9 @@ import {
 } from "./deploymentListPresentation";
 
 export function DeploymentsModule() {
-  const { appId } = useParams();
   const { selectedOrganization } = useAuth();
   const { deployments, error: feedError, loading: isLoading, refresh: refreshFeed } =
-    useDeploymentFeed(selectedOrganization?.id, appId);
+    useDeploymentFeed(selectedOrganization?.id);
   const [now, setNow] = useState(Date.now);
   const hasActiveDeployments = deployments.some(
     (deployment) => isActiveDeployment(deployment.status) && !deployment.completedAt,
@@ -68,7 +66,7 @@ export function DeploymentsModule() {
     return () => window.clearInterval(timer);
   }, [needsClock]);
   const [query, setQuery] = useCollectionQuery(
-    `${selectedOrganization?.id}:deployments:${appId ?? "all"}`,
+    `${selectedOrganization?.id}:deployments`,
     "createdAt",
     "desc",
   );
@@ -84,10 +82,9 @@ export function DeploymentsModule() {
     let live = true;
     setAppNames({});
     if (!selectedOrganization) return;
-    void listApps(selectedOrganization.id).then((apps) => {
+    void listApplications(selectedOrganization.id).then((apps) => {
       if (live) setAppNames(Object.fromEntries(apps.flatMap((app) => [
-        [app.id, app.name],
-        ...(app.branches ?? []).map((branch) => [branch.id, branch.name]),
+        ...app.environments.map((environment) => [environment.id, `${app.name} / ${environment.name}`]),
       ])));
     }).catch((error) => {
       if (live) setError(error instanceof Error ? error.message : "Unable to load apps.");
@@ -141,18 +138,7 @@ export function DeploymentsModule() {
 
   return (
     <PageScaffold
-      breadcrumbs={
-        appId
-          ? [
-              { label: "Apps", to: dashboardRoutes.apps.path },
-              {
-                label: appId,
-                to: buildDashboardPath(dashboardRoutes.appDetail, { appId }),
-              },
-              { label: "Deployments" },
-            ]
-          : [{ label: "Deployments" }]
-      }
+      breadcrumbs={[{ label: "Deployments" }]}
       title="Deployments"
     >
       <CollectionToolbar
@@ -222,7 +208,7 @@ export function DeploymentsModule() {
                   return (
                   <NavigableTableRow
                     key={deployment.id}
-                    href={appId ? `/apps/${appId}/deployments/${deployment.id}` : `/deployments/${deployment.id}`}
+                    href={`/deployments/${deployment.id}`}
                   >
                     <TableCell data-label="App">
                       <Link
@@ -276,9 +262,7 @@ export function DeploymentsModule() {
                         <Button asChild size="sm" variant="outline">
                           <Link
                             to={
-                              appId
-                                ? `/apps/${appId}/deployments/${deployment.id}`
-                                : `/deployments/${deployment.id}`
+                              `/deployments/${deployment.id}`
                             }
                           >
                             Open

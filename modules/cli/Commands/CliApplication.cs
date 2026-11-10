@@ -461,7 +461,11 @@ public sealed partial class CliApplication
         var optionsWithValues = new HashSet<string>(StringComparer.Ordinal)
         {
             "--app",
+            "--environment",
             "--service",
+            "--source",
+            "--tail",
+            "--since",
             "--value",
             "--config",
             "--hostname",

@@ -90,6 +90,7 @@ public sealed class DatabaseManagementTests : IAsyncLifetime
     public async Task DisabledPolicyAloneDoesNotBlockRepositoryDeletion()
     {
         var database = await service.CreateDatabaseAsync(new("org_test", "existing", AppId: "app_test"), actor, default);
+        (await db.DatabaseOperations.SingleAsync()).Status = "completed";
         var policy = await db.DatabaseBackupPolicies.SingleAsync();
         policy.RepositoryAppId = "repository";
         policy.Enabled = false;

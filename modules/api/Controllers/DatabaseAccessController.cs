@@ -10,7 +10,7 @@ using static Minicloud.Api.Controllers.EndpointResults;
 
 namespace Minicloud.Api.Controllers;
 
-[ApiController, Authorize, Route("v1/databases/{id}/access")]
+[ApiController, Authorize, Route("api/databases/{id}/access")]
 public sealed class DatabaseAccessController(MinicloudDbContext db, DatabaseManagementService service, TimeProvider clock) : ControllerBase
 {
     [HttpPut]
@@ -48,6 +48,6 @@ public sealed class DatabaseAccessController(MinicloudDbContext db, DatabaseMana
         database.Revision++;
         database.UpdatedAt = clock.GetUtcNow();
         await db.SaveChangesAsync(ct);
-        return Results.Accepted($"/v1/databases/{id}/operations", new { operation.Id, operation.Kind, operation.Status });
+        return Results.Accepted($"/api/databases/{id}/operations", new { operation.Id, operation.Kind, operation.Status });
     });
 }

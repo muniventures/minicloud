@@ -63,9 +63,13 @@ public sealed partial class DatabaseOperationProcessor
         }
     }
 
+    private sealed record PersistedOperationActor(string Kind, string? UserId, string? ApiKeyId, string? OrganizationId, string[]? Scopes);
+
     private async Task<ActorIdentity> CurrentOperationActorAsync(DatabaseOperation operation, CancellationToken ct)
     {
-        var actor = JsonSerializer.Deserialize<ActorIdentity>(operation.ActorJson, Json) ?? throw new UnauthorizedAccessException();
+        var stored = JsonSerializer.Deserialize<PersistedOperationActor>(operation.ActorJson, Json) ?? throw new UnauthorizedAccessException();
+        var actor = new ActorIdentity(stored.Kind, stored.UserId, stored.ApiKeyId, stored.OrganizationId,
+            (stored.Scopes ?? []).ToHashSet(StringComparer.Ordinal));
         if (actor.IsApiKey)
         {
             var key = await db.ApiKeys.AsNoTracking().SingleOrDefaultAsync(x => x.Id == actor.ApiKeyId && x.OrganizationId == operation.OrganizationId && x.RevokedAt == null && (x.ExpiresAt == null || x.ExpiresAt > clock.GetUtcNow()), ct)

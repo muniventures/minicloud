@@ -203,7 +203,7 @@ public sealed class ProviderAccountService(MinicloudDbContext db, ISecretStore s
         return Enum.IsDefined(type);
     }
     public static string WireType(CloudProvider type) => type switch { CloudProvider.Hetzner => "hetzner", CloudProvider.DigitalOcean => "digital-ocean", CloudProvider.Vultr => "vultr", _ => throw new ArgumentOutOfRangeException(nameof(type)) };
-    private static string ServerName(string orgSlug, string appSlug) => $"minicloud-{orgSlug}-production-{appSlug}".ToLowerInvariant();
+    private static string ServerName(string orgSlug, string appSlug) => ManagedServerName.ForApp(orgSlug, appSlug);
     private static ProviderCatalogException ScopeUnverified() => new("provider_scope_unverified", "Credentials could not be verified against all existing resources. Restore access to the original cloud scope before replacing credentials.");
     private static void ValidateName(string name)
     {

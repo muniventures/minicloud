@@ -9,7 +9,7 @@ import { StatusBadge } from "@/core/components/StatusBadge";
 import { CopyButton } from "@/core/components/CopyButton";
 import { Star, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
-import { checkAppDomainAvailability, createAppCustomDomain, createAppDomain, deleteAppDomain, setAppDomainPrimary } from "../../../api/appsApi";
+import { checkAppDomainAvailability, createAppCustomDomain, createAppDomain, deleteAppDomain, setAppDomainPrimary } from "../../../api/environmentsApi";
 import { listCustomDomains, verifyCustomDomainOwnership } from "@/api/customDomainsApi";
 import { CustomDomainSetupDialog } from "./CustomDomainSetupDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";

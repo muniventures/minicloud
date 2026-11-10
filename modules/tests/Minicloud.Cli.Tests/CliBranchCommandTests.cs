@@ -40,8 +40,9 @@ public sealed class CliBranchCommandTests
 
             Assert.Equal(CliExitCodes.Success, exitCode);
             Assert.Equal([
-                "GET /v1/apps/app_main",
-                "DELETE /v1/apps/app_main/branches/app_branch"
+                "GET /api/apps/app_main",
+                "GET /api/environments/app_main",
+                "DELETE /api/environments/app_main/branches/app_branch"
             ], handler.Requests);
             Assert.Contains("Destroy branch 'feature-cart' and its Vultr VPS? [y/N]:", console.Output);
             Assert.Contains("Branch destroy queued: feature-cart", console.Output);
@@ -59,6 +60,8 @@ public sealed class CliBranchCommandTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests.Add($"{request.Method.Method} {request.RequestUri!.PathAndQuery}");
+            if (request.RequestUri!.AbsolutePath == "/api/apps/app_main")
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = System.Net.Http.Json.JsonContent.Create(CliApiFixtures.Application("app_main", "org_123", "app_main")) });
             if (request.Method == HttpMethod.Delete)
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
@@ -66,7 +69,7 @@ public sealed class CliBranchCommandTests
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("""{"id":"app_main","organizationId":"org_123","name":"Demo","slug":"demo","parentAppId":null,"branchName":null,"plan":"p0","database":"sqlite","branches":[{"id":"app_branch","name":"Demo (feature-cart)","slug":"demo-feature-cart","branchName":"feature-cart","plan":"p0-v-0","database":"sqlite","websiteUrl":"https://org-demo-web-feature-cart.app.muni.dev","createdAt":"2026-07-14T12:00:00Z"}],"latestDeployment":null}""")
+                Content = new StringContent("""{"id":"app_main","applicationId":"app_main","organizationId":"org_123","name":"Demo","slug":"demo","parentAppId":null,"branchName":null,"plan":"p0","database":"sqlite","branches":[{"id":"app_branch","name":"Demo (feature-cart)","slug":"demo-feature-cart","branchName":"feature-cart","plan":"p0-v-0","database":"sqlite","websiteUrl":"https://org-demo-web-feature-cart.app.muni.dev","createdAt":"2026-07-14T12:00:00Z"}],"latestDeployment":null}""")
             });
         }
     }

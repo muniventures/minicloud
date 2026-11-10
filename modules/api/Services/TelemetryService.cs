@@ -439,7 +439,7 @@ public sealed class TelemetryService(
             timeProvider);
 
         var accessOrigin = options?.Value?.AccessOrigin ?? "http://localhost:8088";
-        var queryUrl = $"{accessOrigin.TrimEnd('/')}/v1/logs";
+        var queryUrl = $"{accessOrigin.TrimEnd('/')}/api/logs";
         return new Minicloud.Common.Contracts.TelemetryReadTokenIssueResponse(token, expiresAt, queryUrl);
     }
 

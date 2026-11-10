@@ -3,8 +3,8 @@ import { buildDashboardPath, dashboardRoutes, navigationRoutes } from "./dashboa
 
 describe("dashboardRoutes", () => {
   it("builds parameterized paths", () => {
-    expect(buildDashboardPath(dashboardRoutes.appDeploymentDetail, { appId: "app_123", deploymentId: "dep_123" })).toBe(
-      "/apps/app_123/deployments/dep_123"
+    expect(buildDashboardPath(dashboardRoutes.environmentDetail, { applicationId: "application_123", environmentId: "environment_123", tab: "deployments" })).toBe(
+      "/apps/application_123/environments/environment_123/deployments"
     );
   });
 

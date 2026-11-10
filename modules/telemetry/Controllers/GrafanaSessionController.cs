@@ -7,7 +7,7 @@ namespace Minicloud.Telemetry.Controllers;
 public sealed record GrafanaExchangeRequest(string Code);
 
 [ApiController]
-[Route("v1/grafana")]
+[Route("api/grafana")]
 public sealed class GrafanaSessionController(
     GrafanaSessionService sessions,
     IOptions<TelemetryOptions> options) : ControllerBase

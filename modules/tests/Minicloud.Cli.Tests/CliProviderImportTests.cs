@@ -22,7 +22,7 @@ public sealed class CliProviderImportTests
             var handler = new Handler(); var console = new Console();
             var application = Application(directory.FullName, handler, console);
             Assert.Equal(CliExitCodes.Success, await application.RunAsync(["providers", "add", "--organization", "org", "--name", "Secondary", "--provider", "hetzner"], default));
-            Assert.Equal("/v1/providers", handler.Path);
+            Assert.Equal("/api/providers", handler.Path);
             Assert.Equal("synthetic-provider-import-token", handler.Body!.RootElement.GetProperty("credential").GetString());
             Assert.DoesNotContain("synthetic-provider-import-token", string.Join('\n', console.Messages));
             Assert.Contains(console.Messages, x => x.Contains("Secondary", StringComparison.Ordinal));
@@ -41,7 +41,7 @@ public sealed class CliProviderImportTests
             var application = Application(directory.FullName, handler, console);
             await File.WriteAllTextAsync(path, """{"organizationId":"org","providerAccountId":"provider_a","appBindings":[{"appId":"app_a","planName":"Small"}],"retainedVolumeIds":[]}""");
             Assert.Equal(CliExitCodes.Success, await application.RunAsync(["providers", "import-legacy", "--manifest", path], default));
-            Assert.Equal("/v1/providers/provider_a/import-legacy", handler.Path);
+            Assert.Equal("/api/providers/provider_a/import-legacy", handler.Path);
             Assert.Equal("app_a", handler.Body!.RootElement.GetProperty("appBindings")[0].GetProperty("appId").GetString());
             handler.Path = null;
             await File.WriteAllTextAsync(path, """{"organizationId":"org","providerAccountId":"provider_a","appBindings":[]}""");

@@ -4,13 +4,13 @@ export type DatabaseServer = { id: string; name: string; mode: string; engine: s
 export type BackupPolicy = { enabled: boolean; repositoryAppId?: string | null; frequencyHours: number; retentionDays: number; minimumCopies: number; keepLastCopies?: boolean; status?: string; nextDueAt?: string | null };
 export type BackupArtifact = { id: string; backupId: string; status: string; sizeBytes: number; completedAt?: string | null; expiresAt?: string | null };
 export type DatabaseOperation = { id: string; kind: string; status: string; errorMessage?: string | null; createdAt: string };
-export type Repository = { id: string; name: string };
-const base = "/v1/databases";
+export type Repository = { id: string; name: string; organizationId?: string; slug?: string; deletionStatus?: string | null };
+const base = "/api/databases";
 const idPath = (id: string) => `${base}/${encodeURIComponent(id)}`;
 export const listDatabases = (organizationId: string, signal?: AbortSignal) => apiRequest<Database[]>(`${base}?${new URLSearchParams({ organizationId })}`, { signal });
-export const listDatabaseServers = (organizationId: string, signal?: AbortSignal) => apiRequest<DatabaseServer[]>(`/v1/database-servers?${new URLSearchParams({ organizationId })}`, { signal });
-export const listRepositories = (organizationId: string, signal?: AbortSignal) => apiRequest<Repository[]>(`/v1/database-repositories?${new URLSearchParams({ organizationId })}`, { signal });
-export const createDatabaseServer = (body: { organizationId: string; name: string; mode: string; plan: string }) => apiRequest<DatabaseServer>("/v1/database-servers", { method: "POST", body });
+export const listDatabaseServers = (organizationId: string, signal?: AbortSignal) => apiRequest<DatabaseServer[]>(`/api/database-servers?${new URLSearchParams({ organizationId })}`, { signal });
+export const listRepositories = (organizationId: string, signal?: AbortSignal) => apiRequest<Repository[]>(`/api/database-repositories?${new URLSearchParams({ organizationId })}`, { signal });
+export const createDatabaseServer = (body: { organizationId: string; name: string; mode: string; plan: string }) => apiRequest<DatabaseServer>("/api/database-servers", { method: "POST", body });
 export const createDatabase = (body: { organizationId: string; name: string; serverId?: string; appId?: string; backup?: BackupPolicy }) => apiRequest<Database>(base, { method: "POST", body });
 export const getDatabase = (id: string, signal?: AbortSignal) => apiRequest<Database>(idPath(id), { signal });
 export const getBackupPolicy = (id: string, signal?: AbortSignal) => apiRequest<BackupPolicy | null>(`${idPath(id)}/backup-policy`, { signal });
@@ -21,8 +21,9 @@ export const requestDatabaseOperation = (id: string, body: { kind: string; backu
 export const setDatabaseAccess = (id: string, body: { mode: string; allowedCidrs: string[]; networkId?: string }) => apiRequest<DatabaseOperation>(`${idPath(id)}/access`, { method: "PUT", body });
 export type DatabaseCapabilities = { accessModes: string[]; providerAccountId?: string | null; region?: string | null; networkZone?: string | null };
 export const getDatabaseCapabilities = (id: string, signal?: AbortSignal) => apiRequest<DatabaseCapabilities>(`${idPath(id)}/capabilities`, { signal });
-export const createRepository = (body: { organizationId: string; name: string; plan: string; sizeGb: number }) => apiRequest<Repository>("/v1/database-repositories", { method: "POST", body });
-export const deleteDatabaseServer = (id: string) => apiRequest<DatabaseOperation>(`/v1/database-servers/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const createRepository = (body: { organizationId: string; name: string; plan: string; sizeGb: number }) => apiRequest<Repository>("/api/database-repositories", { method: "POST", body });
+export const deleteRepository = (id: string, confirmation: string) => apiRequest<void>(`/api/database-repositories/${encodeURIComponent(id)}`, { method: "DELETE", body: { confirmation } });
+export const deleteDatabaseServer = (id: string) => apiRequest<DatabaseOperation>(`/api/database-servers/${encodeURIComponent(id)}`, { method: "DELETE" });
 export type DatabaseConnection = { databaseId: string; engine: string; accessMode: string; databaseName: string; username: string; password: string; host: string | null; port: number; sslMode: string | null; endpointAvailable: boolean; caCertificatePem?: string | null };
 export const revealDatabaseConnection = (id: string) => apiRequest<DatabaseConnection>(`${idPath(id)}/connection/reveal`, { method: "POST" });
 export type DatabaseBinding = { id: string; databaseId: string; appId: string; serviceName: string; status: string; host?: string | null; port: number };
@@ -32,10 +33,10 @@ export const unbindDatabase = (id: string, bindingId: string) => apiRequest<void
 export type BackupRecoveryMaterial = { databaseId: string; engine: string; keyVersion: string; encryptionKey: string };
 export const exportBackupRecoveryMaterial = (id: string) => apiRequest<BackupRecoveryMaterial>(`${idPath(id)}/backup-recovery-material`, { method: "POST" });
 export type DatabaseNetwork = { id: string; organizationId: string; providerAccountId: string; name: string; region: string; ipRange: string; subnetRange: string; networkZone?: string | null; status: string };
-export const listDatabaseNetworks = (organizationId: string, signal?: AbortSignal) => apiRequest<DatabaseNetwork[]>(`/v1/database-networks?${new URLSearchParams({ organizationId })}`, { signal });
-export const createDatabaseNetwork = (body: { organizationId: string; name: string; plan: string; ipRange: string; subnetRange: string }) => apiRequest<DatabaseNetwork>("/v1/database-networks", { method: "POST", body });
+export const listDatabaseNetworks = (organizationId: string, signal?: AbortSignal) => apiRequest<DatabaseNetwork[]>(`/api/database-networks?${new URLSearchParams({ organizationId })}`, { signal });
+export const createDatabaseNetwork = (body: { organizationId: string; name: string; plan: string; ipRange: string; subnetRange: string }) => apiRequest<DatabaseNetwork>("/api/database-networks", { method: "POST", body });
 export const cancelDatabaseBackup = (id: string, operationId: string) => apiRequest<void>(`${idPath(id)}/operations/${encodeURIComponent(operationId)}/cancel`, { method: "POST" });
-export const deleteDatabaseNetwork = (networkId: string) => apiRequest<void>(`/v1/database-networks/${encodeURIComponent(networkId)}`, { method: "DELETE" });
+export const deleteDatabaseNetwork = (networkId: string) => apiRequest<void>(`/api/database-networks/${encodeURIComponent(networkId)}`, { method: "DELETE" });
 
 export const downloadBackupFile = (id: string, artifactId: string, fileName: "database.dump.enc" | "manifest.json.enc", signal?: AbortSignal) => apiDownload(`${idPath(id)}/backups/${encodeURIComponent(artifactId)}/files/${fileName}`, signal);
 

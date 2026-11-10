@@ -1,111 +1,81 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppsModule } from "./AppsModule";
-import { listApps } from "../../api/appsApi";
-import type { AppResponse } from "../../models/controlPlane";
+import { listApplications } from "../../api/applicationsApi";
+import { appsFixtureApplications } from "../../api/applicationsFixtures";
 
-vi.mock("../../api/appsApi", () => ({
-  listApps: vi.fn()
+vi.mock("../../api/applicationsApi", () => ({
+  listApplications: vi.fn(),
 }));
 
 vi.mock("../../core/auth/AuthProvider", () => ({
   useAuth: () => ({
-    selectedOrganization: { id: "org_123", name: "MuniVentures" }
-  })
+    selectedOrganization: { id: "org_fixture_01", name: "Fixture Org", role: "owner" },
+  }),
 }));
-
-const mockApps: AppResponse[] = [
-  {
-    id: "app_example-suite",
-    organizationId: "org_123",
-    name: "Example Suite",
-    slug: "example-suite",
-    plan: "p0",
-    database: "sqlite",
-    domains: [
-      {
-        id: "dom_1",
-        hostname: "muni-example-suite-admin.app.muni.dev",
-        url: "https://muni-example-suite-admin.app.muni.dev",
-        sslStatus: "active",
-        reserved: true
-      },
-      {
-        id: "dom_2",
-        hostname: "muni-example-suite-agency-ui.app.muni.dev",
-        url: "https://muni-example-suite-agency-ui.app.muni.dev",
-        sslStatus: "active",
-        reserved: true
-      }
-    ],
-    latestDeployment: {
-      id: "dep_1",
-      status: "failed",
-      completedAt: new Date(Date.now() - 14 * 60000).toISOString()
-    }
-  },
-  {
-    id: "app_astools",
-    organizationId: "org_123",
-    name: "As Tools",
-    slug: "as-tools",
-    plan: "p0",
-    database: "sqlite",
-    domains: [
-      {
-        id: "dom_3",
-        hostname: "muni-as-tools-as-route-analyzer.app.muni.dev",
-        url: "https://muni-as-tools-as-route-analyzer.app.muni.dev",
-        sslStatus: "active",
-        reserved: true
-      }
-    ],
-    latestDeployment: {
-      id: "dep_2",
-      status: "succeeded",
-      completedAt: new Date(Date.now() - 2 * 3600000).toISOString()
-    }
-  }
-];
 
 describe("AppsModule", () => {
   afterEach(cleanup);
-  beforeEach(() => { sessionStorage.clear(); vi.clearAllMocks(); vi.mocked(listApps).mockResolvedValue(mockApps); });
-  const mount = () => render(<MemoryRouter><AppsModule /></MemoryRouter>);
-  it("defaults to cards, reports runtime unavailable and has no empty More menu", async () => {
-    mount(); await screen.findByText("Example Suite");
-    expect(screen.getAllByText("Runtime unavailable")).toHaveLength(2);
-    expect(screen.queryByText("Healthy")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Card view" })).toHaveAttribute("aria-pressed", "true");
+  beforeEach(() => {
+    sessionStorage.clear();
+    vi.clearAllMocks();
+    vi.mocked(listApplications).mockResolvedValue(appsFixtureApplications());
   });
-  it("combines domain search and filters, preserves search and sorting on clear and refresh", async () => {
-    mount(); await screen.findByText("Example Suite");
-    fireEvent.change(screen.getByRole("textbox", { name: "Search apps" }), { target: { value: "route-analyzer" } });
+  const mount = () => render(<MemoryRouter><AppsModule /></MemoryRouter>);
+
+  it("shows each application once with environment subrows and no Plan/Runtime columns or filters", async () => {
+    mount();
+    await screen.findByText("MuniPages");
+    expect(screen.getByRole("columnheader", { name: "App" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Environment" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Latest deployment" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Actions" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Plan" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Runtime" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Card view" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "List view" })).not.toBeInTheDocument();
+    // production + staging are visible persistent subrows of one app
+    expect(screen.getByText("production")).toBeInTheDocument();
+    expect(screen.getByText("staging")).toBeInTheDocument();
+    expect(screen.getByText("No deployments yet")).toBeInTheDocument();
+  });
+
+  it("keeps previews collapsed behind a count and exposes them on demand", async () => {
+    mount();
+    await screen.findByText("MuniPages");
+    // feat-checkout (succeeded, no attention) is collapsed; fix-billing has no deployment
+    const toggle = await screen.findByRole("button", { name: /Show 2 previews/ });
+    expect(screen.queryByText("feat-checkout")).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(screen.getByText("feat-checkout")).toBeInTheDocument();
+    expect(screen.getByText("fix-billing")).toBeInTheDocument();
+  });
+
+  it("matches environment filters within one environment only and marks the match", async () => {
+    mount();
+    await screen.findByText("MuniPages");
     fireEvent.click(screen.getByRole("button", { name: "Filter & sort" }));
-    fireEvent.keyDown(screen.getByRole("combobox", { name: "Database" }), { key: "ArrowDown" });
-    fireEvent.click(await screen.findByRole("option", { name: "sqlite" }));
     fireEvent.keyDown(screen.getByRole("combobox", { name: "Latest deployment" }), { key: "ArrowDown" });
     fireEvent.click(await screen.findByRole("option", { name: "failed" }));
-    expect(screen.getByText("0 matching apps")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Descending" }));
-    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(screen.getByText("1 matching apps")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Descending" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.getByRole("textbox", { name: "Search apps" })).toHaveValue("route-analyzer");
-    fireEvent.click(screen.getByRole("button", { name: "Refresh apps" }));
-    await waitFor(() => expect(listApps).toHaveBeenCalledTimes(2));
-    expect(screen.queryByText("Example Suite")).not.toBeInTheDocument();
+    // staging (failed) matches; no other app has a failed latest deployment
+    expect(screen.getByText("staging")).toBeInTheDocument();
+    expect(screen.getByText("Matches filter")).toBeInTheDocument();
+    expect(screen.queryByText("EmptyApp")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("1 of 2 apps")).toBeInTheDocument());
   });
-  it("preserves results and chosen list mode across remount", async () => {
-    const view = mount(); await screen.findByText("Example Suite");
-    fireEvent.change(screen.getByRole("textbox", { name: "Search apps" }), { target: { value: "agency" } });
-    fireEvent.click(screen.getByRole("button", { name: "List view" }));
-    expect(screen.queryByText("As Tools")).not.toBeInTheDocument();
-    view.unmount(); mount(); await screen.findByText("Example Suite");
-    expect(screen.getByRole("button", { name: "List view" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("textbox", { name: "Search apps" })).toHaveValue("agency");
+
+  it("shows a zero-environment application with the Add environment action", async () => {
+    mount();
+    await screen.findByText("EmptyApp");
+    expect(screen.getByText("No environments")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add environment" })).toBeInTheDocument();
+  });
+
+  it("reports load failure with retry instead of empty success", async () => {
+    vi.mocked(listApplications).mockRejectedValue(new Error("Unable to load apps."));
+    mount();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load apps.");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 });

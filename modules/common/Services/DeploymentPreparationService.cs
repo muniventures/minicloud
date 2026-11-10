@@ -15,6 +15,9 @@ public sealed class DeploymentPreparationService(MinicloudDbContext db, Deployme
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
             if (db.Database.IsNpgsql())
             {
+                var applicationId = await db.Apps.Where(x => x.Id == appId).Select(x => x.ApplicationId).SingleAsync(ct);
+                if (applicationId is not null)
+                    await db.Applications.FromSqlInterpolated($"SELECT * FROM applications WHERE id = {applicationId} FOR UPDATE").AsNoTracking().SingleAsync(ct);
                 await db.Apps.FromSqlInterpolated($"SELECT * FROM apps WHERE id = {appId} FOR UPDATE").AsNoTracking().SingleAsync(ct);
             }
             var result = await action();

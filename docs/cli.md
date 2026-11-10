@@ -6,7 +6,7 @@ The current command is `minicloud`.
 
 The CLI has no default hosted instance. The first command needing a connection
 asks for the main service URL, such as `cloud.example.com` (HTTPS is assumed).
-It derives `https://api.cloud.example.com` and validates `GET /v1/instance`
+It derives `https://api.cloud.example.com` and validates `GET /api/instance`
 without credentials before saving the instance and its application domain.
 Configure DNS and TLS for the derived API hostname on your installation.
 
@@ -109,7 +109,7 @@ minicloud deploy --config path/to/minicloud.yml
 
 ## Managed VPS Plans
 
-The CLI deploys to the app identified by `appId` in `minicloud.yml`. Configure provider accounts and their plan mappings in the portal's **Providers** section. An organization can have multiple accounts of the same provider. Each plan selects one account, region and provider SKU; the CLI only needs the plan's name.
+The CLI deploys to an environment of the logical application identified by `appId` in `minicloud.yml`. Configure provider accounts and their plan mappings in the portal's **Providers** section. An organization can have multiple accounts of the same provider. Each plan selects one account, region and provider SKU; the CLI only needs the plan's name.
 
 New plans start with a UUID name and can be renamed. Names are unique within the organization, including across provider accounts. Discover the current names with:
 
@@ -312,7 +312,7 @@ minicloud deploy --no-publish
 | Field | Required | Description |
 | --- | --- | --- |
 | `app` | Yes | Stable app slug. Use lowercase letters, numbers, dashes, or underscores. |
-| `appId` | Yes | Stable Minicloud app ID. `minicloud deploy` requires this value and sends it with the deployment. |
+| `appId` | Yes | Canonical logical application ID. Runtime environment IDs are not accepted as application IDs; deployment selects a concrete environment before any build or upload. |
 | `database` | No | `sqlite` or `postgres`. |
 | `commitSha` | No | Optional source revision to attach to the deployment. |
 | `services` | Yes | Map of service definitions. One to ten services. |
@@ -625,7 +625,7 @@ or remove its deployment reference until that integration is configured.
 the deployment failure code and message. Secret-store outages report
 `secret_store_unavailable`; preparation failures do not wait for an unrelated SSH
 readiness timeout. CLI 2.0.1 requires the updated control API's
-`POST /v1/deployments/validate-secrets` endpoint for remote secret checks.
+`POST /api/deployments/validate-secrets` endpoint for remote secret checks.
 
 ## Local build visibility
 
@@ -680,12 +680,12 @@ The plan determines the provider: for example, `p0-v-0` selects Vultr and
 `p0-h-0` selects Hetzner. Plans are selected independently when environments are
 created. Use `--database sqlite|postgres` on `environments create` to override the
 application's database mode. All commands accept `--config path/to/minicloud.yml`.
-The dashboard's Environments panel also creates, renames and switches environments.
+The dashboard's app header switches environments; application settings manage the environment collection.
 
-Keep the application's root `appId` in your config. With a single environment,
-`minicloud deploy` selects it automatically. With multiple environments,
+New configs store the logical application's `appId`; existing root and child runtime IDs remain supported through explicit server identity mappings. One config can target any persistent environment in that application. With one active environment,
+`minicloud deploy` selects it automatically. With multiple active environments,
 `--environment <name>` is required, including when the config points at an
-environment's runtime ID. Unknown names fail before building or uploading.
+environment's runtime ID. The dashboard default does not select a CLI target. Unknown names, zero-environment apps, and deleting/deletion-failed targets fail before building or uploading. `logs`, secrets, domains, and `assets publish` accept the same `--environment` selection when targeting an application. Deployment IDs remain direct targets.
 Names use 1–63 letters, digits, dashes or underscores, starting with a letter or
 digit; uniqueness and CLI selection ignore case. Public services receive separate subdomains per environment; for example, the
 `web` service in `staging` uses `<org>-<app>-staging-web.<app-domain>`.

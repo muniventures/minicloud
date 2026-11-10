@@ -53,9 +53,9 @@ public sealed class DomainBindingService(
             binding.UpdatedAt = now;
         }
 
-        var parentSlug = app.ParentAppId is null
+        var parentSlug = app.RuntimeParentSlug ?? (app.ParentAppId is null
             ? null
-            : await db.Apps.Where(x => x.Id == app.ParentAppId).Select(x => x.Slug).SingleAsync(cancellationToken);
+            : await db.Apps.Where(x => x.Id == app.ParentAppId).Select(x => x.Slug).SingleAsync(cancellationToken));
 
         foreach (var service in publicServices)
         {

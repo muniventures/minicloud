@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listAppServices } from "@/api/appsApi";
+import { listAppServices } from "@/api/environmentsApi";
 import type { AppServiceInventoryResponse } from "@/models/controlPlane";
 
 export function useAppServiceInventory(

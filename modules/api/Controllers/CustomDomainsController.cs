@@ -11,31 +11,37 @@ namespace Minicloud.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("v1/custom-domains")]
+[Route("api/custom-domains")]
 public sealed class CustomDomainsController(
     MinicloudDbContext db, ControlPlaneAuthorization authorization, CustomDomainRegistrationService registrations) : ControllerBase
 {
     [HttpGet]
-    public async Task<IResult> List([FromQuery] string appId, CancellationToken ct)
+    public async Task<IResult> List([FromQuery] string appId, CancellationToken ct, [FromQuery] string? applicationId = null, [FromQuery] string? environmentId = null)
     {
-        if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), appId, OrganizationAction.ReadApps, ct))
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, ct);
+        if (ownershipError is not null) { return ownershipError; }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
+        if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), targetAppId, OrganizationAction.ReadApps, ct))
         {
             return EndpointResults.Forbidden();
         }
-        var rows = await db.CustomDomainRegistrations.AsNoTracking().Where(x => x.AppId == appId).OrderBy(x => x.Hostname).ToListAsync(ct);
+        var rows = await db.CustomDomainRegistrations.AsNoTracking().Where(x => x.AppId == targetAppId).OrderBy(x => x.Hostname).ToListAsync(ct);
         return Results.Ok(rows.Select(CustomDomainRegistrationService.ToResponse));
     }
 
     [HttpPost]
-    public async Task<IResult> Register([FromQuery] string appId, [FromBody] RegisterCustomDomainRequest request, CancellationToken ct)
+    public async Task<IResult> Register([FromQuery] string appId, [FromBody] RegisterCustomDomainRequest request, CancellationToken ct, [FromQuery] string? applicationId = null, [FromQuery] string? environmentId = null)
     {
-        if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), appId, OrganizationAction.WriteApps, ct))
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, ct);
+        if (ownershipError is not null) { return ownershipError; }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
+        if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), targetAppId, OrganizationAction.WriteApps, ct))
         {
             return EndpointResults.Forbidden();
         }
         try
         {
-            var row = await registrations.RegisterAsync((await db.Apps.SingleAsync(x => x.Id == appId, ct)).OrganizationId, appId, request.Hostname, ct, AuditEventService.ActorFor(RequirePrincipal(HttpContext).ToActorIdentity()));
+            var row = await registrations.RegisterAsync((await db.Apps.SingleAsync(x => x.Id == targetAppId, ct)).OrganizationId, targetAppId, request.Hostname, ct, AuditEventService.ActorFor(RequirePrincipal(HttpContext).ToActorIdentity()));
             return Results.Ok(CustomDomainRegistrationService.ToResponse(row));
         }
         catch (ArgumentException ex)
@@ -53,13 +59,16 @@ public sealed class CustomDomainsController(
     }
 
     [HttpPost("{id}/verify")]
-    public async Task<IResult> Verify([FromQuery] string appId, string id, CancellationToken ct)
+    public async Task<IResult> Verify([FromQuery] string appId, string id, CancellationToken ct, [FromQuery] string? applicationId = null, [FromQuery] string? environmentId = null)
     {
-        if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), appId, OrganizationAction.WriteApps, ct))
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, ct);
+        if (ownershipError is not null) { return ownershipError; }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
+        if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), targetAppId, OrganizationAction.WriteApps, ct))
         {
             return EndpointResults.Forbidden();
         }
-        var row = await db.CustomDomainRegistrations.SingleOrDefaultAsync(x => x.Id == id && x.AppId == appId, ct);
+        var row = await db.CustomDomainRegistrations.SingleOrDefaultAsync(x => x.Id == id && x.AppId == targetAppId, ct);
         if (row is null)
         {
             return EndpointResults.NotFound("domain_not_found", "Domain was not found.");
@@ -68,16 +77,19 @@ public sealed class CustomDomainsController(
         return Results.Ok(CustomDomainRegistrationService.ToResponse(row));
     }
     [HttpDelete("{id}")]
-    public async Task<IResult> Remove([FromQuery] string appId, string id, CancellationToken ct)
+    public async Task<IResult> Remove([FromQuery] string appId, string id, CancellationToken ct, [FromQuery] string? applicationId = null, [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, ct);
+        if (ownershipError is not null) { return ownershipError; }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var actor = RequirePrincipal(HttpContext).ToActorIdentity();
-        if (!await authorization.CanAccessAppAsync(actor, appId, OrganizationAction.WriteApps, ct))
+        if (!await authorization.CanAccessAppAsync(actor, targetAppId, OrganizationAction.WriteApps, ct))
         {
             return EndpointResults.Forbidden();
         }
         try
         {
-            return await registrations.RemoveAsync(appId, id, AuditEventService.ActorFor(actor), ct)
+            return await registrations.RemoveAsync(targetAppId, id, AuditEventService.ActorFor(actor), ct)
                 ? Results.NoContent()
                 : EndpointResults.NotFound("domain_not_found", "Domain was not found.");
         }

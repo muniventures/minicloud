@@ -84,7 +84,7 @@ public sealed class LocalBuildDeploymentSessionTests
         public bool RejectHeartbeat { get; set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
-            Assert.Equal("/v1/deployments/preparations/dep_test", request.RequestUri!.AbsolutePath);
+            Assert.Equal("/api/deployments/preparations/dep_test", request.RequestUri!.AbsolutePath);
             var update = (await request.Content!.ReadFromJsonAsync<UpdateDeploymentPreparationRequest>(ct))!;
             Updates.Add(update);
             if (update.Status == "heartbeat")

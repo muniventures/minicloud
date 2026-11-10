@@ -16,7 +16,7 @@ public sealed class ApiHttpArtifactRetriever : IArtifactRetriever
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(artifactId);
 
-        var requestUri = $"/v1/artifacts/{Uri.EscapeDataString(artifactId)}/file";
+        var requestUri = $"/api/artifacts/{Uri.EscapeDataString(artifactId)}/file";
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/zip"));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/octet-stream"));

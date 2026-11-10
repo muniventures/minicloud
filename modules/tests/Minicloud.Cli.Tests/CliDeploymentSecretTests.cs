@@ -100,7 +100,7 @@ public sealed class CliDeploymentSecretTests
         {
             var path = request.RequestUri!.AbsolutePath;
             Requests.Add(request.Method + " " + path);
-            if (path == "/v1/deployments/validate-secrets")
+            if (path == "/api/deployments/validate-secrets")
             {
                 Assert.DoesNotContain("sentinel-secret", request.Content!.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult());
                 return Task.FromResult(source is "service" or "app"
@@ -109,18 +109,19 @@ public sealed class CliDeploymentSecretTests
             }
             object response = path switch
             {
-                "/v1/me" => new { id = "usr_test", email = "test@example.com", organizations = new[] { new { id = "org_test", name = "Test", slug = "test", role = "owner" } } },
-                "/v1/apps/app_test" => new { id = "app_test", organizationId = "org_test", name = "Demo", slug = "demo", plan = "p0", database = "none", branches = Array.Empty<object>() },
-                "/v1/secrets" when request.Method == HttpMethod.Get => source is "service" or "app" or "other-service" or "deleted"
+                "/api/me" => new { id = "usr_test", email = "test@example.com", organizations = new[] { new { id = "org_test", name = "Test", slug = "test", role = "owner" } } },
+                "/api/apps/app_test" => CliApiFixtures.Application("app_test", "org_test", "app_test", database: "none"),
+                "/api/environments/app_test" => new { id = "app_test", applicationId = "app_test", organizationId = "org_test", name = "Demo", slug = "demo", plan = "p0", database = "none", branches = Array.Empty<object>() },
+                "/api/secrets" when request.Method == HttpMethod.Get => source is "service" or "app" or "other-service" or "deleted"
                     ? new[] { new { id = "sec_test", appId = "app_test", serviceName = source == "app" ? "" : source == "other-service" ? "worker" : "api", name = "INSTAGRAM_APP_SECRET", status = source == "deleted" ? "deleted" : "active" } }
                     : Array.Empty<object>(),
-                "/v1/secrets" => new { id = "sec_synced", appId = "app_test", serviceName = "api", name = "INSTAGRAM_APP_SECRET", status = "active" },
-                "/v1/deployments/dep_test/logs" => Array.Empty<object>(),
-                "/v1/deployments" => new { id = "dep_test", appId = "app_test", status = "queued" },
-                "/v1/deployments/dep_test" or "/v1/deployments/dep_test/refresh" => new { id = "dep_test", appId = "app_test", organizationId = "org_test", database = "none", status = source == "failure" ? "failed" : "succeeded", failureCode = "missing_service_secret", failureMessage = "Service 'api' references missing secret 'INSTAGRAM_APP_SECRET' for environment variable 'Instagram__AppSecret'.", services = Array.Empty<object>() },
+                "/api/secrets" => new { id = "sec_synced", appId = "app_test", serviceName = "api", name = "INSTAGRAM_APP_SECRET", status = "active" },
+                "/api/deployments/dep_test/logs" => Array.Empty<object>(),
+                "/api/deployments" => new { id = "dep_test", appId = "app_test", status = "queued" },
+                "/api/deployments/dep_test" or "/api/deployments/dep_test/refresh" => new { id = "dep_test", appId = "app_test", organizationId = "org_test", database = "none", status = source == "failure" ? "failed" : "succeeded", failureCode = "missing_service_secret", failureMessage = "Service 'api' references missing secret 'INSTAGRAM_APP_SECRET' for environment variable 'Instagram__AppSecret'.", services = Array.Empty<object>() },
                 _ => throw new InvalidOperationException("Unexpected request: " + request.Method + " " + path)
             };
-            if (path == "/v1/deployments" && request.Method == HttpMethod.Post) { DeploymentCreated = true; }
+            if (path == "/api/deployments" && request.Method == HttpMethod.Post) { DeploymentCreated = true; }
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(response) });
         }
     }

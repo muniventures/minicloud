@@ -40,7 +40,14 @@ public sealed class AppBranchServiceTests : IClassFixture<SqliteTestHarness>
             CreatedAt = now,
             UpdatedAt = now
         };
+        var application = new MinicloudApplication { Id = "application_branch", OrganizationId = organization.Id,
+            Organization = organization, Name = "Store", Slug = "store", NormalizedSlug = "store", DefaultEnvironmentId = parent.Id };
+        parent.ApplicationId = application.Id;
+        parent.Application = application;
+        parent.EnvironmentName = "production";
+        parent.NormalizedEnvironmentName = "production";
         db.Organizations.Add(organization);
+        db.Applications.Add(application);
         db.Apps.Add(parent);
         await db.SaveChangesAsync();
 

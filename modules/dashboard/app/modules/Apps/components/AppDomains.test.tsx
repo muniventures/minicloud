@@ -1,13 +1,13 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { listCustomDomains, removeCustomDomain, registerCustomDomain, verifyCustomDomainOwnership } from "@/api/customDomainsApi";
-import { createAppCustomDomain } from "@/api/appsApi";
+import { createAppCustomDomain } from "@/api/environmentsApi";
 import type { CustomDomainRegistrationResponse } from "@/models/controlPlane";
 import { AppDomains } from "./AppDomains";
 import { CustomDomainSetupDialog } from "./CustomDomainSetupDialog";
 
 vi.mock("@/api/customDomainsApi", () => ({ listCustomDomains: vi.fn(), removeCustomDomain: vi.fn(), registerCustomDomain: vi.fn(), verifyCustomDomainOwnership: vi.fn() }));
-vi.mock("@/api/appsApi", () => ({ createAppCustomDomain: vi.fn(), verifyAppDomain: vi.fn() }));
+vi.mock("@/api/environmentsApi", () => ({ createAppCustomDomain: vi.fn(), verifyAppDomain: vi.fn() }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 const registration: CustomDomainRegistrationResponse = { id: "reg", appId: "app", hostname: "app1.example.com", verificationToken: "mc-domain-verification=token", status: "pending", failureMessage: null, lastCheckedAt: null };
 
@@ -73,7 +73,8 @@ it("confirms domain removal and refreshes the app domain list", async () => {
   vi.mocked(listCustomDomains).mockResolvedValueOnce([registration]).mockResolvedValue([]);
   vi.mocked(removeCustomDomain).mockResolvedValue(undefined);
   render(<AppDomains organizationId="org" appId="app" services={[]} onSaved={vi.fn().mockResolvedValue(undefined)} onManageService={vi.fn()} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Remove app1.example.com" }));
+  fireEvent.pointerDown(await screen.findByRole("button", { name: "Actions for app1.example.com" }), { button: 0, ctrlKey: false });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Remove domain" }));
   expect(removeCustomDomain).not.toHaveBeenCalled();
   expect(screen.getByRole("alertdialog")).toHaveTextContent("Your DNS records remain at your provider");
   fireEvent.click(screen.getByRole("button", { name: "Remove domain" }));
@@ -81,11 +82,50 @@ it("confirms domain removal and refreshes the app domain list", async () => {
   expect(removeCustomDomain).toHaveBeenCalledWith("app", "reg");
 });
 
+it("uses compact owned-domain and hostname tables with no orphan Use CTA", async () => {
+  const verified: CustomDomainRegistrationResponse = { ...registration, status: "verified" };
+  const service = {
+    name: "web",
+    image: "img",
+    port: 80,
+    public: true,
+    path: "/",
+    healthPath: "/health",
+    domains: [
+      { id: "b1", hostname: "app.example.com", kind: "custom_domain", dnsStatus: "verified", applyStatus: "applied", sslStatus: "active", status: "active" },
+      { id: "b2", hostname: "old.example.com", kind: "custom_domain", dnsStatus: "verified", applyStatus: "applied", sslStatus: "active", status: "disabled" },
+    ],
+  };
+  vi.mocked(listCustomDomains).mockResolvedValue([verified]);
+  render(<AppDomains organizationId="org" appId="app" services={[service] as never} onSaved={vi.fn().mockResolvedValue(undefined)} onManageService={vi.fn()} />);
+
+  expect(await screen.findByRole("columnheader", { name: "Domain" })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Ownership" })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Hostname" })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Service" })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Routing" })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "HTTPS" })).toBeInTheDocument();
+  expect(screen.queryByText(/Use app1\.example\.com/)).not.toBeInTheDocument();
+  expect(screen.queryByText("Choose a public service")).not.toBeInTheDocument();
+  expect(screen.getByText("Disabled")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Add hostname" }));
+  fireEvent.click(screen.getByRole("combobox", { name: "Service" }));
+  fireEvent.click(await screen.findByRole("option", { name: "web" }));
+  fireEvent.click(screen.getByRole("combobox", { name: "Domain" }));
+  fireEvent.click(await screen.findByRole("option", { name: "app1.example.com" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+  expect(await screen.findByRole("dialog", { name: "Assign a service hostname" })).toBeInTheDocument();
+  expect(registerCustomDomain).not.toHaveBeenCalled();
+});
+
 it("keeps the domain visible when the server refuses removal", async () => {
   vi.mocked(listCustomDomains).mockResolvedValue([registration]);
   vi.mocked(removeCustomDomain).mockRejectedValue(new Error("Remove service hostnames first."));
   render(<AppDomains organizationId="org" appId="app" services={[]} onSaved={vi.fn().mockResolvedValue(undefined)} onManageService={vi.fn()} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Remove app1.example.com" }));
+  fireEvent.pointerDown(await screen.findByRole("button", { name: "Actions for app1.example.com" }), { button: 0, ctrlKey: false });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Remove domain" }));
   fireEvent.click(screen.getByRole("button", { name: "Remove domain" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Remove service hostnames first.");
   expect(screen.getByRole("button", { name: "Remove domain" })).toBeEnabled();

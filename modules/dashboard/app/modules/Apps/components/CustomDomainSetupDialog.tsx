@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/core/components/StatusBadge";
 import { listCustomDomains, registerCustomDomain, verifyCustomDomainOwnership } from "@/api/customDomainsApi";
-import { createAppCustomDomain, verifyAppDomain } from "@/api/appsApi";
+import { createAppCustomDomain, verifyAppDomain } from "@/api/environmentsApi";
 import type { CustomDomainRegistrationResponse, DomainBindingResponse } from "@/models/controlPlane";
 import { DomainDnsRecord } from "./DomainDnsRecord";
 

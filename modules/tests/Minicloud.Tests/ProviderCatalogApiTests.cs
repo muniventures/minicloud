@@ -22,6 +22,9 @@ namespace Minicloud.Tests;
 
 public sealed class ProviderCatalogApiTests : IAsyncLifetime
 {
+    private static CreateApplicationRequest ApplicationRequest(string organizationId, string name, string slug, string plan, string database) =>
+        new(organizationId, name, slug, new CreateInitialEnvironmentRequest("production", plan, database));
+
     private readonly SqliteConnection _connection = new("Data Source=:memory:");
     private CatalogApiFactory _factory = default!;
     private string _managementToken = default!;
@@ -51,11 +54,11 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
         Assert.Equal("hetzner", first.ProviderType);
         Assert.Equal("hetzner", second.ProviderType);
         Assert.Equal("vultr", third.ProviderType);
-        var accounts = (await client.GetFromJsonAsync<ProviderAccountResponse[]>($"/v1/providers?organizationId={OrganizationId}"))!;
+        var accounts = (await client.GetFromJsonAsync<ProviderAccountResponse[]>($"/api/providers?organizationId={OrganizationId}"))!;
         Assert.Equal(3, accounts.Length);
         foreach (var id in new[] { first.Id, second.Id, third.Id })
         {
-            var response = await client.GetAsync($"/v1/providers/{id}");
+            var response = await client.GetAsync($"/api/providers/{id}");
             var raw = await response.Content.ReadAsStringAsync();
             Assert.DoesNotContain("synthetic-", raw);
             Assert.DoesNotContain("credentialPath", raw, StringComparison.OrdinalIgnoreCase);
@@ -75,6 +78,31 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CredentialScopeDiscoveryUsesTheBoundedManagedServerName()
+    {
+        using var client = Client();
+        var account = await CreateAccountAsync(client, "Long runtime name", "synthetic-first-token");
+        const string organizationSlug = "minicloud-staging";
+        const string appSlug = "dbrepo-0123456789abcdef01234567";
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+            (await db.Organizations.SingleAsync(x => x.Id == OrganizationId)).Slug = organizationSlug;
+            db.Apps.Add(new MinicloudApp { Id = "long-name-runtime", OrganizationId = OrganizationId,
+                Name = "Database repository runtime", Slug = appSlug, EnvironmentKind = "internal" });
+            db.ServerInstances.Add(new ServerInstance { Id = "long-name-server", OrganizationId = OrganizationId,
+                AppId = "long-name-runtime", ProviderAccountId = account.Id, Provider = "Hetzner",
+                ProviderServerId = "123", Region = "nbg1", Status = "ready", BootstrapStatus = "ready" });
+            await db.SaveChangesAsync();
+        }
+        await ErrorAsync(await client.PutAsJsonAsync($"/api/providers/{account.Id}/credentials",
+            new ReplaceProviderCredentialRequest("synthetic-next-token", account.Revision)), "provider_scope_unverified");
+        var expected = ManagedServerName.ForApp(organizationSlug, appSlug);
+        Assert.Contains(_factory.Cloud.Requests, request => request.Credential == "synthetic-next-token"
+            && request.Uri?.Query == "?name=" + expected);
+    }
+
+    [Fact]
     public async Task PlanNamesStartAsUuidSupportUnicodeAndRetireOldNames()
     {
         using var client = Client();
@@ -82,23 +110,24 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
         var second = await CreateAccountAsync(client, "Second", "synthetic-second-token");
         var generated = await CreatePlanAsync(client, first.Id);
         Assert.True(Guid.TryParse(generated.Name, out _));
-        var renamed = await SuccessAsync<ProviderPlanResponse>(await client.PatchAsJsonAsync($"/v1/plans/{generated.Id}",
+        var renamed = await SuccessAsync<ProviderPlanResponse>(await client.PatchAsJsonAsync($"/api/plans/{generated.Id}",
             new UpdateProviderPlanRequest(generated.Revision, Name: "Small São Paulo")));
         Assert.Equal(generated.Id, renamed.Id);
         Assert.Equal("Small São Paulo", renamed.Name);
         Assert.True(renamed.Revision > generated.Revision);
-        await ErrorAsync(await client.PostAsJsonAsync("/v1/plans", PlanRequest(second.Id, "small sa\u0303o paulo")), "plan_name_taken");
-        await ErrorAsync(await client.PostAsJsonAsync("/v1/plans", PlanRequest(second.Id, generated.Name)), "plan_name_taken");
+        await ErrorAsync(await client.PostAsJsonAsync("/api/plans", PlanRequest(second.Id, "small sa\u0303o paulo")), "plan_name_taken");
+        await ErrorAsync(await client.PostAsJsonAsync("/api/plans", PlanRequest(second.Id, generated.Name)), "plan_name_taken");
 
-        var oldName = new CreateAppRequest(OrganizationId, "Old plan reference", "old-plan-ref", generated.Name, "none");
-        await ErrorAsync(await client.PostAsJsonAsync("/v1/apps", oldName), "plan_name_retired");
-        var app = await SuccessAsync<AppResponse>(await client.PostAsJsonAsync("/v1/apps", oldName with { Plan = "small são paulo" }));
+        var oldName = ApplicationRequest(OrganizationId, "Old plan reference", "old-plan-ref", generated.Name, "none");
+        await ErrorAsync(await client.PostAsJsonAsync("/api/apps", oldName), "plan_name_retired");
+        var createdApplication = await SuccessAsync<ApplicationResponse>(await client.PostAsJsonAsync("/api/apps", oldName with { InitialEnvironment = oldName.InitialEnvironment! with { Plan = "small são paulo" } }));
+        var app = Assert.Single(createdApplication.Environments);
         Assert.Equal("Small São Paulo", app.Plan);
-        var renamedAgain = await SuccessAsync<ProviderPlanResponse>(await client.PatchAsJsonAsync($"/v1/plans/{generated.Id}",
+        var renamedAgain = await SuccessAsync<ProviderPlanResponse>(await client.PatchAsJsonAsync($"/api/plans/{generated.Id}",
             new UpdateProviderPlanRequest(renamed.Revision, Name: "Primary small")));
-        Assert.Equal("Primary small", (await client.GetFromJsonAsync<AppResponse>($"/v1/apps/{app.Id}"))!.Plan);
-        await ErrorAsync(await client.DeleteAsync($"/v1/plans/{generated.Id}"), "plan_in_use");
-        await ErrorAsync(await client.PostAsJsonAsync("/v1/plans", PlanRequest(second.Id, renamed.Name)), "plan_name_taken");
+        Assert.Equal("Primary small", (await client.GetFromJsonAsync<EnvironmentDetailResponse>($"/api/environments/{app.Id}"))!.Plan);
+        await ErrorAsync(await client.DeleteAsync($"/api/plans/{generated.Id}"), "plan_in_use");
+        await ErrorAsync(await client.PostAsJsonAsync("/api/plans", PlanRequest(second.Id, renamed.Name)), "plan_name_taken");
         Assert.Equal(generated.Id, renamedAgain.Id);
     }
 
@@ -108,12 +137,12 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
         using var client = Client();
         var account = await CreateAccountAsync(client, "Primary", "synthetic-first-token");
         var plan = await CreatePlanAsync(client, account.Id, "Small shared name");
-        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/v1/plans/{plan.Id}")).StatusCode);
-        await ErrorAsync(await client.PostAsJsonAsync("/v1/plans", PlanRequest(account.Id, plan.Name)), "plan_name_taken");
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/plans/{plan.Id}")).StatusCode);
+        await ErrorAsync(await client.PostAsJsonAsync("/api/plans", PlanRequest(account.Id, plan.Name)), "plan_name_taken");
         var otherToken = await AddOrganizationAsync("org_other");
         using var other = Client(otherToken);
         var otherAccount = await CreateAccountAsync(other, "Other primary", "synthetic-other-token", organizationId: "org_other");
-        var sameName = await SuccessAsync<ProviderPlanResponse>(await other.PostAsJsonAsync("/v1/plans",
+        var sameName = await SuccessAsync<ProviderPlanResponse>(await other.PostAsJsonAsync("/api/plans",
             PlanRequest(otherAccount.Id, plan.Name) with { OrganizationId = "org_other" }));
         Assert.Equal(plan.Name, sameName.Name);
     }
@@ -125,15 +154,15 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
         var account = await CreateAccountAsync(owner, "Primary", "synthetic-first-token");
         var plan = await CreatePlanAsync(owner, account.Id, "Private plan");
         using var foreign = Client(await AddOrganizationAsync("org_foreign"));
-        Assert.Equal(HttpStatusCode.Forbidden, (await foreign.GetAsync($"/v1/providers?organizationId={OrganizationId}")).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await foreign.GetAsync($"/v1/plans?organizationId={OrganizationId}")).StatusCode);
-        Assert.False((await foreign.GetAsync($"/v1/providers/{account.Id}")).IsSuccessStatusCode);
-        Assert.False((await foreign.GetAsync($"/v1/plans/{plan.Id}")).IsSuccessStatusCode);
-        Assert.False((await foreign.PatchAsJsonAsync($"/v1/providers/{account.Id}", new UpdateProviderRequest(account.Revision, Name: "Hijacked"))).IsSuccessStatusCode);
-        Assert.False((await foreign.PatchAsJsonAsync($"/v1/plans/{plan.Id}", new UpdateProviderPlanRequest(plan.Revision, Name: "Hijacked"))).IsSuccessStatusCode);
-        await ErrorAsync(await foreign.PostAsJsonAsync("/v1/plans", PlanRequest(account.Id, "Foreign binding") with { OrganizationId = "org_foreign" }), "provider_not_found");
-        await ErrorAsync(await foreign.PostAsJsonAsync("/v1/apps", new CreateAppRequest("org_foreign", "Foreign app", "foreign-app", plan.Name, "none")), "plan_not_found");
-        Assert.Equal(account.Name, (await owner.GetFromJsonAsync<ProviderAccountResponse>($"/v1/providers/{account.Id}"))!.Name);
+        Assert.Equal(HttpStatusCode.Forbidden, (await foreign.GetAsync($"/api/providers?organizationId={OrganizationId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await foreign.GetAsync($"/api/plans?organizationId={OrganizationId}")).StatusCode);
+        Assert.False((await foreign.GetAsync($"/api/providers/{account.Id}")).IsSuccessStatusCode);
+        Assert.False((await foreign.GetAsync($"/api/plans/{plan.Id}")).IsSuccessStatusCode);
+        Assert.False((await foreign.PatchAsJsonAsync($"/api/providers/{account.Id}", new UpdateProviderRequest(account.Revision, Name: "Hijacked"))).IsSuccessStatusCode);
+        Assert.False((await foreign.PatchAsJsonAsync($"/api/plans/{plan.Id}", new UpdateProviderPlanRequest(plan.Revision, Name: "Hijacked"))).IsSuccessStatusCode);
+        await ErrorAsync(await foreign.PostAsJsonAsync("/api/plans", PlanRequest(account.Id, "Foreign binding") with { OrganizationId = "org_foreign" }), "provider_not_found");
+        await ErrorAsync(await foreign.PostAsJsonAsync("/api/apps", ApplicationRequest("org_foreign", "Foreign app", "foreign-app", plan.Name, "none")), "plan_not_found");
+        Assert.Equal(account.Name, (await owner.GetFromJsonAsync<ProviderAccountResponse>($"/api/providers/{account.Id}"))!.Name);
     }
 
     [Fact]
@@ -144,12 +173,13 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
         var plan = await CreatePlanAsync(owner, account.Id, "Deployable small");
         using var deploy = Client(await AddKeyAsync(OrganizationId,
             [ApiKeyScopes.AppsRead, ApiKeyScopes.AppsWrite, ApiKeyScopes.DeploymentsCreate, ApiKeyScopes.DeploymentsRead, ApiKeyScopes.PlansRead]));
-        Assert.Single((await deploy.GetFromJsonAsync<ProviderPlanResponse[]>($"/v1/plans?organizationId={OrganizationId}"))!);
-        Assert.Equal(HttpStatusCode.Forbidden, (await deploy.PostAsJsonAsync("/v1/providers", new CreateProviderRequest(OrganizationId, "Unauthorized", "hetzner", "synthetic-denied"))).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await deploy.PutAsJsonAsync($"/v1/providers/{account.Id}/credentials", new ReplaceProviderCredentialRequest("synthetic-denied", account.Revision))).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await deploy.PostAsJsonAsync("/v1/plans", PlanRequest(account.Id, "Unauthorized"))).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await deploy.PatchAsJsonAsync($"/v1/plans/{plan.Id}", new UpdateProviderPlanRequest(plan.Revision, Name: "Unauthorized"))).StatusCode);
-        var app = await SuccessAsync<AppResponse>(await deploy.PostAsJsonAsync("/v1/apps", new CreateAppRequest(OrganizationId, "Allowed app", "allowed-app", plan.Name, "none")));
+        Assert.Single((await deploy.GetFromJsonAsync<ProviderPlanResponse[]>($"/api/plans?organizationId={OrganizationId}"))!);
+        Assert.Equal(HttpStatusCode.Forbidden, (await deploy.PostAsJsonAsync("/api/providers", new CreateProviderRequest(OrganizationId, "Unauthorized", "hetzner", "synthetic-denied"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await deploy.PutAsJsonAsync($"/api/providers/{account.Id}/credentials", new ReplaceProviderCredentialRequest("synthetic-denied", account.Revision))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await deploy.PostAsJsonAsync("/api/plans", PlanRequest(account.Id, "Unauthorized"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await deploy.PatchAsJsonAsync($"/api/plans/{plan.Id}", new UpdateProviderPlanRequest(plan.Revision, Name: "Unauthorized"))).StatusCode);
+        var createdApplication = await SuccessAsync<ApplicationResponse>(await deploy.PostAsJsonAsync("/api/apps", ApplicationRequest(OrganizationId, "Allowed app", "allowed-app", plan.Name, "none")));
+        var app = Assert.Single(createdApplication.Environments);
         Assert.Equal(plan.Name, app.Plan);
         Assert.DoesNotContain(_factory.Cloud.Requests, request => request.Credential == "synthetic-denied");
     }
@@ -163,9 +193,9 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
     {
         var token = await AddDashboardUserAsync(role);
         using var client = Client(token);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/v1/providers?organizationId={OrganizationId}")).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/v1/plans?organizationId={OrganizationId}")).StatusCode);
-        var response = await client.PostAsJsonAsync("/v1/providers", new CreateProviderRequest(OrganizationId, role.ToString(), "hetzner", "synthetic-role-token"));
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/providers?organizationId={OrganizationId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/plans?organizationId={OrganizationId}")).StatusCode);
+        var response = await client.PostAsJsonAsync("/api/providers", new CreateProviderRequest(OrganizationId, role.ToString(), "hetzner", "synthetic-role-token"));
         Assert.Equal(canManage ? HttpStatusCode.Created : HttpStatusCode.Forbidden, response.StatusCode);
     }
 
@@ -175,19 +205,19 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
         using var client = Client();
         var account = await CreateAccountAsync(client, "Primary", "synthetic-first-token");
         var plan = await CreatePlanAsync(client, account.Id, "Small");
-        var disabledPlan = await SuccessAsync<ProviderPlanResponse>(await client.PatchAsJsonAsync($"/v1/plans/{plan.Id}", new UpdateProviderPlanRequest(plan.Revision, Enabled: false)));
-        await ErrorAsync(await client.PatchAsJsonAsync($"/v1/plans/{plan.Id}", new UpdateProviderPlanRequest(plan.Revision, Name: "Stale edit")), "revision_conflict");
+        var disabledPlan = await SuccessAsync<ProviderPlanResponse>(await client.PatchAsJsonAsync($"/api/plans/{plan.Id}", new UpdateProviderPlanRequest(plan.Revision, Enabled: false)));
+        await ErrorAsync(await client.PatchAsJsonAsync($"/api/plans/{plan.Id}", new UpdateProviderPlanRequest(plan.Revision, Name: "Stale edit")), "revision_conflict");
         Assert.False(disabledPlan.Enabled);
-        await ErrorAsync(await client.PostAsJsonAsync("/v1/apps", new CreateAppRequest(OrganizationId, "Disabled", "disabled", plan.Name, "none")), "plan_disabled");
-        await SuccessAsync<ProviderPlanResponse>(await client.PatchAsJsonAsync($"/v1/plans/{plan.Id}", new UpdateProviderPlanRequest(disabledPlan.Revision, Enabled: true)));
-        var disabledAccount = await SuccessAsync<ProviderAccountResponse>(await client.PatchAsJsonAsync($"/v1/providers/{account.Id}", new UpdateProviderRequest(account.Revision, Enabled: false)));
-        await ErrorAsync(await client.PatchAsJsonAsync($"/v1/providers/{account.Id}", new UpdateProviderRequest(account.Revision, Name: "Stale account")), "revision_conflict");
+        await ErrorAsync(await client.PostAsJsonAsync("/api/apps", ApplicationRequest(OrganizationId, "Disabled", "disabled", plan.Name, "none")), "plan_disabled");
+        await SuccessAsync<ProviderPlanResponse>(await client.PatchAsJsonAsync($"/api/plans/{plan.Id}", new UpdateProviderPlanRequest(disabledPlan.Revision, Enabled: true)));
+        var disabledAccount = await SuccessAsync<ProviderAccountResponse>(await client.PatchAsJsonAsync($"/api/providers/{account.Id}", new UpdateProviderRequest(account.Revision, Enabled: false)));
+        await ErrorAsync(await client.PatchAsJsonAsync($"/api/providers/{account.Id}", new UpdateProviderRequest(account.Revision, Name: "Stale account")), "revision_conflict");
         Assert.False(disabledAccount.Enabled);
-        var catalog = Assert.Single((await client.GetFromJsonAsync<ProviderPlanResponse[]>($"/v1/plans?organizationId={OrganizationId}"))!);
+        var catalog = Assert.Single((await client.GetFromJsonAsync<ProviderPlanResponse[]>($"/api/plans?organizationId={OrganizationId}"))!);
         Assert.True(catalog.Enabled);
         Assert.False(catalog.AccountEnabled);
-        await ErrorAsync(await client.PostAsJsonAsync("/v1/apps", new CreateAppRequest(OrganizationId, "Disabled account", "disabled-account", plan.Name, "none")), "provider_disabled");
-        await ErrorAsync(await client.PostAsJsonAsync("/v1/plans", PlanRequest(account.Id, "New mapping")), "provider_disabled");
+        await ErrorAsync(await client.PostAsJsonAsync("/api/apps", ApplicationRequest(OrganizationId, "Disabled account", "disabled-account", plan.Name, "none")), "provider_disabled");
+        await ErrorAsync(await client.PostAsJsonAsync("/api/plans", PlanRequest(account.Id, "New mapping")), "provider_disabled");
     }
 
     [Fact]
@@ -198,7 +228,7 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
         string originalPath;
         await using (var scope = _factory.Services.CreateAsyncScope())
             originalPath = (await scope.ServiceProvider.GetRequiredService<MinicloudDbContext>().ProviderAccounts.SingleAsync()).CredentialPath;
-        var replacement = await client.PutAsJsonAsync($"/v1/providers/{account.Id}/credentials", new ReplaceProviderCredentialRequest("synthetic-rejected-token", account.Revision));
+        var replacement = await client.PutAsJsonAsync($"/api/providers/{account.Id}/credentials", new ReplaceProviderCredentialRequest("synthetic-rejected-token", account.Revision));
         Assert.False(replacement.IsSuccessStatusCode);
         Assert.DoesNotContain("synthetic-rejected-token", await replacement.Content.ReadAsStringAsync());
         await using (var scope = _factory.Services.CreateAsyncScope())
@@ -207,11 +237,11 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
             Assert.Equal(originalPath, saved.CredentialPath);
             Assert.Equal(account.Revision, saved.Revision);
         }
-        var check = await SuccessAsync<ProviderValidationResponse>(await client.PostAsync($"/v1/providers/{account.Id}/validate", null));
+        var check = await SuccessAsync<ProviderValidationResponse>(await client.PostAsync($"/api/providers/{account.Id}/validate", null));
         Assert.Equal("valid", check.Status);
         var requestCount = _factory.Cloud.Requests.Count;
         _factory.Secrets.Available = false;
-        var unavailable = await SuccessAsync<ProviderValidationResponse>(await client.PostAsync($"/v1/providers/{account.Id}/validate", null));
+        var unavailable = await SuccessAsync<ProviderValidationResponse>(await client.PostAsync($"/api/providers/{account.Id}/validate", null));
         Assert.Equal("credentials_unavailable", unavailable.Status);
         Assert.Equal(requestCount, _factory.Cloud.Requests.Count);
     }
@@ -220,11 +250,11 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
     public async Task UnsupportedProviderTypesAreRejectedBeforeSecretsOrCloudDispatch()
     {
         using var client = Client();
-        var types = (await client.GetFromJsonAsync<ProviderTypeResponse[]>("/v1/provider-types"))!;
+        var types = (await client.GetFromJsonAsync<ProviderTypeResponse[]>("/api/provider-types"))!;
         Assert.Equal(new[] { "digital-ocean", "hetzner", "vultr" }, types.Select(x => x.Type).OrderBy(x => x).ToArray());
         Assert.True(types.Single(x => x.Type == "hetzner").SupportsStorage);
         Assert.All(types.Where(x => x.Type != "hetzner"), type => Assert.False(type.SupportsStorage));
-        await ErrorAsync(await client.PostAsJsonAsync("/v1/providers", new CreateProviderRequest(OrganizationId, "Unsupported", "arbitrary-provider", "synthetic-token")), "provider_type_unsupported");
+        await ErrorAsync(await client.PostAsJsonAsync("/api/providers", new CreateProviderRequest(OrganizationId, "Unsupported", "arbitrary-provider", "synthetic-token")), "provider_type_unsupported");
         Assert.Empty(_factory.Secrets.Values);
         Assert.Empty(_factory.Cloud.Requests);
     }
@@ -241,9 +271,9 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
                 OrganizationId = OrganizationId, ProviderAccountId = account.Id, Name = "uploads", Region = "nbg1", SizeGb = 20, ProviderVolumeId = "volume-1" });
             await db.SaveChangesAsync();
         }
-        await ErrorAsync(await client.DeleteAsync($"/v1/providers/{account.Id}"), "provider_in_use");
+        await ErrorAsync(await client.DeleteAsync($"/api/providers/{account.Id}"), "provider_in_use");
         Assert.Single(_factory.Secrets.Values);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/v1/providers/{account.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/providers/{account.Id}")).StatusCode);
     }
 
     [Fact]
@@ -252,13 +282,14 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
         using var client = Client();
         var account = await CreateAccountAsync(client, "Primary", "synthetic-first-token");
         var plan = await CreatePlanAsync(client, account.Id, "Original name");
-        var app = await SuccessAsync<AppResponse>(await client.PostAsJsonAsync("/v1/apps", new CreateAppRequest(OrganizationId, "Prepared app", "prepared-app", plan.Name, "none")));
-        await SuccessAsync<DeploymentCreateResponse>(await client.PostAsJsonAsync("/v1/deployments/preparations",
+        var createdApplication = await SuccessAsync<ApplicationResponse>(await client.PostAsJsonAsync("/api/apps", ApplicationRequest(OrganizationId, "Prepared app", "prepared-app", plan.Name, "none")));
+        var app = Assert.Single(createdApplication.Environments);
+        await SuccessAsync<DeploymentCreateResponse>(await client.PostAsJsonAsync("/api/deployments/preparations",
             new StartDeploymentPreparationRequest(app.Id, Guid.NewGuid().ToString("D"), ["api"])));
-        var locked = (await client.GetFromJsonAsync<ProviderPlanResponse>($"/v1/plans/{plan.Id}"))!;
+        var locked = (await client.GetFromJsonAsync<ProviderPlanResponse>($"/api/plans/{plan.Id}"))!;
         Assert.True(locked.ProvisioningLocked);
-        await ErrorAsync(await client.PatchAsJsonAsync($"/v1/plans/{plan.Id}", new UpdateProviderPlanRequest(locked.Revision, Region: "hel1")), "plan_mapping_locked");
-        var renamed = await SuccessAsync<ProviderPlanResponse>(await client.PatchAsJsonAsync($"/v1/plans/{plan.Id}", new UpdateProviderPlanRequest(locked.Revision, Name: "Current name")));
+        await ErrorAsync(await client.PatchAsJsonAsync($"/api/plans/{plan.Id}", new UpdateProviderPlanRequest(locked.Revision, Region: "hel1")), "plan_mapping_locked");
+        var renamed = await SuccessAsync<ProviderPlanResponse>(await client.PatchAsJsonAsync($"/api/plans/{plan.Id}", new UpdateProviderPlanRequest(locked.Revision, Name: "Current name")));
         Assert.Equal("Current name", renamed.Name);
         await using var scope = _factory.Services.CreateAsyncScope();
         var reservation = await scope.ServiceProvider.GetRequiredService<MinicloudDbContext>().Deployments.SingleAsync();
@@ -281,14 +312,15 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
         var second = await CreateAccountAsync(client, "Second account", "synthetic-second-token");
         var firstPlan = await CreatePlanAsync(client, first.Id, "First small");
         var secondPlan = await CreatePlanAsync(client, second.Id, "Second small");
-        var app = await SuccessAsync<AppResponse>(await client.PostAsJsonAsync("/v1/apps",
-            new CreateAppRequest(OrganizationId, "Unprovisioned app", "unprovisioned-app", firstPlan.Name, "none")));
-        var preparation = await SuccessAsync<DeploymentCreateResponse>(await client.PostAsJsonAsync("/v1/deployments/preparations",
+        var createdApplication = await SuccessAsync<ApplicationResponse>(await client.PostAsJsonAsync("/api/apps",
+            ApplicationRequest(OrganizationId, "Unprovisioned app", "unprovisioned-app", firstPlan.Name, "none")));
+        var app = Assert.Single(createdApplication.Environments);
+        var preparation = await SuccessAsync<DeploymentCreateResponse>(await client.PostAsJsonAsync("/api/deployments/preparations",
             new StartDeploymentPreparationRequest(app.Id, Guid.NewGuid().ToString("D"), ["api"])));
         if (terminalStatus == "canceled")
-            Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/v1/deployments/{preparation.Id}/cancel", null)).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/deployments/{preparation.Id}/cancel", null)).StatusCode);
         else
-            Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsJsonAsync($"/v1/deployments/preparations/{preparation.Id}",
+            Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsJsonAsync($"/api/deployments/preparations/{preparation.Id}",
                 new UpdateDeploymentPreparationRequest(app.Id, "failed"))).StatusCode);
         await using (var scope = _factory.Services.CreateAsyncScope())
         {
@@ -300,12 +332,12 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
         var dispatchCount = _factory.Cloud.Requests.Count;
-        var selection = await client.PostAsJsonAsync($"/v1/apps/{app.Id}/plan", new SelectAppPlanRequest(secondPlan.Name));
+        var selection = await client.PostAsJsonAsync($"/api/environments/{app.Id}/plan", new SelectAppPlanRequest(secondPlan.Name));
         if (canChangePlan)
         {
-            var selected = await SuccessAsync<AppResponse>(selection);
+            var selected = await SuccessAsync<EnvironmentDetailResponse>(selection);
             Assert.Equal(secondPlan.Id, selected.PlanId);
-            var retry = await SuccessAsync<DeploymentCreateResponse>(await client.PostAsJsonAsync("/v1/deployments/preparations",
+            var retry = await SuccessAsync<DeploymentCreateResponse>(await client.PostAsJsonAsync("/api/deployments/preparations",
                 new StartDeploymentPreparationRequest(app.Id, Guid.NewGuid().ToString("D"), ["api"])));
             await using var scope = _factory.Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
@@ -315,7 +347,7 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
         else
         {
             await ErrorAsync(selection, "plan_change_requires_migration");
-            Assert.Equal(firstPlan.Id, (await client.GetFromJsonAsync<AppResponse>($"/v1/apps/{app.Id}"))!.PlanId);
+            Assert.Equal(firstPlan.Id, (await client.GetFromJsonAsync<EnvironmentDetailResponse>($"/api/environments/{app.Id}"))!.PlanId);
         }
         Assert.Equal(dispatchCount, _factory.Cloud.Requests.Count);
     }
@@ -326,9 +358,10 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
         using var client = Client();
         var account = await CreateAccountAsync(client, "Reserved account", "synthetic-original-token");
         var plan = await CreatePlanAsync(client, account.Id, "Reserved small");
-        var app = await SuccessAsync<AppResponse>(await client.PostAsJsonAsync("/v1/apps",
-            new CreateAppRequest(OrganizationId, "Reserved app", "reserved-app", plan.Name, "none")));
-        await SuccessAsync<DeploymentCreateResponse>(await client.PostAsJsonAsync("/v1/deployments/preparations",
+        var createdApplication = await SuccessAsync<ApplicationResponse>(await client.PostAsJsonAsync("/api/apps",
+            ApplicationRequest(OrganizationId, "Reserved app", "reserved-app", plan.Name, "none")));
+        var app = Assert.Single(createdApplication.Environments);
+        await SuccessAsync<DeploymentCreateResponse>(await client.PostAsJsonAsync("/api/deployments/preparations",
             new StartDeploymentPreparationRequest(app.Id, Guid.NewGuid().ToString("D"), ["api"])));
         string originalPath, originalGeneration;
         string? originalVersion;
@@ -342,7 +375,7 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
             Assert.Empty(await db.ServerInstances.ToListAsync());
             Assert.False((await db.Deployments.SingleAsync()).ProviderCreationAttempted);
         }
-        var response = await client.PutAsJsonAsync($"/v1/providers/{account.Id}/credentials",
+        var response = await client.PutAsJsonAsync($"/api/providers/{account.Id}/credentials",
             new ReplaceProviderCredentialRequest("synthetic-different-scope-token", originalRevision));
         await ErrorAsync(response, "provider_scope_unverified");
         await using (var scope = _factory.Services.CreateAsyncScope())
@@ -370,9 +403,9 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
     private static Task<ProviderPlanResponse> CreatePlanAsync(HttpClient client, string accountId, string? name = null) =>
         CreatePlanCoreAsync(client, PlanRequest(accountId, name));
     private static async Task<ProviderPlanResponse> CreatePlanCoreAsync(HttpClient client, CreateProviderPlanRequest body) =>
-        await SuccessAsync<ProviderPlanResponse>(await client.PostAsJsonAsync("/v1/plans", body));
+        await SuccessAsync<ProviderPlanResponse>(await client.PostAsJsonAsync("/api/plans", body));
     private static async Task<ProviderAccountResponse> CreateAccountAsync(HttpClient client, string name, string credential, string providerType = "hetzner", string organizationId = OrganizationId) =>
-        await SuccessAsync<ProviderAccountResponse>(await client.PostAsJsonAsync("/v1/providers", new CreateProviderRequest(organizationId, name, providerType, credential)));
+        await SuccessAsync<ProviderAccountResponse>(await client.PostAsJsonAsync("/api/providers", new CreateProviderRequest(organizationId, name, providerType, credential)));
     private static async Task<T> SuccessAsync<T>(HttpResponseMessage response)
     {
         Assert.True(response.IsSuccessStatusCode, $"HTTP {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}");

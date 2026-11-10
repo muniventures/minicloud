@@ -30,14 +30,8 @@ export const dashboardRoutes = {
   plans: defineRoute({ key: "plans", name: "Plans", path: "/plans", layout: "main", nav: { label: "Plans", icon: Server, group: "main" } }),
   providerAccounts: defineRoute({ key: "providerAccounts", name: "Provider accounts", path: "/plans/accounts", layout: "main" }),
   providers: defineRoute({ key: "providers", name: "Providers", path: "/providers", layout: "main" }),
-  appDetail: defineRoute({ key: "appDetail", name: "App detail", path: "/apps/:appId", layout: "main" }),
-  appDeployments: defineRoute({ key: "appDeployments", name: "App deployments", path: "/apps/:appId/deployments", layout: "main" }),
-  appDeploymentDetail: defineRoute({
-    key: "appDeploymentDetail",
-    name: "Deployment detail",
-    path: "/apps/:appId/deployments/:deploymentId",
-    layout: "main"
-  }),
+  appDetail: defineRoute({ key: "appDetail", name: "Application", path: "/apps/:applicationId", layout: "main" }),
+  environmentDetail: defineRoute({ key: "environmentDetail", name: "Environment", path: "/apps/:applicationId/environments/:environmentId/:tab", layout: "main" }),
   deployments: defineRoute({
     key: "deployments",
     name: "Deployments",

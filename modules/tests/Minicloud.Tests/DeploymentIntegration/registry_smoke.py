@@ -50,7 +50,7 @@ def main():
       REGISTRY_HTTP_SECRET: {secrets.token_hex(32)}
       REGISTRY_STORAGE_DELETE_ENABLED: 'true'
       REGISTRY_AUTH: token
-      REGISTRY_AUTH_TOKEN_REALM: {base}/v1/registry/token
+      REGISTRY_AUTH_TOKEN_REALM: {base}/api/registry/token
       REGISTRY_AUTH_TOKEN_SERVICE: minicloud-registry
       REGISTRY_AUTH_TOKEN_ISSUER: minicloud-registry
       REGISTRY_AUTH_TOKEN_ROOTCERTBUNDLE: /auth/cert.pem
@@ -108,7 +108,8 @@ networks:
             salt = secrets.token_bytes(16)
             hashed = "pbkdf2_sha256$210000$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(hashlib.pbkdf2_hmac("sha256", secret.encode(), salt, 210000)).decode()
             sql(f"INSERT INTO organizations(id,name,slug,created_at,updated_at) VALUES('{organization}','Registry test','{organization}',now(),now()); "
-                f"INSERT INTO apps(id,organization_id,name,slug,plan,database,created_at,updated_at) VALUES('{app}','{organization}','Registry test','{app}','P0','None',now(),now()); "
+                f"INSERT INTO applications(id,organization_id,name,slug,normalized_slug,default_environment_id,created_at,updated_at) VALUES('application_{app}','{organization}','Registry test','{app}','{app}','{app}',now(),now()); "
+                f"INSERT INTO apps(id,organization_id,application_id,name,slug,plan,database,environment_name,normalized_environment_name,environment_kind,created_at,updated_at) VALUES('{app}','{organization}','application_{app}','Registry test','{app}','P0','None','production','production','persistent',now(),now()); "
                 f"INSERT INTO api_keys(id,organization_id,name,key_prefix,key_hash,scopes_json,created_at,updated_at) VALUES('key_{suffix}','{organization}','Registry test','{prefix}','{hashed}','[\"apps:read\",\"deployments:create\",\"deployments:read\"]',now(),now());")
             return app, secret
 
@@ -120,26 +121,26 @@ networks:
                   compose("exec", "-T", "api", "df", "-k", "/registry-data").stdout, file=sys.stderr)
             app, token = seed(component.RUN_ID)
             foreign_app, foreign_token = seed("f" + component.RUN_ID)
-            status, target = request(f"/v1/apps/{app}/image-build-target", token=token)
+            status, target = request(f"/api/environments/{app}/image-build-target", token=token)
             assert status == 200, (status, target)
-            assert request(f"/v1/apps/{app}/image-build-target", token=foreign_token)[0] == 403
+            assert request(f"/api/environments/{app}/image-build-target", token=foreign_token)[0] == 403
             # Real PostgreSQL app-row locking serializes competing CLI reservations.
             preparation_app, preparation_token = seed("p" + component.RUN_ID)
             starts = [{"appId": preparation_app, "idempotencyKey": str(__import__("uuid").uuid4()), "serviceNames": ["api"]} for _ in range(2)]
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-                reservations = list(pool.map(lambda body: request("/v1/deployments/preparations", "POST", body, preparation_token), starts))
+                reservations = list(pool.map(lambda body: request("/api/deployments/preparations", "POST", body, preparation_token), starts))
             assert sorted(item[0] for item in reservations) == [201, 409], reservations
             winner = next(index for index, item in enumerate(reservations) if item[0] == 201)
             reserved = reservations[winner][1]
             assert reserved["status"] == "waiting_for_build"
-            assert request("/v1/deployments/preparations", "POST", starts[winner], preparation_token)[1]["id"] == reserved["id"]
-            assert request("/v1/deployments/preparations/" + reserved["id"], "POST", {"appId": preparation_app, "status": "heartbeat"}, preparation_token)[0] == 204
-            assert request("/v1/deployments/preparations/" + reserved["id"], "POST", {"appId": preparation_app, "status": "failed"}, foreign_token)[0] == 403
+            assert request("/api/deployments/preparations", "POST", starts[winner], preparation_token)[1]["id"] == reserved["id"]
+            assert request("/api/deployments/preparations/" + reserved["id"], "POST", {"appId": preparation_app, "status": "heartbeat"}, preparation_token)[0] == 204
+            assert request("/api/deployments/preparations/" + reserved["id"], "POST", {"appId": preparation_app, "status": "failed"}, foreign_token)[0] == 403
             admission = {"appId": preparation_app, "database": "none", "preparationId": reserved["id"],
                          "services": [{"name": "api", "image": "busybox:1.37", "port": 8080, "public": True, "path": "/", "healthPath": "/"}]}
-            status, prepared = request("/v1/deployments", "POST", admission, preparation_token)
+            status, prepared = request("/api/deployments", "POST", admission, preparation_token)
             assert status == 201 and prepared["id"] == reserved["id"], (status, prepared)
-            assert request("/v1/deployments/preparations/" + reserved["id"], "POST", {"appId": preparation_app, "status": "failed"}, preparation_token)[0] == 409
+            assert request("/api/deployments/preparations/" + reserved["id"], "POST", {"appId": preparation_app, "status": "failed"}, preparation_token)[0] == 409
             assert sql(f"SELECT count(*) FROM deployments WHERE app_id='{preparation_app}'") == "1"
             original_config = Path(os.environ.get("DOCKER_CONFIG", Path.home() / ".docker"))
             docker_config = directory / "docker"
@@ -160,11 +161,11 @@ networks:
             for number in range(3):
                 if number == 2:
                     (source / "index.html").write_text("expired orphan smoke\n")
-                status, publication = request(f"/v1/apps/{app}/image-publications", "POST", {
+                status, publication = request(f"/api/environments/{app}/image-publications", "POST", {
                     "serviceName": "api", "inputSha256": hashlib.sha256(b"registry-smoke").hexdigest(), "target": target, "idempotencyKey": __import__("uuid").uuid4().__str__()}, token)
                 assert status == 201, (status, publication)
                 identity = publication["id"]
-                status, credentials = request(f"/v1/apps/{app}/image-publications/{identity}/credentials", "POST", token=token)
+                status, credentials = request(f"/api/environments/{app}/image-publications/{identity}/credentials", "POST", token=token)
                 assert status == 200, (status, credentials)
                 config.setdefault("auths", {})[credentials["registry"]] = {"auth": base64.b64encode((credentials["username"] + ":" + credentials["password"]).encode()).decode()}
                 config.setdefault("credHelpers", {}).pop(credentials["registry"], None)
@@ -178,15 +179,15 @@ networks:
                 digest = json.loads(metadata.read_text())["containerimage.digest"]
                 if number == 2:
                     scope = urllib.parse.urlencode({"service": "minicloud-registry", "scope": "repository:" + publication["repository"] + ":pull,push"})
-                    status, bearer = request("/v1/registry/token?" + scope, headers={"Authorization": "Basic " + base64.b64encode((credentials["username"] + ":" + credentials["password"]).encode()).decode()})
+                    status, bearer = request("/api/registry/token?" + scope, headers={"Authorization": "Basic " + base64.b64encode((credentials["username"] + ":" + credentials["password"]).encode()).decode()})
                     assert status == 200
                     status, orphan_manifest = request("/v2/" + publication["repository"] + "/manifests/" + digest, token=bearer["token"], headers={"Accept": "application/vnd.oci.image.manifest.v1+json"})
                     assert status == 200, (status, orphan_manifest)
                     orphan_digest = digest
                     orphan_layer = orphan_manifest["layers"][-1]["digest"]
-                status, ready = request(f"/v1/apps/{app}/image-publications/{identity}/complete", "POST", {"manifestDigest": digest}, token)
+                status, ready = request(f"/api/environments/{app}/image-publications/{identity}/complete", "POST", {"manifestDigest": digest}, token)
                 assert status == 200, (status, ready)
-                assert request(f"/v1/apps/{app}/image-publications/{identity}", token=foreign_token)[0] == 403
+                assert request(f"/api/environments/{app}/image-publications/{identity}", token=foreign_token)[0] == 403
                 charged = int(sql(f"SELECT COALESCE(sum(charged_bytes),0) FROM registry_sessions WHERE image_publication_id='{identity}'"))
                 evidence.append({"digest": digest, "sizeBytes": ready["sizeBytes"], "uploadedBytes": charged, "seconds": round(time.monotonic() - started, 2)})
                 if number == 1:
@@ -197,10 +198,10 @@ networks:
             (source / "index.html").write_text("registry smoke\n")
             assert evidence[1]["uploadedBytes"] < evidence[0]["uploadedBytes"], evidence
             assert sql("SELECT count(*) FROM deployment_artifacts") == "0"
-            status, queued = request("/v1/deployments", "POST", {"appId": app, "database": "none", "services": [{"name": "api", "imagePublicationId": identity, "port": 8080, "public": True, "path": "/", "healthPath": "/"}]}, token)
+            status, queued = request("/api/deployments", "POST", {"appId": app, "database": "none", "services": [{"name": "api", "imagePublicationId": identity, "port": 8080, "public": True, "path": "/", "healthPath": "/"}]}, token)
             assert status == 201, (status, queued)
             assert sql(f"SELECT image FROM deployment_services WHERE deployment_id='{queued['id']}'").endswith("@" + evidence[1]["digest"])
-            assert request(f"/v1/deployments/{queued['id']}/dispatch", "POST", token=token)[0] == 200
+            assert request(f"/api/deployments/{queued['id']}/dispatch", "POST", token=token)[0] == 200
             sql(f"UPDATE deployments SET status='Canceled',completed_at=now() WHERE id='{queued['id']}'")
             # Keep the real build visible long enough to observe waiting before queue admission.
             with (source / "Dockerfile").open("a") as build_file:
@@ -208,7 +209,7 @@ networks:
             component.run("dotnet", "build", "modules/cli/Minicloud.Cli.csproj", "--no-restore", "-v", "quiet", "-m:1", "-nr:false", timeout=180)
             customer_config = directory / "minicloud.yml"
             customer_config.write_text(f"""app: {app}
-appId: {app}
+appId: application_{app}
 database: none
 buildJobs: 3
 services:
@@ -286,23 +287,23 @@ services:
 
             scope = urllib.parse.urlencode({"service": "minicloud-registry", "scope": "repository:" + publication["repository"] + ":pull"})
             basic = "Basic " + base64.b64encode((pull_session + ":" + pull_password).encode()).decode()
-            status, pull_token = request("/v1/registry/token?" + scope, headers={"Authorization": basic})
+            status, pull_token = request("/api/registry/token?" + scope, headers={"Authorization": basic})
             assert status == 200
             assert request("/v2/" + publication["repository"] + "/manifests/" + orphan_digest, token=pull_token["token"])[0] == 403
             assert request("/v2/org/org_foreign/app/app_foreign/service/api/manifests/" + evidence[1]["digest"], token=pull_token["token"])[0] == 403
             sql(f"UPDATE deployments SET ownership_token='changed-owner' WHERE id='{queued['id']}'")
-            assert request("/v1/registry/token?" + scope, headers={"Authorization": basic})[0] == 401
+            assert request("/api/registry/token?" + scope, headers={"Authorization": basic})[0] == 401
             sql(f"UPDATE deployments SET ownership_token='registry-smoke-owner' WHERE id='{queued['id']}'; UPDATE registry_sessions SET server_id=NULL WHERE id='{pull_session}'")
-            assert request("/v1/registry/token?" + scope, headers={"Authorization": basic})[0] == 401
+            assert request("/api/registry/token?" + scope, headers={"Authorization": basic})[0] == 401
             sql(f"UPDATE registry_sessions SET server_id='srv_{component.RUN_ID}' WHERE id='{pull_session}'")
 
-            assert request(f"/v1/deployments/{queued['id']}/dispatch", "POST", token=token)[0] == 409
+            assert request(f"/api/deployments/{queued['id']}/dispatch", "POST", token=token)[0] == 409
 
             operator = hashlib.sha256((directory / "auth/key.pem").read_bytes()).hexdigest()
             assert request("/internal/registry/maintenance", "POST", {"action": "begin"}, token)[0] == 401
             status, state = request("/internal/registry/maintenance", "POST", {"action": "begin"}, headers={"X-Minicloud-Registry-Operator": operator})
             assert status == 200, (status, state)
-            assert request(f"/v1/apps/{app}/image-publications", "POST", {"serviceName": "api", "inputSha256": "b"*64, "target": target, "idempotencyKey": str(__import__("uuid").uuid4())}, token)[0] == 503
+            assert request(f"/api/environments/{app}/image-publications", "POST", {"serviceName": "api", "inputSha256": "b"*64, "target": target, "idempotencyKey": str(__import__("uuid").uuid4())}, token)[0] == 503
             # Snapshot immutable registry bytes and a transactionally consistent control-plane dump.
             snapshot = directory / "restore-data"
             shutil.copytree(directory / "data", snapshot)
@@ -321,7 +322,7 @@ services:
             component.run("docker", "run", "-d", "--rm", "--name", restore_registry, "--network", component.PROJECT + "_default",
                           "--user", fixture_user,
                           "-v", str(snapshot) + ":/var/lib/registry", "-v", str(directory / "auth/cert.pem") + ":/auth/cert.pem:ro",
-                          "-e", "REGISTRY_AUTH=token", "-e", f"REGISTRY_AUTH_TOKEN_REALM=http://127.0.0.1:{restore_port}/v1/registry/token",
+                          "-e", "REGISTRY_AUTH=token", "-e", f"REGISTRY_AUTH_TOKEN_REALM=http://127.0.0.1:{restore_port}/api/registry/token",
                           "-e", "REGISTRY_AUTH_TOKEN_SERVICE=minicloud-registry", "-e", "REGISTRY_AUTH_TOKEN_ISSUER=minicloud-registry", "-e", "REGISTRY_AUTH_TOKEN_ROOTCERTBUNDLE=/auth/cert.pem",
                           "-e", "OTEL_TRACES_EXPORTER=none", REGISTRY_IMAGE)
             api_container = compose("ps", "-q", "api").stdout.strip()
@@ -338,7 +339,7 @@ services:
             component.until(lambda: subprocess.run(["curl", "-fsS", f"http://127.0.0.1:{restore_port}/health"], capture_output=True).returncode == 0, 60, "restored API startup")
             query = urllib.parse.urlencode({"service": "minicloud-registry", "scope": "repository:" + publication["repository"] + ":pull"})
             basic = base64.b64encode((pull_session + ":" + pull_password).encode()).decode()
-            auth_request = urllib.request.Request(f"http://127.0.0.1:{restore_port}/v1/registry/token?" + query, headers={"Authorization": "Basic " + basic})
+            auth_request = urllib.request.Request(f"http://127.0.0.1:{restore_port}/api/registry/token?" + query, headers={"Authorization": "Basic " + basic})
             with urllib.request.urlopen(auth_request, timeout=30) as response:
                 restored_token = json.load(response)["token"]
             manifest_request = urllib.request.Request(f"http://127.0.0.1:{restore_port}/v2/" + publication["repository"] + "/manifests/" + evidence[1]["digest"], headers={"Authorization": "Bearer " + restored_token, "Accept": "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"})
@@ -363,18 +364,18 @@ services:
             assert sql("SELECT count(*) FROM image_publications WHERE retired_at IS NOT NULL") == "1"
             # An authorized push session can check repository blobs after GC; the retired graph cannot.
             sql(f"UPDATE server_instances SET build_platform='linux/amd64', build_platform_observed_at=now() WHERE id='srv_{component.RUN_ID}'")
-            status, target = request(f"/v1/apps/{app}/image-build-target", token=token)
+            status, target = request(f"/api/environments/{app}/image-build-target", token=token)
             assert status == 200
-            status, candidate = request(f"/v1/apps/{app}/image-publications", "POST", {"serviceName": "api", "inputSha256": "c"*64, "target": target, "idempotencyKey": str(__import__("uuid").uuid4())}, token)
+            status, candidate = request(f"/api/environments/{app}/image-publications", "POST", {"serviceName": "api", "inputSha256": "c"*64, "target": target, "idempotencyKey": str(__import__("uuid").uuid4())}, token)
             assert status == 201
-            status, probe = request(f"/v1/apps/{app}/image-publications/{candidate['id']}/credentials", "POST", token=token)
+            status, probe = request(f"/api/environments/{app}/image-publications/{candidate['id']}/credentials", "POST", token=token)
             assert status == 200
-            status, probe_token = request("/v1/registry/token?" + scope, headers={"Authorization": "Basic " + base64.b64encode((probe["username"] + ":" + probe["password"]).encode()).decode()})
+            status, probe_token = request("/api/registry/token?" + scope, headers={"Authorization": "Basic " + base64.b64encode((probe["username"] + ":" + probe["password"]).encode()).decode()})
             assert status == 200
             assert request("/v2/" + publication["repository"] + "/blobs/" + orphan_layer, "HEAD", token=probe_token["token"])[0] == 404
             assert request("/v2/" + publication["repository"] + "/manifests/" + evidence[1]["digest"], token=probe_token["token"], headers={"Accept": "application/vnd.oci.image.manifest.v1+json"})[0] == 200
-            assert request(f"/v1/apps/{app}/image-publications/{candidate['id']}/credentials", "POST", token=token)[0] == 200
-            assert request(f"/v1/apps/{app}/image-publications/{candidate['id']}/credentials", "POST", token=token)[0] == 429
+            assert request(f"/api/environments/{app}/image-publications/{candidate['id']}/credentials", "POST", token=token)[0] == 200
+            assert request(f"/api/environments/{app}/image-publications/{candidate['id']}/credentials", "POST", token=token)[0] == 429
             stats = component.run("docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", registry_container).stdout.strip()
             print(json.dumps({"registryImage": REGISTRY_IMAGE, "status": "passed", "pushes": evidence, "sourceZipCount": 0, "deploymentAdmission": "digest-pinned", "cliLocalPublication": "passed; monitoring canceled after queue admission", "localBuildPreparation": "visible_before_build_same_record_admission_and_concurrent_exclusion", "dockerPullAndHttp": "passed", "runtimeImagePreparation": "passed; fixture lease and host architecture", "tenantIsolation": "passed", "isolatedMetadataAndBlobRestore": "passed", "fencedGc": "passed", "expiredOrphanCollected": "passed", "workerAndServerScope": "passed", "uploadSessionQuota": "passed", "managedRedispatch": "passed", "registryMemory": stats}))
         except Exception:

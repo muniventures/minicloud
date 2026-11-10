@@ -11,7 +11,9 @@ public sealed record CreateDeploymentRequest(
     IReadOnlyList<DeploymentServiceRequest> Services,
     string? PostgresPassword = null,
     string? PreparationId = null,
-    string? Plan = null);
+    string? Plan = null,
+    string? ApplicationId = null,
+    string? EnvironmentId = null);
 
 public sealed record DeploymentServiceRequest(
     string Name,
@@ -35,7 +37,9 @@ public sealed record DeploymentCreateResponse(
     string StatusUrl,
     string? WebsiteUrl,
     DateTimeOffset CreatedAt,
-    string? PostgresPassword = null);
+    string? PostgresPassword = null,
+    string? ApplicationId = null,
+    string? EnvironmentId = null);
 
 public sealed record DeploymentResponse(
     string Id,
@@ -53,7 +57,9 @@ public sealed record DeploymentResponse(
     DateTimeOffset? CompletedAt,
     string? AssetReleaseId = null,
     DateTimeOffset? CancellationRequestedAt = null,
-    DateTimeOffset? RequeuedAt = null);
+    DateTimeOffset? RequeuedAt = null,
+    string? ApplicationId = null,
+    string? EnvironmentId = null);
 
 public sealed record DeploymentServiceResponse(
     string Name,
@@ -74,7 +80,9 @@ public sealed record CreateDeploymentArtifactRequest(
     string ContentType,
     long SizeBytes,
     string Sha256,
-    object Manifest);
+    object Manifest,
+    string? ApplicationId = null,
+    string? EnvironmentId = null);
 
 public sealed record DeploymentArtifactCreateResponse(
     string Id,
@@ -84,7 +92,9 @@ public sealed record DeploymentArtifactCreateResponse(
     string UploadUrl,
     long SizeBytes,
     string Sha256,
-    DateTimeOffset ExpiresAt);
+    DateTimeOffset ExpiresAt,
+    string? ApplicationId = null,
+    string? EnvironmentId = null);
 
 public sealed record DeploymentArtifactResponse(
     string Id,
@@ -94,14 +104,18 @@ public sealed record DeploymentArtifactResponse(
     long SizeBytes,
     string Sha256,
     DateTimeOffset CreatedAt,
-    DateTimeOffset ExpiresAt);
+    DateTimeOffset ExpiresAt,
+    string? ApplicationId = null,
+    string? EnvironmentId = null);
 
 public sealed record DeploymentEventResponse(
     string Id,
     string Level,
     string Message,
     string? MetadataJson,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string? ApplicationId = null,
+    string? EnvironmentId = null);
 
 public sealed record DeploymentLogResponse(
     string Id,
@@ -126,5 +140,5 @@ public sealed record DeploymentActivityStepResponse(
     DateTimeOffset? StartedAt,
     DateTimeOffset? CompletedAt);
 
-public sealed record StartDeploymentPreparationRequest(string AppId, string IdempotencyKey, IReadOnlyList<string> ServiceNames, string? Plan = null);
-public sealed record UpdateDeploymentPreparationRequest(string AppId, string Status, string Stage = "build");
+public sealed record StartDeploymentPreparationRequest(string AppId, string IdempotencyKey, IReadOnlyList<string> ServiceNames, string? Plan = null, string? ApplicationId = null, string? EnvironmentId = null);
+public sealed record UpdateDeploymentPreparationRequest(string AppId, string Status, string Stage = "build", string? ApplicationId = null, string? EnvironmentId = null);

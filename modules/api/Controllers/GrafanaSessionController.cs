@@ -36,14 +36,14 @@ public sealed class GrafanaSessionController(
         }
 
         var request = HttpContext.Request;
-        return $"{request.Scheme}://{request.Host}/v1/grafana/query-gateway";
+        return $"{request.Scheme}://{request.Host}/api/grafana/query-gateway";
     }
 
     private static IResult HiddenNotFound() =>
         EndpointResults.NotFound("grafana_not_found", "The requested resource was not found.");
 
     [Authorize]
-    [HttpPost("v1/apps/{appId}/grafana-session")]
+    [HttpPost("api/environments/{appId}/grafana-session")]
     public async Task<IResult> Launch(
         [FromRoute] string appId,
         [FromBody] GrafanaLaunchRequest? request,
@@ -80,7 +80,7 @@ public sealed class GrafanaSessionController(
                     AppId = app.Id,
                     Destination = destination
                 };
-                using var msg = new HttpRequestMessage(HttpMethod.Post, $"{telemetryUrl}/internal/v1/telemetry/launch-code")
+                using var msg = new HttpRequestMessage(HttpMethod.Post, $"{telemetryUrl}/internal/api/telemetry/launch-code")
                 {
                     Content = System.Net.Http.Json.JsonContent.Create(launchReq)
                 };
@@ -120,7 +120,7 @@ public sealed class GrafanaSessionController(
         Response.Headers.CacheControl = "no-store";
         Response.Headers.Pragma = "no-cache";
         var exchangeUrl = !string.IsNullOrWhiteSpace(telemetryOptions.Value.AccessOrigin)
-            ? $"{telemetryOptions.Value.AccessOrigin.TrimEnd('/')}/v1/grafana/exchange"
+            ? $"{telemetryOptions.Value.AccessOrigin.TrimEnd('/')}/api/grafana/exchange"
             : null;
         var grafanaBase = !string.IsNullOrWhiteSpace(telemetryOptions.Value.AccessOrigin)
             ? $"{telemetryOptions.Value.AccessOrigin.TrimEnd('/')}/grafana/"
@@ -131,7 +131,7 @@ public sealed class GrafanaSessionController(
     /// <summary>
     /// POST-only exchange: no GET/PUT/DELETE route exists, so other verbs 405.
     /// </summary>
-    [HttpPost("v1/grafana/exchange")]
+    [HttpPost("api/grafana/exchange")]
     public async Task<IResult> Exchange(
         [FromBody] GrafanaExchangeRequest request,
         CancellationToken cancellationToken)
@@ -158,7 +158,7 @@ public sealed class GrafanaSessionController(
         return Results.Ok(new GrafanaExchangeResponse(outcome.Destination!, outcome.ExpiresAt!.Value));
     }
 
-    [HttpPost("v1/grafana/logout")]
+    [HttpPost("api/grafana/logout")]
     public async Task<IResult> Logout(CancellationToken cancellationToken)
     {
         if (!sessions.IsOriginAllowed(Request.Headers.Origin.ToString()))
@@ -183,7 +183,7 @@ public sealed class GrafanaSessionController(
     }
 
     [Authorize]
-    [HttpGet("v1/apps/{appId}/grafana-explore-url")]
+    [HttpGet("api/environments/{appId}/grafana-explore-url")]
     public async Task<IResult> ExploreUrl(
         [FromRoute] string appId,
         [FromServices] GrafanaProvisioningService provisioning,

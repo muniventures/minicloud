@@ -9,6 +9,7 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
     public DbSet<User> Users => Set<User>();
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<OrganizationMember> OrganizationMembers => Set<OrganizationMember>();
+    public DbSet<MinicloudApplication> Applications => Set<MinicloudApplication>();
     public DbSet<MinicloudApp> Apps => Set<MinicloudApp>();
     public DbSet<AppSecret> AppSecrets => Set<AppSecret>();
     public DbSet<AppServiceSecret> AppServiceSecrets => Set<AppServiceSecret>();
@@ -258,19 +259,48 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
             entity.Property(x => x.UpdatedAt).HasColumnName("updated_at");
         });
 
+        modelBuilder.Entity<MinicloudApplication>(entity =>
+        {
+            entity.ToTable("applications");
+            entity.HasKey(x => x.Id);
+            entity.HasAlternateKey(x => new { x.OrganizationId, x.Id });
+            entity.HasIndex(x => new { x.OrganizationId, x.Slug }).IsUnique();
+            entity.HasIndex(x => new { x.OrganizationId, x.NormalizedSlug }).IsUnique();
+            entity.HasIndex(x => x.LegacyRootAppId).IsUnique();
+            entity.Property(x => x.Name).HasMaxLength(120);
+            entity.Property(x => x.Slug).HasMaxLength(63);
+            entity.Property(x => x.NormalizedSlug).HasMaxLength(63);
+            entity.HasOne(x => x.Organization)
+                .WithMany(x => x.Applications)
+                .HasForeignKey(x => x.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<MinicloudApp>(entity =>
         {
             entity.ToTable("apps");
             entity.HasIndex(x => new { x.OrganizationId, x.Slug }).IsUnique();
             entity.HasIndex(x => new { x.ParentAppId, x.BranchName }).IsUnique();
+            entity.HasIndex(x => new { x.ApplicationId, x.NormalizedEnvironmentName }).IsUnique();
+            entity.HasOne(x => x.Application)
+                .WithMany(x => x.Environments)
+                .HasForeignKey(x => new { x.OrganizationId, x.ApplicationId })
+                .HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.ParentApp)
                 .WithMany(x => x.Branches)
                 .HasForeignKey(x => x.ParentAppId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.Property(x => x.OrganizationId).HasColumnName("organization_id");
+            entity.Property(x => x.ApplicationId).HasColumnName("application_id");
             entity.Property(x => x.ParentAppId).HasColumnName("parent_app_id");
             entity.Property(x => x.BranchName).HasColumnName("branch_name");
             entity.Property(x => x.EnvironmentName).HasColumnName("environment_name").HasMaxLength(63);
+            entity.Property(x => x.NormalizedEnvironmentName).HasColumnName("normalized_environment_name").HasMaxLength(63);
+            entity.Property(x => x.EnvironmentKind).HasColumnName("environment_kind").HasMaxLength(32).HasDefaultValue(EnvironmentKinds.Persistent);
+            entity.Property(x => x.RuntimeParentSlug).HasColumnName("runtime_parent_slug").HasMaxLength(63);
+            entity.Property(x => x.SourceBranch).HasColumnName("source_branch").HasMaxLength(63);
+            entity.Property(x => x.SourceEnvironmentId).HasColumnName("source_environment_id");
             entity.Property(x => x.EnvironmentKey).HasColumnName("environment_key");
             entity.HasIndex(x => x.EnvironmentKey).IsUnique();
             entity.Property(x => x.Plan).HasConversion<string>().HasColumnName("plan");

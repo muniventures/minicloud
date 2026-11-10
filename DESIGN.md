@@ -3,7 +3,10 @@
 ## Source of truth
 
 Status: Active for the Plans and Provider accounts redesign; not a replacement
-for unrelated dashboard modules. Date: 2026-11-09.
+for unrelated dashboard modules. Apps/operations extension: Approved design, 2026-11-09;
+[Apps and operations UX](docs/specs/apps-operations-ux.md) governs the approved
+App → Environment → Services screens and drawings. Implementation and release
+acceptance are separate. Date: 2026-11-09.
 
 - Detailed contract: [Plan management UX](docs/specs/plan-management-ux.md).
 - Domain contract: [Provider accounts and named plans](docs/specs/provider-accounts-and-plans.md).
@@ -92,15 +95,41 @@ backend identifiers and secret-store implementation details in ordinary forms.
 
 ## Implementation constraints
 
-This is a dashboard presentation change using existing React/shadcn components
+The Plans/Provider accounts work is a dashboard presentation change using
+existing React/shadcn components
 and APIs. No database migration, provider catalog integration or runtime/CLI change
 is required. Existing authorization, revision checks, naming rules and immutable
 placements remain authoritative. Preserve unrelated concurrent source changes.
 Implementation must validate the detailed acceptance criteria and dashboard checks;
 mockups alone are not implementation evidence.
 
+## Apps and operations extension (Approved design)
+
+The approved spec linked above extends the same shell, collection toolbar, table, dialog,
+status tokens and accessibility contract to Apps, Overview, Services, Domains and
+Console. It separates deployment results from observed runtime, discloses secondary
+addresses, distinguishes domain ownership/routing/HTTPS and places runtime logs
+before container details. Its authoritative domain dependency is
+[Application, environment, and service model](docs/specs/application-environment-model.md):
+one logical app, explicit peer environments, prominent scoped selection, distinct
+application/environment settings and environment-owned operational resources.
+Qualify that `/v2` model and migration before dashboard cutover; the drawings
+depict the intended model and must not fake it through legacy-name grouping. App-level
+plan/database/runtime/deployment claims are prohibited. The Apps list has App,
+Environment, Latest deployment and Actions columns, with no Plan or Runtime
+columns or filters. Narrow navigation uses a
+compact menu rather than horizontal primary scrolling. Independent apps are not
+automatically merged. Muse owns implementation after model prerequisites; Codex
+owns final validation. These artifacts specify design; they do not establish
+implementation or release completion.
+
 ## Open questions
 
-No blocking design questions. Live provider SKU/location catalogs, pricing and
+For Plans, no blocking design questions. Live provider SKU/location catalogs,
+pricing and
 capacity discovery remain outside this redesign; no owner action is required for
 those deferred capabilities.
+
+Apps/operations implementation depends on the explicit model/API and qualified
+migration described above; this is an implementation prerequisite, not an
+unresolved decision about the intended UX.

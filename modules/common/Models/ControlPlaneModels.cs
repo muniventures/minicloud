@@ -23,6 +23,7 @@ public sealed class Organization
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public List<OrganizationMember> Members { get; set; } = [];
+    public List<MinicloudApplication> Applications { get; set; } = [];
     public List<MinicloudApp> Apps { get; set; } = [];
     public List<ApiKey> ApiKeys { get; set; } = [];
 }
@@ -40,7 +41,14 @@ public sealed class OrganizationMember
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-public sealed class MinicloudApp
+public static class EnvironmentKinds
+{
+    public const string Persistent = "persistent";
+    public const string Preview = "preview";
+    public const string Internal = "internal";
+}
+
+public sealed class MinicloudApplication
 {
     [Key]
     public string Id { get; set; } = default!;
@@ -48,10 +56,35 @@ public sealed class MinicloudApp
     public Organization Organization { get; set; } = default!;
     public string Name { get; set; } = default!;
     public string Slug { get; set; } = default!;
+    public string NormalizedSlug { get; set; } = default!;
+    public string? DefaultEnvironmentId { get; set; }
+    public string? LegacyRootAppId { get; set; }
+    public string? DeletionStatus { get; set; }
+    public string? DeletionError { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public List<MinicloudApp> Environments { get; set; } = [];
+}
+
+public sealed class MinicloudApp
+{
+    [Key]
+    public string Id { get; set; } = default!;
+    public string OrganizationId { get; set; } = default!;
+    public Organization Organization { get; set; } = default!;
+    public string? ApplicationId { get; set; }
+    public MinicloudApplication? Application { get; set; }
+    public string Name { get; set; } = default!;
+    public string Slug { get; set; } = default!;
     public string? ParentAppId { get; set; }
     public MinicloudApp? ParentApp { get; set; }
     public string? BranchName { get; set; }
     public string? EnvironmentName { get; set; }
+    public string? NormalizedEnvironmentName { get; set; }
+    public string EnvironmentKind { get; set; } = EnvironmentKinds.Persistent;
+    public string? RuntimeParentSlug { get; set; }
+    public string? SourceBranch { get; set; }
+    public string? SourceEnvironmentId { get; set; }
     // Root app ID + case-folded name enforces uniqueness across root and child environments.
     public string? EnvironmentKey { get; set; }
     public string? DeletionStatus { get; set; }

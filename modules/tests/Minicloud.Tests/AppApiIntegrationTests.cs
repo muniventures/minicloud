@@ -41,34 +41,35 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         var seed = await SeedAsync("org_environments", "app_environments", DateTimeOffset.UtcNow);
         var foreign = await SeedAsync("org_env_foreign", "app_env_foreign", DateTimeOffset.UtcNow);
         using var client = _factory!.CreateClient();
-        var url = $"/v1/apps/{seed.AppId}/environments";
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync(url, new CreateAppEnvironmentRequest("staging", "p0-v-0"))).StatusCode);
+        var url = $"/api/apps/{seed.ApplicationId}/environments";
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync(url, new CreateEnvironmentRequest("staging", "p0-v-0"))).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", foreign.ApiKeyToken);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(url, new CreateAppEnvironmentRequest("staging", "p0-v-0"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(url, new CreateEnvironmentRequest("staging", "p0-v-0"))).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
-        var response = await client.PostAsJsonAsync(url, new CreateAppEnvironmentRequest("staging", "p0-v-0"));
+        var response = await client.PostAsJsonAsync(url, new CreateEnvironmentRequest("staging", "p0-v-0"));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var staging = (await response.Content.ReadFromJsonAsync<AppResponse>())!;
+        var createdEnvironment = (await response.Content.ReadFromJsonAsync<ApplicationEnvironmentResponse>())!;
+        var staging = (await client.GetFromJsonAsync<EnvironmentDetailResponse>($"/api/environments/{createdEnvironment.Id}"))!;
         Assert.Equal("p0-v-0", staging.Plan);
         Assert.Equal("staging", staging.EnvironmentName);
-        var main = (await client.GetFromJsonAsync<AppResponse>($"/v1/apps/{seed.AppId}"))!;
+        var main = (await client.GetFromJsonAsync<EnvironmentDetailResponse>($"/api/environments/{seed.AppId}"))!;
         Assert.Equal(2, main.Environments!.Count);
         Assert.Empty(main.Branches);
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(url, new CreateAppEnvironmentRequest("STAGING", "p0-h-0"))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(url, new CreateEnvironmentRequest("STAGING", "p0-h-0"))).StatusCode);
         var service = new DeploymentServiceRequest("web", "example/web:1", 8080, true, "/", "/health");
         foreach (var id in new[] { main.Id, staging.Id })
-            Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/v1/deployments", new CreateDeploymentRequest(id, "sqlite", null, [service]))).StatusCode);
-        main = (await client.GetFromJsonAsync<AppResponse>($"/v1/apps/{main.Id}"))!;
-        staging = (await client.GetFromJsonAsync<AppResponse>($"/v1/apps/{staging.Id}"))!;
+            Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/deployments", new CreateDeploymentRequest(id, "sqlite", null, [service]))).StatusCode);
+        main = (await client.GetFromJsonAsync<EnvironmentDetailResponse>($"/api/environments/{main.Id}"))!;
+        staging = (await client.GetFromJsonAsync<EnvironmentDetailResponse>($"/api/environments/{staging.Id}"))!;
         Assert.NotEqual(Assert.Single(main.Domains).Hostname, Assert.Single(staging.Domains).Hostname);
-        var renamed = await client.PatchAsJsonAsync($"/v1/apps/{staging.Id}/environment", new RenameAppEnvironmentRequest("qa"));
+        var renamed = await client.PatchAsJsonAsync($"/api/apps/{seed.ApplicationId}/environments/{staging.Id}", new UpdateEnvironmentRequest("qa"));
         Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
-        var afterRename = (await client.GetFromJsonAsync<AppResponse>($"/v1/apps/{staging.Id}"))!;
+        var afterRename = (await client.GetFromJsonAsync<EnvironmentDetailResponse>($"/api/environments/{staging.Id}"))!;
         Assert.Equal("qa", afterRename.EnvironmentName);
         Assert.Equal(staging.Domains[0].Hostname, afterRename.Domains[0].Hostname);
-        Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/v1/apps/{main.Id}/branches/{staging.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/api/environments/{main.Id}/branches/{staging.Id}")).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", foreign.ApiKeyToken);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync($"/v1/apps/{staging.Id}/environment", new RenameAppEnvironmentRequest("other"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync($"/api/apps/{seed.ApplicationId}/environments/{staging.Id}", new UpdateEnvironmentRequest("other"))).StatusCode);
     }
 
     [Fact]
@@ -76,7 +77,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
     {
         using var factory = new AppApiFactory(_connection, "apps.discovery.example");
         using var client = factory.CreateClient();
-        var response = await client.GetAsync("/v1/instance");
+        var response = await client.GetAsync("/api/instance");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var info = await response.Content.ReadFromJsonAsync<InstanceInfoResponse>();
         Assert.NotNull(info);
@@ -101,17 +102,17 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         }
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
-        var route = $"/v1/apps/{seed.AppId}/plan";
+        var route = $"/api/environments/{seed.AppId}/plan";
         var selected = await client.PostAsJsonAsync(route, new SelectAppPlanRequest("Produção econômica"));
         Assert.Equal(HttpStatusCode.OK, selected.StatusCode);
-        var app = (await selected.Content.ReadFromJsonAsync<AppResponse>())!;
+        var app = (await selected.Content.ReadFromJsonAsync<EnvironmentDetailResponse>())!;
         Assert.Equal(planId, app.PlanId);
         Assert.Equal("Produção econômica", app.Plan);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync($"/v1/apps/{seed.AppId}", new UpdateAppRequest("unauthorized rename", null, null))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync($"/api/apps/{seed.ApplicationId}/environments/{seed.AppId}", new UpdateEnvironmentRequest(Name: "unauthorized-rename"))).StatusCode);
         var invalid = await client.PostAsJsonAsync(route, new SelectAppPlanRequest("missing"));
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
         Assert.Contains("plan_not_found", await invalid.Content.ReadAsStringAsync());
-        var deployment = await client.PostAsJsonAsync("/v1/deployments", new CreateDeploymentRequest(seed.AppId, "none", null,
+        var deployment = await client.PostAsJsonAsync("/api/deployments", new CreateDeploymentRequest(seed.AppId, "none", null,
             [new("web", "example/web:1", 8080, true, "/", "/health")], Plan: "Produção econômica"));
         Assert.Equal(HttpStatusCode.Created, deployment.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(route, new SelectAppPlanRequest("p0"))).StatusCode);
@@ -141,7 +142,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
             (await db.Apps.SingleAsync(x => x.Id == seed.AppId)).Plan = AppPlan.P0V0;
             await db.SaveChangesAsync();
         }
-        var unsupported = await client.PostAsJsonAsync("/v1/deployments", request);
+        var unsupported = await client.PostAsJsonAsync("/api/deployments", request);
         Assert.Equal(HttpStatusCode.BadRequest, unsupported.StatusCode);
         Assert.Contains("storage_provider_unsupported", await unsupported.Content.ReadAsStringAsync());
         await using (var scope = _factory.Services.CreateAsyncScope())
@@ -151,10 +152,10 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
             (await db.Apps.SingleAsync(x => x.Id == seed.AppId)).Plan = AppPlan.P0H0;
             await db.SaveChangesAsync();
         }
-        var accepted = await client.PostAsJsonAsync("/v1/deployments", request);
+        var accepted = await client.PostAsJsonAsync("/api/deployments", request);
         Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
         var created = (await accepted.Content.ReadFromJsonAsync<DeploymentCreateResponse>())!;
-        var saved = await client.GetFromJsonAsync<DeploymentResponse>("/v1/deployments/" + created.Id);
+        var saved = await client.GetFromJsonAsync<DeploymentResponse>("/api/deployments/" + created.Id);
         Assert.Equal(new StorageMountRequest(20, "/app/uploads", 1000, 1000), Assert.Single(saved!.Services).Storage!["uploads"]);
     }
 
@@ -170,7 +171,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
         using var client = _factory!.CreateClient();
-        var url = $"/v1/apps/{seed.AppId}/storage";
+        var url = $"/api/environments/{seed.AppId}/storage";
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(url)).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", other.ApiKeyToken);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(url)).StatusCode);
@@ -197,7 +198,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         {
             var request = new CreateDeploymentRequest(seed.AppId, "none", null,
                 [new DeploymentServiceRequest("api", "example/api:1", 8080, true, "/", "/health", Storage: new Dictionary<string, StorageMountRequest> { ["uploads"] = mount })]);
-            var response = await client.PostAsJsonAsync("/v1/deployments", request);
+            var response = await client.PostAsJsonAsync("/api/deployments", request);
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
             Assert.Contains("invalid_storage_change", await response.Content.ReadAsStringAsync());
         }
@@ -216,18 +217,18 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
         using var client = _factory!.CreateClient();
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsync("/v1/deployments/dep_cancel_api/cancel", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsync("/api/deployments/dep_cancel_api/cancel", null)).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", other.ApiKeyToken);
-        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync("/v1/deployments/dep_cancel_api/cancel", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync("/api/deployments/dep_cancel_api/cancel", null)).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
-        var result = await client.PostAsync("/v1/deployments/dep_cancel_api/cancel", null);
+        var result = await client.PostAsync("/api/deployments/dep_cancel_api/cancel", null);
         Assert.Equal(HttpStatusCode.OK, result.StatusCode);
         Assert.True((await result.Content.ReadFromJsonAsync<DeploymentCancellationResponse>())!.CancellationRequested);
-        var deployment = await client.GetFromJsonAsync<DeploymentResponse>("/v1/deployments/dep_cancel_api");
+        var deployment = await client.GetFromJsonAsync<DeploymentResponse>("/api/deployments/dep_cancel_api");
         Assert.Equal("canceled", deployment!.Status);
         Assert.NotNull(deployment.CancellationRequestedAt);
         Assert.NotNull(deployment.CompletedAt);
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/v1/deployments/dep_cancel_api/cancel", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/deployments/dep_cancel_api/cancel", null)).StatusCode);
     }
 
     [Fact]
@@ -237,21 +238,21 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
         var start = new StartDeploymentPreparationRequest(seed.AppId, Guid.NewGuid().ToString("D"), ["api"]);
-        using var response = await client.PostAsJsonAsync("/v1/deployments/preparations", start);
+        using var response = await client.PostAsJsonAsync("/api/deployments/preparations", start);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var pending = (await response.Content.ReadFromJsonAsync<DeploymentCreateResponse>())!;
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/v1/deployments/{pending.Id}/cancel", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/deployments/{pending.Id}/cancel", null)).StatusCode);
 
-        var deployment = await client.GetFromJsonAsync<DeploymentResponse>($"/v1/deployments/{pending.Id}");
+        var deployment = await client.GetFromJsonAsync<DeploymentResponse>($"/api/deployments/{pending.Id}");
         Assert.Equal("canceled", deployment!.Status);
         Assert.NotNull(deployment.CancellationRequestedAt);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync($"/v1/deployments/preparations/{pending.Id}",
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync($"/api/deployments/preparations/{pending.Id}",
             new UpdateDeploymentPreparationRequest(seed.AppId, "heartbeat"))).StatusCode);
         var submit = new CreateDeploymentRequest(seed.AppId, "none", null,
             [new DeploymentServiceRequest("api", "example/api:latest", 8080, true, "/", "/health")], PreparationId: pending.Id);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/v1/deployments", submit)).StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsync($"/v1/deployments/{pending.Id}/dispatch", null)).StatusCode);
-        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/v1/deployments/preparations",
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/deployments", submit)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsync($"/api/deployments/{pending.Id}/dispatch", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/deployments/preparations",
             start with { IdempotencyKey = Guid.NewGuid().ToString("D") })).StatusCode);
     }
 
@@ -262,25 +263,25 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
         var start = new StartDeploymentPreparationRequest(seed.AppId, Guid.NewGuid().ToString("D"), ["api"]);
-        var response = await client.PostAsJsonAsync("/v1/deployments/preparations", start);
+        var response = await client.PostAsJsonAsync("/api/deployments/preparations", start);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var pending = (await response.Content.ReadFromJsonAsync<DeploymentCreateResponse>())!;
         Assert.Equal("waiting_for_build", pending.Status);
-        var replay = await client.PostAsJsonAsync("/v1/deployments/preparations", start);
+        var replay = await client.PostAsJsonAsync("/api/deployments/preparations", start);
         Assert.Equal(pending.Id, (await replay.Content.ReadFromJsonAsync<DeploymentCreateResponse>())!.Id);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/v1/deployments/preparations", start with { IdempotencyKey = Guid.NewGuid().ToString("D") })).StatusCode);
-        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsJsonAsync($"/v1/deployments/preparations/{pending.Id}", new UpdateDeploymentPreparationRequest(seed.AppId, "heartbeat"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/deployments/preparations", start with { IdempotencyKey = Guid.NewGuid().ToString("D") })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsJsonAsync($"/api/deployments/preparations/{pending.Id}", new UpdateDeploymentPreparationRequest(seed.AppId, "heartbeat"))).StatusCode);
         var request = new CreateDeploymentRequest(seed.AppId, "none", null,
             [new DeploymentServiceRequest("api", "example/api:latest", 8080, true, "/", "/health")], PreparationId: pending.Id);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/v1/deployments", request with { PreparationId = null })).StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/v1/deployments", request with { Services = [request.Services[0] with { Name = "other" }] })).StatusCode);
-        var queued = await client.PostAsJsonAsync("/v1/deployments", request);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/deployments", request with { PreparationId = null })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/deployments", request with { Services = [request.Services[0] with { Name = "other" }] })).StatusCode);
+        var queued = await client.PostAsJsonAsync("/api/deployments", request);
         Assert.Equal(HttpStatusCode.Created, queued.StatusCode);
         var created = (await queued.Content.ReadFromJsonAsync<DeploymentCreateResponse>())!;
         Assert.Equal(pending.Id, created.Id);
         Assert.Equal("queued", created.Status);
         // A lost admission response must never let failure/cancellation overwrite queued work.
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync($"/v1/deployments/preparations/{pending.Id}", new UpdateDeploymentPreparationRequest(seed.AppId, "failed"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync($"/api/deployments/preparations/{pending.Id}", new UpdateDeploymentPreparationRequest(seed.AppId, "failed"))).StatusCode);
         await using var scope = _factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
         var stored = await db.Deployments.Include(x => x.Services).Include(x => x.Events).SingleAsync(x => x.AppId == seed.AppId);
@@ -302,7 +303,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
         var start = new StartDeploymentPreparationRequest(seed.AppId, Guid.NewGuid().ToString("D"), ["1_api"]);
-        var pending = (await (await client.PostAsJsonAsync("/v1/deployments/preparations", start)).Content.ReadFromJsonAsync<DeploymentCreateResponse>())!;
+        var pending = (await (await client.PostAsJsonAsync("/api/deployments/preparations", start)).Content.ReadFromJsonAsync<DeploymentCreateResponse>())!;
         if (action == "expired")
         {
             await using var editScope = _factory.Services.CreateAsyncScope();
@@ -310,14 +311,14 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
             (await edit.Deployments.SingleAsync(x => x.Id == pending.Id)).UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-6);
             await edit.SaveChangesAsync();
         }
-        var closed = await client.PostAsJsonAsync($"/v1/deployments/preparations/{pending.Id}", new UpdateDeploymentPreparationRequest(seed.AppId, action == "expired" ? "heartbeat" : action));
+        var closed = await client.PostAsJsonAsync($"/api/deployments/preparations/{pending.Id}", new UpdateDeploymentPreparationRequest(seed.AppId, action == "expired" ? "heartbeat" : action));
         Assert.Equal(action == "expired" ? HttpStatusCode.Conflict : HttpStatusCode.NoContent, closed.StatusCode);
-        var detail = (await client.GetFromJsonAsync<DeploymentResponse>($"/v1/deployments/{pending.Id}"))!;
+        var detail = (await client.GetFromJsonAsync<DeploymentResponse>($"/api/deployments/{pending.Id}"))!;
         Assert.Equal(expected, detail.Status);
         Assert.Equal(failure, detail.FailureCode);
         Assert.NotNull(detail.CompletedAt);
         Assert.Null(detail.StartedAt);
-        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/v1/deployments/preparations", start with { IdempotencyKey = Guid.NewGuid().ToString("D") })).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/deployments/preparations", start with { IdempotencyKey = Guid.NewGuid().ToString("D") })).StatusCode);
     }
 
     [Fact]
@@ -328,14 +329,14 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", first.ApiKeyToken);
         var start = new StartDeploymentPreparationRequest(first.AppId, Guid.NewGuid().ToString("D"), ["api"]);
-        var pending = (await (await client.PostAsJsonAsync("/v1/deployments/preparations", start)).Content.ReadFromJsonAsync<DeploymentCreateResponse>())!;
+        var pending = (await (await client.PostAsJsonAsync("/api/deployments/preparations", start)).Content.ReadFromJsonAsync<DeploymentCreateResponse>())!;
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", other.ApiKeyToken);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/v1/deployments/preparations", start)).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync($"/v1/deployments/preparations/{pending.Id}", new UpdateDeploymentPreparationRequest(first.AppId, "failed"))).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync($"/v1/deployments/preparations/{pending.Id}", new UpdateDeploymentPreparationRequest(other.AppId, "failed"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/deployments/preparations", start)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync($"/api/deployments/preparations/{pending.Id}", new UpdateDeploymentPreparationRequest(first.AppId, "failed"))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync($"/api/deployments/preparations/{pending.Id}", new UpdateDeploymentPreparationRequest(other.AppId, "failed"))).StatusCode);
         var foreignRequest = new CreateDeploymentRequest(other.AppId, "none", null,
             [new DeploymentServiceRequest("api", "example/api:latest", 8080, true, "/", "/health")], PreparationId: pending.Id);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/v1/deployments", foreignRequest)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/deployments", foreignRequest)).StatusCode);
     }
 
     [Fact]
@@ -346,7 +347,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
         var request = new CreateDeploymentRequest(seed.AppId, "none", null,
             [new DeploymentServiceRequest("api", null, 8080, true, "/", "/health", ImagePublicationId: "img_unavailable")]);
-        var response = await client.PostAsJsonAsync("/v1/deployments", request);
+        var response = await client.PostAsJsonAsync("/api/deployments", request);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Contains(ImagePublicationErrors.Unavailable, await response.Content.ReadAsStringAsync());
         await using var scope = _factory.Services.CreateAsyncScope();
@@ -355,7 +356,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         Assert.False(await db.Domains.AnyAsync(x => x.AppId == seed.AppId));
         var foreign = await SeedAsync("org_image_foreign", "app_image_foreign", DateTimeOffset.UtcNow);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", foreign.ApiKeyToken);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/v1/deployments", request)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/deployments", request)).StatusCode);
     }
 
     [Theory]
@@ -387,7 +388,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
             await seedDb.SaveChangesAsync();
             request = request with { Services = [new DeploymentServiceRequest("portal", "example/portal:latest", 8080, true, "/", "/health")] };
         }
-        var response = await client.PostAsJsonAsync("/v1/deployments", request);
+        var response = await client.PostAsJsonAsync("/api/deployments", request);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var error = await response.Content.ReadFromJsonAsync<ErrorResponse>();
         Assert.Equal("missing_service_secret", error!.Error.Code);
@@ -409,8 +410,8 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
         var request = new ValidateDeploymentSecretsRequest(seed.AppId,
             [new DeploymentSecretServiceRequest("api", new Dictionary<string, string> { ["TOKEN"] = "API_TOKEN" })]);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/v1/secrets?appId={seed.AppId}")).StatusCode);
-        var missing = await client.PostAsJsonAsync("/v1/deployments/validate-secrets", request);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/secrets?appId={seed.AppId}")).StatusCode);
+        var missing = await client.PostAsJsonAsync("/api/deployments/validate-secrets", request);
         Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
         Assert.Contains("missing_service_secret", await missing.Content.ReadAsStringAsync());
         await using (var scope = _factory.Services.CreateAsyncScope())
@@ -424,53 +425,51 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
             });
             await db.SaveChangesAsync();
         }
-        var valid = await client.PostAsJsonAsync("/v1/deployments/validate-secrets", request);
+        var valid = await client.PostAsJsonAsync("/api/deployments/validate-secrets", request);
         Assert.Equal(HttpStatusCode.NoContent, valid.StatusCode);
         Assert.Empty(await valid.Content.ReadAsStringAsync());
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", foreign.ApiKeyToken);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/v1/deployments/validate-secrets", request)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/deployments/validate-secrets", request)).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
         var invalid = request with { Services = [new DeploymentSecretServiceRequest("api", new Dictionary<string, string> { ["TOKEN"] = "invalid secret" })] };
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/v1/deployments/validate-secrets", invalid)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/deployments/validate-secrets", invalid)).StatusCode);
     }
 
     [Fact]
-    public async Task AppResponseEndpoints_LoadRequiredNavigationData()
+    public async Task EnvironmentEndpoints_LoadRequiredNavigationData()
     {
         var now = new DateTimeOffset(2026, 5, 12, 12, 0, 0, TimeSpan.Zero);
         var seed = await SeedAsync("org_app_api_mapping", "app_api_mapping", now);
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
 
-        var getResponse = await client.GetAsync($"/v1/apps/{seed.AppId}");
+        var getResponse = await client.GetAsync($"/api/environments/{seed.AppId}");
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
-        var app = await getResponse.Content.ReadFromJsonAsync<AppResponse>();
+        var app = await getResponse.Content.ReadFromJsonAsync<EnvironmentDetailResponse>();
         Assert.NotNull(app);
         Assert.Empty(app!.Domains);
         Assert.Empty(app.Branches);
 
-        var updateResponse = await client.PatchAsJsonAsync($"/v1/apps/{seed.AppId}", new
-        {
-            name = "Updated App API Mapping"
-        });
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, (await client.PatchAsJsonAsync($"/api/environments/{seed.AppId}", new { name = "removed-adapter" })).StatusCode);
+        var updateResponse = await client.PatchAsJsonAsync($"/api/apps/{seed.ApplicationId}/environments/{seed.AppId}",
+            new UpdateEnvironmentRequest(Name: "updated-env"));
         Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
-        var updated = await updateResponse.Content.ReadFromJsonAsync<AppResponse>();
+        var updated = await updateResponse.Content.ReadFromJsonAsync<ApplicationEnvironmentResponse>();
         Assert.NotNull(updated);
-        Assert.Equal("Updated App API Mapping", updated!.Name);
+        Assert.Equal("updated-env", updated!.Name);
         Assert.Empty(updated.Domains);
 
-        var createResponse = await client.PostAsJsonAsync("/v1/apps", new
+        var createResponse = await client.PostAsJsonAsync("/api/apps", new
         {
             organizationId = seed.OrganizationId,
             name = "Created App API Mapping",
             slug = "created-app-api-mapping",
-            plan = "p0",
-            database = "sqlite"
+            initialEnvironment = new { name = "production", plan = "p0", database = "sqlite" }
         });
         Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
-        var created = await createResponse.Content.ReadFromJsonAsync<AppResponse>();
+        var created = await createResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
         Assert.NotNull(created);
-        Assert.Empty(created!.Domains);
+        Assert.Empty(Assert.Single(created!.Environments).Domains);
     }
 
     [Fact]
@@ -504,7 +503,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
             });
             await db.SaveChangesAsync();
         }
-        var response = await client.PostAsJsonAsync("/v1/assets", new PublishAssetRequest(seed.AppId, "cli", "art_asset", new string('b', 64), "/cli-releases"));
+        var response = await client.PostAsJsonAsync("/api/assets", new PublishAssetRequest(seed.AppId, "cli", "art_asset", new string('b', 64), "/cli-releases"));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var release = (await response.Content.ReadFromJsonAsync<AssetReleaseResponse>())!;
         Assert.Equal("queued", release.Status);
@@ -520,15 +519,15 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
             Assert.Null(deployment.Domain);
             Assert.Empty(await new DeploymentServiceSetService().BuildActiveServicesAsync(db, seed.AppId, default));
         }
-        var read = await client.GetFromJsonAsync<AssetReleaseResponse>("/v1/assets/" + release.Id);
+        var read = await client.GetFromJsonAsync<AssetReleaseResponse>("/api/assets/" + release.Id);
         Assert.Equal(release.Id, read!.Id);
-        var bind = await client.PostAsJsonAsync("/v1/deployments", new CreateDeploymentRequest(seed.AppId, "sqlite", null,
+        var bind = await client.PostAsJsonAsync("/api/deployments", new CreateDeploymentRequest(seed.AppId, "sqlite", null,
             [new("backend", "example:1", 8080, true, "/", "/health", AssetMounts: new Dictionary<string, AssetMountRequest> { ["cli"] = new(release.Id, "/app/cli-releases") })]));
         Assert.Equal(HttpStatusCode.BadRequest, bind.StatusCode);
         var foreign = await SeedAsync("org_asset_foreign", "app_asset_foreign", now);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", foreign.ApiKeyToken);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/v1/assets/" + release.Id)).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/v1/assets", new PublishAssetRequest(foreign.AppId, "cli", "art_asset", new string('b', 64), "/cli-releases"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/assets/" + release.Id)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/assets", new PublishAssetRequest(foreign.AppId, "cli", "art_asset", new string('b', 64), "/cli-releases"))).StatusCode);
         await using var deletionScope = _factory.Services.CreateAsyncScope();
         var deletionDb = deletionScope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
         deletionDb.Apps.Remove(await deletionDb.Apps.SingleAsync(x => x.Id == seed.AppId));
@@ -544,29 +543,58 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
 
-        var firstResponse = await client.PostAsJsonAsync($"/v1/apps/{seed.AppId}/branches", new { branchName = "feature/checkout" });
-        var secondResponse = await client.PostAsJsonAsync($"/v1/apps/{seed.AppId}/branches", new { branchName = "feature/checkout" });
+        var firstResponse = await client.PostAsJsonAsync($"/api/environments/{seed.AppId}/branches", new { branchName = "feature/checkout" });
+        var secondResponse = await client.PostAsJsonAsync($"/api/environments/{seed.AppId}/branches", new { branchName = "feature/checkout" });
 
         Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
         Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
-        var first = await firstResponse.Content.ReadFromJsonAsync<AppResponse>();
-        var second = await secondResponse.Content.ReadFromJsonAsync<AppResponse>();
+        var first = await firstResponse.Content.ReadFromJsonAsync<EnvironmentDetailResponse>();
+        var second = await secondResponse.Content.ReadFromJsonAsync<EnvironmentDetailResponse>();
         Assert.NotNull(first);
         Assert.Equal(first!.Id, second!.Id);
         Assert.Equal(seed.AppId, first.ParentAppId);
         Assert.Equal("feature-checkout", first.BranchName);
         Assert.Equal("p0", first.Plan);
 
-        var main = await client.GetFromJsonAsync<AppResponse>($"/v1/apps/{seed.AppId}");
+        var main = await client.GetFromJsonAsync<EnvironmentDetailResponse>($"/api/environments/{seed.AppId}");
         var branch = Assert.Single(main!.Branches);
         Assert.Equal(first.Id, branch.Id);
 
-        var topLevel = await client.GetFromJsonAsync<AppResponse[]>($"/v1/apps?organizationId={seed.OrganizationId}");
-        Assert.Single(topLevel!);
-        Assert.Equal(seed.AppId, topLevel![0].Id);
-        var includingBranches = await client.GetFromJsonAsync<AppResponse[]>($"/v1/apps?organizationId={seed.OrganizationId}&includeBranches=true");
-        Assert.Equal(2, includingBranches!.Length);
-        Assert.Contains(includingBranches, app => app.Id == first.Id && app.ParentAppId == seed.AppId);
+        var applications = await client.GetFromJsonAsync<ApplicationResponse[]>($"/api/apps?organizationId={seed.OrganizationId}");
+        var application = Assert.Single(applications!);
+        Assert.Equal(seed.ApplicationId, application.Id);
+        Assert.Equal(2, application.EnvironmentCount);
+        Assert.Contains(application.Environments, environment => environment.Id == first.Id && environment.Kind == EnvironmentKinds.Preview);
+    }
+
+    [Fact]
+    public async Task PreviewBranchFromNamedEnvironment_CreatesAndDeletesOnlyItsTarget()
+    {
+        var seed = await SeedAsync("org_named_preview", "app_named_preview", DateTimeOffset.UtcNow);
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var create = await client.PostAsJsonAsync($"/api/apps/{seed.ApplicationId}/environments", new CreateEnvironmentRequest("staging", "p0", "sqlite"));
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+        var staging = (await create.Content.ReadFromJsonAsync<ApplicationEnvironmentResponse>())!;
+        var branchResponse = await client.PostAsJsonAsync($"/api/environments/{staging.Id}/branches", new EnsureAppBranchRequest("feature/from-staging"));
+        Assert.True(branchResponse.StatusCode == HttpStatusCode.OK, await branchResponse.Content.ReadAsStringAsync());
+        var branch = (await branchResponse.Content.ReadFromJsonAsync<EnvironmentDetailResponse>())!;
+        Assert.Equal(staging.Id, branch.ParentAppId);
+        Assert.Equal(seed.ApplicationId, branch.ApplicationId);
+        var conflictingSource = await client.PostAsJsonAsync($"/api/environments/{seed.AppId}/branches", new EnsureAppBranchRequest("feature/from-staging"));
+        Assert.Equal(HttpStatusCode.BadRequest, conflictingSource.StatusCode);
+        Assert.Contains("branch_source_conflict", await conflictingSource.Content.ReadAsStringAsync());
+        var nestedPreview = await client.PostAsJsonAsync($"/api/environments/{branch.Id}/branches", new EnsureAppBranchRequest("feature/nested"));
+        Assert.Equal(HttpStatusCode.BadRequest, nestedPreview.StatusCode);
+        Assert.Contains("branch_parent_invalid", await nestedPreview.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/environments/{staging.Id}/branches/{branch.Id}")).StatusCode);
+
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+        Assert.Equal("queued", (await db.Apps.SingleAsync(x => x.Id == branch.Id)).DeletionStatus);
+        Assert.Null((await db.Apps.SingleAsync(x => x.Id == staging.Id)).DeletionStatus);
+        Assert.Null((await db.Apps.SingleAsync(x => x.Id == seed.AppId)).DeletionStatus);
+        Assert.Null((await db.Applications.SingleAsync(x => x.Id == seed.ApplicationId)).DeletionStatus);
     }
 
     [Fact]
@@ -587,12 +615,12 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         }
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
-        var legacy = await client.GetFromJsonAsync<DeploymentResponse[]>($"/v1/deployments?organizationId={seed.OrganizationId}");
-        var complete = await client.GetFromJsonAsync<DeploymentResponse[]>($"/v1/deployments?organizationId={seed.OrganizationId}&all=true");
+        var legacy = await client.GetFromJsonAsync<DeploymentResponse[]>($"/api/deployments?organizationId={seed.OrganizationId}");
+        var complete = await client.GetFromJsonAsync<DeploymentResponse[]>($"/api/deployments?organizationId={seed.OrganizationId}&all=true");
         Assert.Equal(100, legacy!.Length);
         Assert.Equal(105, complete!.Length);
         Assert.All(complete, deployment => Assert.Equal(seed.OrganizationId, deployment.OrganizationId));
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/v1/deployments?organizationId={other.OrganizationId}&all=true")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/deployments?organizationId={other.OrganizationId}&all=true")).StatusCode);
     }
 
     [Theory]
@@ -643,9 +671,9 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
 
         async Task<DeploymentResponse[]> ReadResponses()
         {
-            var list = await client.GetFromJsonAsync<DeploymentResponse[]>($"/v1/deployments?organizationId={seed.OrganizationId}&all=true");
-            var detail = await client.GetFromJsonAsync<DeploymentResponse>($"/v1/deployments/{id}");
-            using var refresh = await client.PostAsync($"/v1/deployments/{id}/refresh", null);
+            var list = await client.GetFromJsonAsync<DeploymentResponse[]>($"/api/deployments?organizationId={seed.OrganizationId}&all=true");
+            var detail = await client.GetFromJsonAsync<DeploymentResponse>($"/api/deployments/{id}");
+            using var refresh = await client.PostAsync($"/api/deployments/{id}/refresh", null);
             refresh.EnsureSuccessStatusCode();
             return [Assert.Single(list!), detail!, (await refresh.Content.ReadFromJsonAsync<DeploymentResponse>())!];
         }
@@ -659,7 +687,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         }
 
         var beforeDispatch = DateTimeOffset.UtcNow;
-        using var dispatched = await client.PostAsync($"/v1/deployments/{id}/dispatch", null);
+        using var dispatched = await client.PostAsync($"/api/deployments/{id}/dispatch", null);
         dispatched.EnsureSuccessStatusCode();
         var queued = (await dispatched.Content.ReadFromJsonAsync<DeploymentResponse>())!;
         Assert.InRange(queued.RequeuedAt!.Value, beforeDispatch, DateTimeOffset.UtcNow);
@@ -681,7 +709,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
 
-        var response = await client.PostAsJsonAsync("/v1/deployments", new
+        var response = await client.PostAsJsonAsync("/api/deployments", new
         {
             appId = seed.AppId,
             database = "sqlite",
@@ -738,7 +766,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
 
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
-        var createResponse = await client.PostAsJsonAsync("/v1/deployments", new CreateDeploymentRequest(
+        var createResponse = await client.PostAsJsonAsync("/api/deployments", new CreateDeploymentRequest(
             seed.AppId,
             "sqlite",
             "abcdef1234567890",
@@ -747,7 +775,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
         var created = await createResponse.Content.ReadFromJsonAsync<DeploymentCreateResponse>();
         Assert.NotNull(created);
-        var deployment = await client.GetFromJsonAsync<DeploymentResponse>($"/v1/deployments/{created!.Id}");
+        var deployment = await client.GetFromJsonAsync<DeploymentResponse>($"/api/deployments/{created!.Id}");
         var service = Assert.Single(deployment!.Services);
         Assert.Equal($"minicloud/app-api-local-image-web:{created.Id}", service.Image);
         Assert.DoesNotContain("ghcr.io", service.Image);
@@ -778,9 +806,19 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
             CreatedAt = now,
             UpdatedAt = now
         });
+        var applicationId = $"application_{appId}";
+        db.Applications.Add(new MinicloudApplication
+        {
+            Id = applicationId, OrganizationId = organizationId, Name = appId,
+            Slug = appId.Replace('_', '-'), NormalizedSlug = appId.Replace('_', '-'),
+            DefaultEnvironmentId = appId, LegacyRootAppId = appId, CreatedAt = now, UpdatedAt = now
+        });
         db.Apps.Add(new MinicloudApp
         {
             Id = appId,
+            ApplicationId = applicationId,
+            EnvironmentName = "production",
+            NormalizedEnvironmentName = "production",
             OrganizationId = organizationId,
             Name = appId,
             Slug = appId.Replace('_', '-'),
@@ -820,10 +858,10 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        return new SeedResult(organizationId, appId, apiKeyToken.Token);
+        return new SeedResult(organizationId, appId, apiKeyToken.Token, applicationId);
     }
 
-    private sealed record SeedResult(string OrganizationId, string AppId, string ApiKeyToken);
+    private sealed record SeedResult(string OrganizationId, string AppId, string ApiKeyToken, string ApplicationId);
 
     private sealed class AppApiFactory(SqliteConnection connection, string appDomain = "app.muni.dev") : WebApplicationFactory<Program>
     {

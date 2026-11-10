@@ -14,7 +14,7 @@ namespace Minicloud.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("v1/[controller]")]
+[Route("api/[controller]")]
 public sealed class DomainsController : ControllerBase
 {
     [HttpGet("services")]
@@ -23,19 +23,27 @@ public sealed class DomainsController : ControllerBase
         [FromServices] MinicloudDbContext db,
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] DeploymentServiceSetService serviceSets,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), appId, OrganizationAction.ReadApps, cancellationToken))
+        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), targetAppId, OrganizationAction.ReadApps, cancellationToken))
         {
             return EndpointResults.Forbidden();
         }
 
-        var services = await serviceSets.BuildActiveServicesAsync(db, appId, cancellationToken);
+        var services = await serviceSets.BuildActiveServicesAsync(db, targetAppId, cancellationToken);
         var bindings = await db.Domains.AsNoTracking()
-            .Where(x => x.AppId == appId)
+            .Where(x => x.AppId == targetAppId)
             .ToListAsync(cancellationToken);
-        var latestStatus = await LatestStatusByServiceAsync(db, appId, cancellationToken);
+        var latestStatus = await LatestStatusByServiceAsync(db, targetAppId, cancellationToken);
 
         return Results.Ok(services.Select(service =>
             new AppServiceInventoryResponse(
@@ -60,16 +68,24 @@ public sealed class DomainsController : ControllerBase
         [FromQuery] string appId,
         [FromServices] MinicloudDbContext db,
         [FromServices] ControlPlaneAuthorization authorization,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), appId, OrganizationAction.ReadApps, cancellationToken))
+        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), targetAppId, OrganizationAction.ReadApps, cancellationToken))
         {
             return EndpointResults.Forbidden();
         }
 
         var bindings = await db.Domains.AsNoTracking()
-            .Where(x => x.AppId == appId)
+            .Where(x => x.AppId == targetAppId)
             .OrderBy(x => x.ServiceName)
             .ThenBy(x => x.Hostname)
             .ToListAsync(cancellationToken);
@@ -80,12 +96,21 @@ public sealed class DomainsController : ControllerBase
     public async Task<IResult> CheckDomainAvailability(
         [FromQuery] string appId,
         [FromQuery] string label,
+        [FromServices] MinicloudDbContext db,
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] DomainBindingService domains,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), appId, OrganizationAction.ReadApps, cancellationToken))
+        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), targetAppId, OrganizationAction.ReadApps, cancellationToken))
         {
             return EndpointResults.Forbidden();
         }
@@ -104,10 +129,18 @@ public sealed class DomainsController : ControllerBase
         [FromServices] DeploymentServiceSetService serviceSets,
         [FromServices] DomainBindingService domains,
         [FromServices] CustomDomainRegistrationService registrations,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        var app = await db.Apps.Include(x => x.Organization).SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
+        var app = await db.Apps.Include(x => x.Organization).SingleOrDefaultAsync(x => x.Id == targetAppId, cancellationToken);
         if (app is null)
         {
             return EndpointResults.NotFound("app_not_found", "App was not found.");
@@ -118,7 +151,7 @@ public sealed class DomainsController : ControllerBase
             return EndpointResults.Forbidden();
         }
 
-        var activeServices = await serviceSets.BuildActiveServicesAsync(db, appId, cancellationToken);
+        var activeServices = await serviceSets.BuildActiveServicesAsync(db, targetAppId, cancellationToken);
         if (request.Hostname is not null && request.Label is not null)
         {
             return Results.BadRequest(new ErrorResponse(new ErrorBody("validation_failed", "Provide hostname or label, not both.", [])));
@@ -159,7 +192,7 @@ public sealed class DomainsController : ControllerBase
             return EndpointResults.Conflict("domain_hostname_taken", "Domain is already assigned.");
         }
         await audit.AppendAsync(app.OrganizationId, app.Id, AuditEventService.ActorFor(principal.ToActorIdentity()), "domain.created", result.Binding!.Id, cancellationToken);
-        return Results.Created($"/v1/domains/{result.Binding!.Id}?appId={Uri.EscapeDataString(appId)}", DomainBindingService.ToResponse(result.Binding));
+        return Results.Created($"/api/domains/{result.Binding!.Id}?appId={Uri.EscapeDataString(targetAppId)}", DomainBindingService.ToResponse(result.Binding));
     }
 
     [HttpPost("{domainId}/verify")]
@@ -168,14 +201,22 @@ public sealed class DomainsController : ControllerBase
         [FromServices] MinicloudDbContext db,
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] CustomDomainVerificationService verification,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), appId, OrganizationAction.WriteApps, cancellationToken))
+        if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), targetAppId, OrganizationAction.WriteApps, cancellationToken))
         {
             return EndpointResults.Forbidden();
         }
-        var binding = await db.Domains.SingleOrDefaultAsync(x => x.AppId == appId && x.Id == domainId, cancellationToken);
+        var binding = await db.Domains.SingleOrDefaultAsync(x => x.AppId == targetAppId && x.Id == domainId, cancellationToken);
         if (binding is null)
         {
             return EndpointResults.NotFound("domain_not_found", "Domain binding was not found.");
@@ -193,10 +234,18 @@ public sealed class DomainsController : ControllerBase
         [FromServices] AuditEventService audit,
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] TimeProvider timeProvider,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        var binding = await db.Domains.SingleOrDefaultAsync(x => x.AppId == appId && x.Id == domainId, cancellationToken);
+        var binding = await db.Domains.SingleOrDefaultAsync(x => x.AppId == targetAppId && x.Id == domainId, cancellationToken);
         if (binding is null)
         {
             return EndpointResults.NotFound("domain_not_found", "Domain binding was not found.");
@@ -223,7 +272,7 @@ public sealed class DomainsController : ControllerBase
         if (request.IsPrimary is true)
         {
             var siblings = await db.Domains
-                .Where(x => x.AppId == appId && x.ServiceName == binding.ServiceName)
+                .Where(x => x.AppId == targetAppId && x.ServiceName == binding.ServiceName)
                 .ToListAsync(cancellationToken);
             var now = timeProvider.GetUtcNow();
             foreach (var sibling in siblings)
@@ -244,10 +293,18 @@ public sealed class DomainsController : ControllerBase
         [FromServices] MinicloudDbContext db,
         [FromServices] AuditEventService audit,
         [FromServices] ControlPlaneAuthorization authorization,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] string? applicationId = null,
+        [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, cancellationToken);
+        if (ownershipError is not null)
+        {
+            return ownershipError;
+        }
+        var targetAppId = !string.IsNullOrWhiteSpace(environmentId) ? environmentId : appId;
         var principal = RequirePrincipal(HttpContext);
-        var binding = await db.Domains.SingleOrDefaultAsync(x => x.AppId == appId && x.Id == domainId, cancellationToken);
+        var binding = await db.Domains.SingleOrDefaultAsync(x => x.AppId == targetAppId && x.Id == domainId, cancellationToken);
         if (binding is null)
         {
             return EndpointResults.NotFound("domain_not_found", "Domain binding was not found.");

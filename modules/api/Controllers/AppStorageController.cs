@@ -12,14 +12,17 @@ namespace Minicloud.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("v1/apps/{appId}/storage")]
+[Route("api/environments/{appId}/storage")]
 public sealed class AppStorageController : ControllerBase
 {
     // Registration is not a live provider/mount health check. Include retained volumes.
     [HttpGet]
     public async Task<IResult> List(string appId, [FromServices] MinicloudDbContext db,
-        [FromServices] ControlPlaneAuthorization authorization, CancellationToken ct)
+        [FromServices] ControlPlaneAuthorization authorization, CancellationToken ct,
+        [FromQuery] string? applicationId = null, [FromQuery] string? environmentId = null)
     {
+        var ownershipError = await VerifyTargetOwnershipAsync(db, appId, applicationId, environmentId, ct);
+        if (ownershipError is not null) { return ownershipError; }
         if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), appId, OrganizationAction.ReadApps, ct))
         { return EndpointResults.Forbidden(); }
         var volumes = await db.AppStorageVolumes.AsNoTracking().Where(x => x.AppId == appId).OrderBy(x => x.Name).ToListAsync(ct);

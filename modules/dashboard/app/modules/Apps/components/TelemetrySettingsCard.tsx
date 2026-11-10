@@ -80,13 +80,13 @@ export function TelemetrySettingsCard({ appId, settings, onChanged }: Props) {
                 Point the OpenTelemetry logs exporter at the signal-specific endpoint and store the complete
                 headers value as the reserved app secret MINICLOUD_OTLP_LOGS_HEADERS, mapped with secretEnv:
               </p>
-              <pre className="mt-2 overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs text-muted-foreground">
+              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-xs text-muted-foreground">
 {`OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/protobuf
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=${settings.ingestionUrl ?? "<ask your operator for the logs ingestion endpoint>"}
 OTEL_EXPORTER_OTLP_LOGS_HEADERS=Authorization=Bearer%20<token>
 OTEL_SERVICE_NAME=<service-name>`}
               </pre>
-              <pre className="mt-2 overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs text-muted-foreground">
+              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-xs text-muted-foreground">
 {`secretEnv:
   OTEL_EXPORTER_OTLP_LOGS_HEADERS: MINICLOUD_OTLP_LOGS_HEADERS`}
               </pre>

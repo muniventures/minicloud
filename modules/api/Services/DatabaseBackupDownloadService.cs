@@ -40,7 +40,7 @@ public sealed class DatabaseBackupDownloadService(MinicloudDbContext db, Control
         catch (Exception e) when (e is JsonException or System.Security.Cryptography.CryptographicException or FormatException or InvalidOperationException or KeyNotFoundException)
         { throw new InvalidOperationException("Backup repository credential custody is unavailable."); }
         var sourceNamespace = database.OrganizationId.Replace('_', '-').ToLowerInvariant();
-        var url = $"https://{domain.Hostname}/v1/{Uri.EscapeDataString(sourceNamespace)}/{Uri.EscapeDataString(database.Id)}/{Uri.EscapeDataString(artifact.BackupId)}/{filename}";
+        var url = $"https://{domain.Hostname}/api/{Uri.EscapeDataString(sourceNamespace)}/{Uri.EscapeDataString(database.Id)}/{Uri.EscapeDataString(artifact.BackupId)}/{filename}";
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         HttpResponseMessage response;

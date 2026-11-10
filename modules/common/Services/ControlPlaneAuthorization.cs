@@ -29,12 +29,32 @@ public sealed class ControlPlaneAuthorization(MinicloudDbContext db)
 
     public async Task<bool> CanAccessAppAsync(ActorIdentity principal, string appId, OrganizationAction action, CancellationToken cancellationToken)
     {
-        var app = await db.Apps.AsNoTracking().SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
-        if (app?.DeletionStatus is not null && action is not (OrganizationAction.ReadApps or OrganizationAction.ReadDeployments or OrganizationAction.ReadRuntime or OrganizationAction.ReadSecrets or OrganizationAction.ReadApplicationLogs))
+        var app = await db.Apps.AsNoTracking().Include(x => x.Application).SingleOrDefaultAsync(x => x.Id == appId, cancellationToken);
+        if (app is null)
         {
             return false;
         }
-        return app is not null && await CanAccessOrganizationAsync(principal, app.OrganizationId, action, cancellationToken);
+        var isReadOnlyAction = action is OrganizationAction.ReadApps or OrganizationAction.ReadDeployments or OrganizationAction.ReadRuntime or OrganizationAction.ReadSecrets or OrganizationAction.ReadApplicationLogs;
+        if ((app.DeletionStatus is not null || app.Application?.DeletionStatus is not null) && !isReadOnlyAction)
+        {
+            return false;
+        }
+        return await CanAccessOrganizationAsync(principal, app.OrganizationId, action, cancellationToken);
+    }
+
+    public async Task<bool> CanAccessApplicationAsync(ActorIdentity principal, string applicationId, OrganizationAction action, CancellationToken cancellationToken)
+    {
+        var application = await db.Applications.AsNoTracking().SingleOrDefaultAsync(x => x.Id == applicationId, cancellationToken);
+        if (application is null)
+        {
+            return false;
+        }
+        var isReadOnlyAction = action is OrganizationAction.ReadApps or OrganizationAction.ReadDeployments or OrganizationAction.ReadRuntime or OrganizationAction.ReadSecrets or OrganizationAction.ReadApplicationLogs;
+        if (application.DeletionStatus is not null && !isReadOnlyAction)
+        {
+            return false;
+        }
+        return await CanAccessOrganizationAsync(principal, application.OrganizationId, action, cancellationToken);
     }
 
     private static bool HasScope(ActorIdentity principal, string? requiredScope) =>

@@ -33,7 +33,7 @@ public sealed class MinicloudApiClient
         try
         {
             // Discovery never sends the current instance's credentials.
-            using var response = await _httpClient.GetAsync(apiUrl + "/v1/instance", ct);
+            using var response = await _httpClient.GetAsync(apiUrl + "/api/instance", ct);
             if (!response.IsSuccessStatusCode) throw new HttpRequestException($"Instance discovery returned HTTP {(int)response.StatusCode}.");
             var info = await response.Content.ReadFromJsonAsync<InstanceInfoResponse>(JsonOptions, ct);
             if (info is null || info.Product != "minicloud" || info.ProtocolVersion != 1 ||
@@ -48,64 +48,67 @@ public sealed class MinicloudApiClient
     }
 
     public Task<MeResponse> GetMeAsync(CancellationToken cancellationToken) =>
-        SendAsync<MeResponse>(HttpMethod.Get, "/v1/me", null, cancellationToken);
+        SendAsync<MeResponse>(HttpMethod.Get, "/api/me", null, cancellationToken);
 
     public Task<MeResponse> GetMeWithTokenAsync(string token, CancellationToken cancellationToken) =>
-        SendAsync<MeResponse>(HttpMethod.Get, "/v1/me", null, cancellationToken, token);
+        SendAsync<MeResponse>(HttpMethod.Get, "/api/me", null, cancellationToken, token);
 
-    public Task<IReadOnlyList<AppResponse>> GetAppsAsync(string organizationId, CancellationToken cancellationToken) =>
-        SendAsync<IReadOnlyList<AppResponse>>(HttpMethod.Get, $"/v1/apps?organizationId={Uri.EscapeDataString(organizationId)}", null, cancellationToken);
+    public Task<IReadOnlyList<ApplicationResponse>> GetApplicationsAsync(string organizationId, CancellationToken cancellationToken) =>
+        SendAsync<IReadOnlyList<ApplicationResponse>>(HttpMethod.Get, $"/api/apps?organizationId={Uri.EscapeDataString(organizationId)}", null, cancellationToken);
 
-    public Task<AppResponse> CreateEnvironmentAsync(string appId, CreateAppEnvironmentRequest request, CancellationToken cancellationToken) =>
-        SendAsync<AppResponse>(HttpMethod.Post, $"/v1/apps/{Uri.EscapeDataString(appId)}/environments", request, cancellationToken);
+    public Task<ApplicationResponse> GetApplicationAsync(string applicationId, CancellationToken ct) =>
+        SendAsync<ApplicationResponse>(HttpMethod.Get, $"/api/apps/{Uri.EscapeDataString(applicationId)}", null, ct);
 
-    public Task<AppResponse> RenameEnvironmentAsync(string appId, RenameAppEnvironmentRequest request, CancellationToken cancellationToken) =>
-        SendAsync<AppResponse>(HttpMethod.Patch, $"/v1/apps/{Uri.EscapeDataString(appId)}/environment", request, cancellationToken);
+    public Task<ApplicationEnvironmentResponse> CreateEnvironmentAsync(string applicationId, CreateEnvironmentRequest request, CancellationToken ct) =>
+        SendAsync<ApplicationEnvironmentResponse>(HttpMethod.Post, $"/api/apps/{Uri.EscapeDataString(applicationId)}/environments", request, ct);
 
-    public Task<AppResponse> GetAppAsync(string appId, CancellationToken cancellationToken) =>
-        SendAsync<AppResponse>(HttpMethod.Get, $"/v1/apps/{Uri.EscapeDataString(appId)}", null, cancellationToken);
+    public Task<ApplicationEnvironmentResponse> UpdateEnvironmentAsync(string applicationId, string environmentId, UpdateEnvironmentRequest request, CancellationToken ct) =>
+        SendAsync<ApplicationEnvironmentResponse>(HttpMethod.Patch, $"/api/apps/{Uri.EscapeDataString(applicationId)}/environments/{Uri.EscapeDataString(environmentId)}", request, ct);
+
+    public Task<EnvironmentDetailResponse> GetEnvironmentAsync(string environmentId, CancellationToken cancellationToken) =>
+        SendAsync<EnvironmentDetailResponse>(HttpMethod.Get, $"/api/environments/{Uri.EscapeDataString(environmentId)}", null, cancellationToken);
 
     public Task<ImageBuildTarget> GetImageBuildTargetAsync(string appId, CancellationToken ct) =>
-        SendAsync<ImageBuildTarget>(HttpMethod.Get, $"/v1/apps/{Uri.EscapeDataString(appId)}/image-build-target", null, ct);
+        SendAsync<ImageBuildTarget>(HttpMethod.Get, $"/api/environments/{Uri.EscapeDataString(appId)}/image-build-target", null, ct);
     public Task<ImagePublicationResponse> CreateImagePublicationAsync(string appId, CreateImagePublicationRequest request, CancellationToken ct) =>
-        SendAsync<ImagePublicationResponse>(HttpMethod.Post, $"/v1/apps/{Uri.EscapeDataString(appId)}/image-publications", request, ct);
+        SendAsync<ImagePublicationResponse>(HttpMethod.Post, $"/api/environments/{Uri.EscapeDataString(appId)}/image-publications", request, ct);
     public Task<ImagePublicationCredentialsResponse> GetImagePublicationCredentialsAsync(string appId, string id, CancellationToken ct) =>
-        SendAsync<ImagePublicationCredentialsResponse>(HttpMethod.Post, $"/v1/apps/{Uri.EscapeDataString(appId)}/image-publications/{Uri.EscapeDataString(id)}/credentials", null, ct);
+        SendAsync<ImagePublicationCredentialsResponse>(HttpMethod.Post, $"/api/environments/{Uri.EscapeDataString(appId)}/image-publications/{Uri.EscapeDataString(id)}/credentials", null, ct);
     public Task<ImagePublicationResponse> CompleteImagePublicationAsync(string appId, string id, string digest, CancellationToken ct) =>
-        SendAsync<ImagePublicationResponse>(HttpMethod.Post, $"/v1/apps/{Uri.EscapeDataString(appId)}/image-publications/{Uri.EscapeDataString(id)}/complete", new CompleteImagePublicationRequest(digest), ct);
+        SendAsync<ImagePublicationResponse>(HttpMethod.Post, $"/api/environments/{Uri.EscapeDataString(appId)}/image-publications/{Uri.EscapeDataString(id)}/complete", new CompleteImagePublicationRequest(digest), ct);
     public Task CancelImagePublicationAsync(string appId, string id, CancellationToken ct) =>
-        SendNoContentAsync(HttpMethod.Delete, $"/v1/apps/{Uri.EscapeDataString(appId)}/image-publications/{Uri.EscapeDataString(id)}", ct);
+        SendNoContentAsync(HttpMethod.Delete, $"/api/environments/{Uri.EscapeDataString(appId)}/image-publications/{Uri.EscapeDataString(id)}", ct);
 
-    public Task<AppResponse> CreateAppAsync(CreateAppRequest request, CancellationToken cancellationToken) =>
-        SendAsync<AppResponse>(HttpMethod.Post, "/v1/apps", request, cancellationToken);
+    public Task<ApplicationResponse> CreateAppAsync(CreateApplicationRequest request, CancellationToken cancellationToken) =>
+        SendAsync<ApplicationResponse>(HttpMethod.Post, "/api/apps", request, cancellationToken);
 
-    public Task<AppResponse> SelectPlanAsync(string appId, string plan, CancellationToken cancellationToken) =>
-        SendAsync<AppResponse>(HttpMethod.Post, $"/v1/apps/{Uri.EscapeDataString(appId)}/plan", new SelectAppPlanRequest(plan), cancellationToken);
+    public Task<EnvironmentDetailResponse> SelectPlanAsync(string appId, string plan, CancellationToken cancellationToken) =>
+        SendAsync<EnvironmentDetailResponse>(HttpMethod.Post, $"/api/environments/{Uri.EscapeDataString(appId)}/plan", new SelectAppPlanRequest(plan), cancellationToken);
 
     public Task<IReadOnlyList<ProviderPlanResponse>> GetPlansAsync(string organizationId, CancellationToken cancellationToken) =>
-        SendAsync<IReadOnlyList<ProviderPlanResponse>>(HttpMethod.Get, $"/v1/plans?organizationId={Uri.EscapeDataString(organizationId)}", null, cancellationToken);
+        SendAsync<IReadOnlyList<ProviderPlanResponse>>(HttpMethod.Get, $"/api/plans?organizationId={Uri.EscapeDataString(organizationId)}", null, cancellationToken);
 
     public Task<ProviderAccountResponse> CreateProviderAsync(CreateProviderRequest request, CancellationToken ct) =>
-        SendAsync<ProviderAccountResponse>(HttpMethod.Post, "/v1/providers", request, ct);
+        SendAsync<ProviderAccountResponse>(HttpMethod.Post, "/api/providers", request, ct);
 
     public Task<ProviderLegacyImportResult> ImportProviderLegacyAsync(ProviderLegacyImportRequest request, CancellationToken ct) =>
-        SendAsync<ProviderLegacyImportResult>(HttpMethod.Post, $"/v1/providers/{Uri.EscapeDataString(request.ProviderAccountId)}/import-legacy", request, ct);
+        SendAsync<ProviderLegacyImportResult>(HttpMethod.Post, $"/api/providers/{Uri.EscapeDataString(request.ProviderAccountId)}/import-legacy", request, ct);
 
-    public Task<AppResponse> EnsureBranchAsync(string appId, EnsureAppBranchRequest request, CancellationToken cancellationToken) =>
-        SendAsync<AppResponse>(HttpMethod.Post, $"/v1/apps/{Uri.EscapeDataString(appId)}/branches", request, cancellationToken);
+    public Task<EnvironmentDetailResponse> EnsureBranchAsync(string appId, EnsureAppBranchRequest request, CancellationToken cancellationToken) =>
+        SendAsync<EnvironmentDetailResponse>(HttpMethod.Post, $"/api/environments/{Uri.EscapeDataString(appId)}/branches", request, cancellationToken);
 
     public Task DestroyBranchAsync(string appId, string branchAppId, CancellationToken cancellationToken) =>
-        SendNoContentAsync(HttpMethod.Delete, $"/v1/apps/{Uri.EscapeDataString(appId)}/branches/{Uri.EscapeDataString(branchAppId)}", cancellationToken);
+        SendNoContentAsync(HttpMethod.Delete, $"/api/environments/{Uri.EscapeDataString(appId)}/branches/{Uri.EscapeDataString(branchAppId)}", cancellationToken);
 
     public Task<IReadOnlyList<AppServiceInventoryResponse>> GetAppServicesAsync(string appId, CancellationToken cancellationToken) =>
-        SendAsync<IReadOnlyList<AppServiceInventoryResponse>>(HttpMethod.Get, $"/v1/domains/services?appId={Uri.EscapeDataString(appId)}", null, cancellationToken);
+        SendAsync<IReadOnlyList<AppServiceInventoryResponse>>(HttpMethod.Get, $"/api/domains/services?appId={Uri.EscapeDataString(appId)}", null, cancellationToken);
 
     public Task<IReadOnlyList<DomainBindingResponse>> GetDomainsAsync(string appId, CancellationToken cancellationToken) =>
-        SendAsync<IReadOnlyList<DomainBindingResponse>>(HttpMethod.Get, $"/v1/domains?appId={Uri.EscapeDataString(appId)}", null, cancellationToken);
+        SendAsync<IReadOnlyList<DomainBindingResponse>>(HttpMethod.Get, $"/api/domains?appId={Uri.EscapeDataString(appId)}", null, cancellationToken);
 
     public Task<IReadOnlyList<AppServiceSecretResponse>> GetSecretsAsync(string appId, string? serviceName, CancellationToken cancellationToken)
     {
-        var path = $"/v1/secrets?appId={Uri.EscapeDataString(appId)}";
+        var path = $"/api/secrets?appId={Uri.EscapeDataString(appId)}";
         if (!string.IsNullOrWhiteSpace(serviceName))
         {
             path += $"&service={Uri.EscapeDataString(serviceName)}";
@@ -115,44 +118,44 @@ public sealed class MinicloudApiClient
     }
 
     public Task ValidateDeploymentSecretsAsync(ValidateDeploymentSecretsRequest request, CancellationToken cancellationToken) =>
-        SendNoContentAsync(HttpMethod.Post, "/v1/deployments/validate-secrets", request, cancellationToken);
+        SendNoContentAsync(HttpMethod.Post, "/api/deployments/validate-secrets", request, cancellationToken);
 
     public Task<AppServiceSecretResponse> SetSecretAsync(string appId, SetAppServiceSecretRequest request, CancellationToken cancellationToken) =>
-        SendAsync<AppServiceSecretResponse>(HttpMethod.Post, $"/v1/secrets?appId={Uri.EscapeDataString(appId)}", request, cancellationToken);
+        SendAsync<AppServiceSecretResponse>(HttpMethod.Post, $"/api/secrets?appId={Uri.EscapeDataString(appId)}", request, cancellationToken);
 
     public Task DeleteSecretAsync(string appId, string secretId, CancellationToken cancellationToken) =>
-        SendNoContentAsync(HttpMethod.Delete, $"/v1/secrets/{Uri.EscapeDataString(secretId)}?appId={Uri.EscapeDataString(appId)}", cancellationToken);
+        SendNoContentAsync(HttpMethod.Delete, $"/api/secrets/{Uri.EscapeDataString(secretId)}?appId={Uri.EscapeDataString(appId)}", cancellationToken);
 
     public Task<DomainBindingResponse> CreateDomainAsync(string appId, CreateDomainBindingRequest request, CancellationToken cancellationToken) =>
-        SendAsync<DomainBindingResponse>(HttpMethod.Post, $"/v1/domains?appId={Uri.EscapeDataString(appId)}", request, cancellationToken);
+        SendAsync<DomainBindingResponse>(HttpMethod.Post, $"/api/domains?appId={Uri.EscapeDataString(appId)}", request, cancellationToken);
 
     public Task<DomainBindingResponse> UpdateDomainAsync(string appId, string domainId, UpdateDomainBindingRequest request, CancellationToken cancellationToken) =>
-        SendAsync<DomainBindingResponse>(HttpMethod.Patch, $"/v1/domains/{Uri.EscapeDataString(domainId)}?appId={Uri.EscapeDataString(appId)}", request, cancellationToken);
+        SendAsync<DomainBindingResponse>(HttpMethod.Patch, $"/api/domains/{Uri.EscapeDataString(domainId)}?appId={Uri.EscapeDataString(appId)}", request, cancellationToken);
 
     public Task DeleteDomainAsync(string appId, string domainId, CancellationToken cancellationToken) =>
-        SendNoContentAsync(HttpMethod.Delete, $"/v1/domains/{Uri.EscapeDataString(domainId)}?appId={Uri.EscapeDataString(appId)}", cancellationToken);
+        SendNoContentAsync(HttpMethod.Delete, $"/api/domains/{Uri.EscapeDataString(domainId)}?appId={Uri.EscapeDataString(appId)}", cancellationToken);
 
     public Task<AssetReleaseResponse> PublishAssetAsync(PublishAssetRequest request, CancellationToken ct) =>
-        SendAsync<AssetReleaseResponse>(HttpMethod.Post, "/v1/assets", request, ct);
+        SendAsync<AssetReleaseResponse>(HttpMethod.Post, "/api/assets", request, ct);
     public Task<AssetReleaseResponse> GetAssetAsync(string id, CancellationToken ct) =>
-        SendAsync<AssetReleaseResponse>(HttpMethod.Get, $"/v1/assets/{Uri.EscapeDataString(id)}", null, ct);
+        SendAsync<AssetReleaseResponse>(HttpMethod.Get, $"/api/assets/{Uri.EscapeDataString(id)}", null, ct);
 
     public Task<DeploymentCreateResponse> StartDeploymentPreparationAsync(StartDeploymentPreparationRequest request, CancellationToken ct) =>
-        SendAsync<DeploymentCreateResponse>(HttpMethod.Post, "/v1/deployments/preparations", request, ct);
+        SendAsync<DeploymentCreateResponse>(HttpMethod.Post, "/api/deployments/preparations", request, ct);
 
     public Task UpdateDeploymentPreparationAsync(string id, UpdateDeploymentPreparationRequest request, CancellationToken ct) =>
-        SendNoContentAsync(HttpMethod.Post, $"/v1/deployments/preparations/{Uri.EscapeDataString(id)}", request, ct);
+        SendNoContentAsync(HttpMethod.Post, $"/api/deployments/preparations/{Uri.EscapeDataString(id)}", request, ct);
 
     public Task<DeploymentCreateResponse> CreateDeploymentAsync(CreateDeploymentRequest request, CancellationToken cancellationToken) =>
-        SendAsync<DeploymentCreateResponse>(HttpMethod.Post, "/v1/deployments", request, cancellationToken);
+        SendAsync<DeploymentCreateResponse>(HttpMethod.Post, "/api/deployments", request, cancellationToken);
 
     public Task<DeploymentArtifactCreateResponse> CreateDeploymentArtifactAsync(CreateDeploymentArtifactRequest request, CancellationToken cancellationToken) =>
-        SendAsync<DeploymentArtifactCreateResponse>(HttpMethod.Post, "/v1/artifacts", request, cancellationToken);
+        SendAsync<DeploymentArtifactCreateResponse>(HttpMethod.Post, "/api/artifacts", request, cancellationToken);
 
     public async Task<DeploymentArtifactResponse> UploadDeploymentArtifactContentAsync(string artifactId, string uploadUrl, string filePath, string sha256, long sizeBytes, CancellationToken cancellationToken)
     {
         var path = string.IsNullOrWhiteSpace(uploadUrl)
-            ? $"/v1/artifacts/{Uri.EscapeDataString(artifactId)}/file"
+            ? $"/api/artifacts/{Uri.EscapeDataString(artifactId)}/file"
             : UploadPathAndQuery(uploadUrl);
         var token = _tokenStore.GetToken();
         if (string.IsNullOrWhiteSpace(token))
@@ -187,7 +190,7 @@ public sealed class MinicloudApiClient
             query += $"&appId={Uri.EscapeDataString(appId)}";
         }
 
-        return SendAsync<IReadOnlyList<DeploymentResponse>>(HttpMethod.Get, $"/v1/deployments?{query}", null, cancellationToken);
+        return SendAsync<IReadOnlyList<DeploymentResponse>>(HttpMethod.Get, $"/api/deployments?{query}", null, cancellationToken);
     }
 
     private static string UploadPathAndQuery(string uploadUrl)
@@ -201,19 +204,19 @@ public sealed class MinicloudApiClient
     }
 
     public Task<DeploymentResponse> GetDeploymentAsync(string deploymentId, CancellationToken cancellationToken) =>
-        SendAsync<DeploymentResponse>(HttpMethod.Get, $"/v1/deployments/{Uri.EscapeDataString(deploymentId)}", null, cancellationToken);
+        SendAsync<DeploymentResponse>(HttpMethod.Get, $"/api/deployments/{Uri.EscapeDataString(deploymentId)}", null, cancellationToken);
 
     public Task<DeploymentCancellationResponse> CancelDeploymentAsync(string deploymentId, CancellationToken cancellationToken) =>
-        SendAsync<DeploymentCancellationResponse>(HttpMethod.Post, $"/v1/deployments/{Uri.EscapeDataString(deploymentId)}/cancel", null, cancellationToken);
+        SendAsync<DeploymentCancellationResponse>(HttpMethod.Post, $"/api/deployments/{Uri.EscapeDataString(deploymentId)}/cancel", null, cancellationToken);
 
     public Task<DeploymentResponse> RefreshDeploymentAsync(string deploymentId, CancellationToken cancellationToken) =>
-        SendAsync<DeploymentResponse>(HttpMethod.Post, $"/v1/deployments/{Uri.EscapeDataString(deploymentId)}/refresh", null, cancellationToken);
+        SendAsync<DeploymentResponse>(HttpMethod.Post, $"/api/deployments/{Uri.EscapeDataString(deploymentId)}/refresh", null, cancellationToken);
 
     public Task<IReadOnlyList<DeploymentEventResponse>> GetDeploymentEventsAsync(string deploymentId, CancellationToken cancellationToken) =>
-        SendAsync<IReadOnlyList<DeploymentEventResponse>>(HttpMethod.Get, $"/v1/deployments/{Uri.EscapeDataString(deploymentId)}/events", null, cancellationToken);
+        SendAsync<IReadOnlyList<DeploymentEventResponse>>(HttpMethod.Get, $"/api/deployments/{Uri.EscapeDataString(deploymentId)}/events", null, cancellationToken);
 
     public Task<IReadOnlyList<DeploymentLogResponse>> GetDeploymentLogsAsync(string deploymentId, CancellationToken cancellationToken) =>
-        SendAsync<IReadOnlyList<DeploymentLogResponse>>(HttpMethod.Get, $"/v1/deployments/{Uri.EscapeDataString(deploymentId)}/logs", null, cancellationToken);
+        SendAsync<IReadOnlyList<DeploymentLogResponse>>(HttpMethod.Get, $"/api/deployments/{Uri.EscapeDataString(deploymentId)}/logs", null, cancellationToken);
 
     public Task<IReadOnlyList<RuntimeLogResponse>> GetRuntimeLogsAsync(
         string appId,
@@ -241,14 +244,14 @@ public sealed class MinicloudApiClient
         }
 
         query.Insert(0, $"appId={Uri.EscapeDataString(appId)}");
-        return SendAsync<IReadOnlyList<RuntimeLogResponse>>(HttpMethod.Get, $"/v1/runtime/logs?{string.Join("&", query)}", null, cancellationToken);
+        return SendAsync<IReadOnlyList<RuntimeLogResponse>>(HttpMethod.Get, $"/api/runtime/logs?{string.Join("&", query)}", null, cancellationToken);
     }
 
     public Task<CliLoginSessionCreateResponse> CreateCliLoginSessionAsync(CancellationToken cancellationToken) =>
-        SendUnauthenticatedAsync<CliLoginSessionCreateResponse>(HttpMethod.Post, "/v1/cli-login-sessions", null, cancellationToken);
+        SendUnauthenticatedAsync<CliLoginSessionCreateResponse>(HttpMethod.Post, "/api/cli-login-sessions", null, cancellationToken);
 
     public Task<CliLoginSessionExchangeResponse?> ExchangeCliLoginSessionAsync(string sessionId, CancellationToken cancellationToken) =>
-        SendUnauthenticatedMaybeAcceptedAsync<CliLoginSessionExchangeResponse>(HttpMethod.Post, $"/v1/cli-login-sessions/{Uri.EscapeDataString(sessionId)}/exchange", null, cancellationToken);
+        SendUnauthenticatedMaybeAcceptedAsync<CliLoginSessionExchangeResponse>(HttpMethod.Post, $"/api/cli-login-sessions/{Uri.EscapeDataString(sessionId)}/exchange", null, cancellationToken);
 
     private async Task<T> SendAsync<T>(HttpMethod method, string pathAndQuery, object? body, CancellationToken cancellationToken, string? tokenOverride = null)
     {

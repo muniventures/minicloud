@@ -13,7 +13,7 @@ namespace Minicloud.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("v1/deployments/preparations")]
+[Route("api/deployments/preparations")]
 public sealed class DeploymentPreparationsController : ControllerBase
 {
     [HttpPost]
@@ -21,15 +21,19 @@ public sealed class DeploymentPreparationsController : ControllerBase
         [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] DeploymentPreparationService preparations, [FromServices] ProviderCatalogService catalog, CancellationToken ct)
     {
-        if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), request.AppId, OrganizationAction.CreateDeployments, ct))
+        var ownershipError = await VerifyTargetOwnershipAsync(db, request.AppId, request.ApplicationId, request.EnvironmentId, ct);
+        if (ownershipError is not null)
+        { return ownershipError; }
+        var targetAppId = !string.IsNullOrWhiteSpace(request.EnvironmentId) ? request.EnvironmentId! : request.AppId;
+        if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), targetAppId, OrganizationAction.CreateDeployments, ct))
         { return EndpointResults.Forbidden(); }
         var validation = ControlPlaneValidation.ValidateDeploymentPreparation(request);
         if (!validation.IsValid) { return EndpointResults.ValidationProblem("Local build preparation is invalid.", validation); }
         var key = Guid.Parse(request.IdempotencyKey);
-        try { return await preparations.LockedAsync(request.AppId, async () =>
+        try { return await preparations.LockedAsync(targetAppId, async () =>
         {
-            var app = await db.Apps.SingleAsync(x => x.Id == request.AppId, ct);
-            if (app.DeletionStatus is not null) { return EndpointResults.Conflict("app_deleting", "The app is being deleted."); }
+            var app = await db.Apps.SingleAsync(x => x.Id == targetAppId, ct);
+            if (app.DeletionStatus is not null || await db.Applications.AnyAsync(x => x.Id == app.ApplicationId && x.DeletionStatus != null, ct)) { return EndpointResults.Conflict("app_deleting", "The app is being deleted."); }
             var id = "dep_" + key.ToString("N");
             var existing = await db.Deployments.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (existing is not null)
@@ -40,7 +44,7 @@ public sealed class DeploymentPreparationsController : ControllerBase
                 { return EndpointResults.Conflict("preparation_conflict", "Preparation key is already bound to another plan."); }
                 if (existing.Status != DeploymentStatus.WaitingForBuild || preparations.IsExpired(existing))
                 { return EndpointResults.Conflict("preparation_closed", "Preparation has ended; use a new key."); }
-                return Results.Ok(ToResponse(existing));
+                return Results.Ok(ToResponse(existing, app.ApplicationId));
             }
             if (await preparations.HasActiveAsync(app.Id, null, ct))
             { return EndpointResults.Conflict("deployment_active", "This app already has an active deployment or local build."); }
@@ -48,7 +52,7 @@ public sealed class DeploymentPreparationsController : ControllerBase
             var deployment = preparations.Start(app, id, request.ServiceNames);
             await catalog.ReserveAsync(app, deployment, ct);
             db.Deployments.Add(deployment);
-            return Results.Created($"/v1/deployments/{deployment.Id}", ToResponse(deployment));
+            return Results.Created($"/api/deployments/{deployment.Id}", ToResponse(deployment, app.ApplicationId));
         }, ct); }
         catch (ProviderCatalogException ex)
         { return EndpointResults.Problem(ex.Code, ex.Message, StatusCodes.Status400BadRequest); }
@@ -61,15 +65,19 @@ public sealed class DeploymentPreparationsController : ControllerBase
         [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] DeploymentPreparationService preparations, CancellationToken ct)
     {
-        if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), request.AppId, OrganizationAction.CreateDeployments, ct))
+        var ownershipError = await VerifyTargetOwnershipAsync(db, request.AppId, request.ApplicationId, request.EnvironmentId, ct);
+        if (ownershipError is not null)
+        { return ownershipError; }
+        var targetAppId = !string.IsNullOrWhiteSpace(request.EnvironmentId) ? request.EnvironmentId! : request.AppId;
+        if (!await authorization.CanAccessAppAsync(RequirePrincipal(HttpContext).ToActorIdentity(), targetAppId, OrganizationAction.CreateDeployments, ct))
         { return EndpointResults.Forbidden(); }
         if (request.Status is not ("heartbeat" or "failed" or "canceled") || request.Stage is not ("build" or "preparation" or "admission"))
         { return EndpointResults.Problem("invalid_preparation_status", "Expected heartbeat, failed or canceled.", 400); }
-        return await preparations.LockedAsync(request.AppId, async () =>
+        return await preparations.LockedAsync(targetAppId, async () =>
         {
             var deployment = db.Database.IsNpgsql()
-                ? await db.Deployments.FromSqlInterpolated($"SELECT * FROM deployments WHERE id = {id} AND app_id = {request.AppId} FOR UPDATE").SingleOrDefaultAsync(ct)
-                : await db.Deployments.SingleOrDefaultAsync(x => x.Id == id && x.AppId == request.AppId, ct);
+                ? await db.Deployments.FromSqlInterpolated($"SELECT * FROM deployments WHERE id = {id} AND app_id = {targetAppId} FOR UPDATE").SingleOrDefaultAsync(ct)
+                : await db.Deployments.SingleOrDefaultAsync(x => x.Id == id && x.AppId == targetAppId, ct);
             if (deployment is null) { return EndpointResults.NotFound("deployment_not_found", "Deployment was not found."); }
             if (deployment.Status != DeploymentStatus.WaitingForBuild)
             { return EndpointResults.Conflict("preparation_closed", "Preparation is no longer waiting for a local build."); }
@@ -84,6 +92,6 @@ public sealed class DeploymentPreparationsController : ControllerBase
         }, ct);
     }
 
-    private static DeploymentCreateResponse ToResponse(Deployment d) => new(d.Id, d.AppId,
-        ControlPlaneValidation.ToWireValue(d.Status), $"/v1/deployments/{d.Id}", null, d.CreatedAt);
+    private static DeploymentCreateResponse ToResponse(Deployment d, string? applicationId) => new(d.Id, d.AppId,
+        ControlPlaneValidation.ToWireValue(d.Status), $"/api/deployments/{d.Id}", null, d.CreatedAt, ApplicationId: applicationId, EnvironmentId: d.AppId);
 }

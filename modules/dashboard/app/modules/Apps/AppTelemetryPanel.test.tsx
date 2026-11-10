@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type AppResponse, type TelemetryLogEntry, type TelemetryLogsResponse } from "../../models/controlPlane";
+import { ApiError, type EnvironmentDetailResponse, type TelemetryLogEntry, type TelemetryLogsResponse } from "../../models/controlPlane";
 import { AppTelemetryPanel } from "./AppTelemetryPanel";
 import {
   exchangeGrafanaLaunch,
@@ -19,7 +19,7 @@ vi.mock("../../api/telemetryApi", () => ({
   queryApplicationLogs: vi.fn()
 }));
 
-const app: AppResponse = {
+const app: EnvironmentDetailResponse = {
   id: "app_123",
   organizationId: "org_123",
   name: "Demo",

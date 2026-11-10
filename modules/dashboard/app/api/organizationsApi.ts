@@ -7,7 +7,7 @@ export type CreateOrganizationRequest = {
 };
 
 export function createOrganization(request: CreateOrganizationRequest) {
-  return apiRequest<OrganizationResponse>("/v1/organizations", {
+  return apiRequest<OrganizationResponse>("/api/organizations", {
     method: "POST",
     body: request
   });

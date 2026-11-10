@@ -52,7 +52,7 @@ public sealed partial class CliApplication
 
     private async Task<int> RunLogsAsync(string[] args, CancellationToken cancellationToken)
     {
-        var appOrDeployment = args.FirstOrDefault(x => !x.StartsWith("-", StringComparison.Ordinal));
+        var appOrDeployment = FirstPositional(args);
         var source = GetOption(args, "--source");
         var service = GetOption(args, "--service");
         var since = GetOption(args, "--since");
@@ -92,21 +92,8 @@ public sealed partial class CliApplication
             return CliExitCodes.Success;
         }
 
-        var me = await _apiClient.GetMeAsync(cancellationToken);
-        var organization = me.Organizations.FirstOrDefault();
-        if (organization is null)
-        {
-            _console.WriteError("Auth error: your token is not associated with an organization.");
-            return CliExitCodes.AuthError;
-        }
-
-        var apps = await _apiClient.GetAppsAsync(organization.Id, cancellationToken);
-        var app = FindApp(apps, appOrDeployment);
-        if (app is null)
-        {
-            _console.WriteError($"App '{appOrDeployment}' was not found in organization '{organization.Name}'.");
-            return CliExitCodes.ValidationError;
-        }
+        var appArgs = args.Concat(["--app", appOrDeployment]).ToArray();
+        var app = await ResolveAppOptionAsync(appArgs, cancellationToken);
 
         var runtimeLogs = await _apiClient.GetRuntimeLogsAsync(app.Id, source, service, tail, since, cancellationToken);
         foreach (var log in runtimeLogs)

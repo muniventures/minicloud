@@ -72,7 +72,7 @@ public sealed class GrafanaSessionService(
             LaunchCode = code,
             Destination = safeDestination,
             ExpiresAt = expiresAt,
-            ExchangeUrl = $"{accessOrigin}/v1/grafana/exchange",
+            ExchangeUrl = $"{accessOrigin}/api/grafana/exchange",
             GrafanaBaseUrl = $"{accessOrigin}/grafana/"
         };
     }
