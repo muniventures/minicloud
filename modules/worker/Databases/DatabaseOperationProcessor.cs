@@ -261,6 +261,7 @@ public sealed partial class DatabaseOperationProcessor(
     private async Task<bool> ProcessDatabaseAsync(DatabaseOperation operation, CancellationToken ct)
     {
         var database = await db.ManagedDatabases.SingleAsync(x => x.Id == operation.DatabaseId && x.OrganizationId == operation.OrganizationId, ct);
+        if (operation.Kind == "purge-backups") { return await PurgeBackupsAsync(operation, database, ct); }
         if (operation.Kind == "restore") { return await RestoreBackupAsync(operation, database, ct); }
         if (operation.Kind == "reconcile-policy") { return await ReconcileBackupPolicyAsync(operation, database, ct); }
         if (operation.Kind == "configure-backup" && !await db.DatabaseBackupPolicies.AnyAsync(x => x.DatabaseId == database.Id && x.Enabled, ct))

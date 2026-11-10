@@ -68,14 +68,38 @@ public sealed class DatabaseManagementTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ReferencedRepositoryCannotBeDeletedEvenAfterPolicyDisabled()
+    public async Task DisabledPolicyAloneDoesNotBlockRepositoryDeletion()
     {
         var database = await service.CreateDatabaseAsync(new("org_test", "existing", AppId: "app_test"), actor, default);
         var policy = await db.DatabaseBackupPolicies.SingleAsync();
         policy.RepositoryAppId = "repository";
         policy.Enabled = false;
         await db.SaveChangesAsync();
+        Assert.Null(await DatabaseLifecycleGuards.AppDeletionBlockerAsync(db, "repository", default));
+    }
+
+    [Fact]
+    public async Task OnlyCompleteArtifactsAndEnabledPoliciesProtectRepository()
+    {
+        db.DatabaseBackupArtifacts.Add(new DatabaseBackupArtifact { Id = "artifact", OrganizationId = "org_test", DatabaseId = "db_fixture", RepositoryAppId = "repository", Status = "complete" });
+        await db.SaveChangesAsync();
         Assert.NotNull(await DatabaseLifecycleGuards.AppDeletionBlockerAsync(db, "repository", default));
+        (await db.DatabaseBackupArtifacts.SingleAsync()).Status = "purged";
+        await db.SaveChangesAsync();
+        Assert.Null(await DatabaseLifecycleGuards.AppDeletionBlockerAsync(db, "repository", default));
+    }
+
+    [Fact]
+    public async Task RevokedBindingDoesNotBlockApplicationDeletion()
+    {
+        var database = await service.CreateDatabaseAsync(new("org_test", "existing", AppId: "app_test"), actor, default);
+        (await db.DatabaseOperations.SingleAsync()).Status = "completed";
+        db.ManagedDatabaseBindings.Add(new ManagedDatabaseBinding { Id = "binding", OrganizationId = "org_test", DatabaseId = database.Id, AppId = "app_test", ServiceName = "api", Status = "applied" });
+        await db.SaveChangesAsync();
+        Assert.NotNull(await DatabaseLifecycleGuards.AppDeletionBlockerAsync(db, "app_test", default));
+        (await db.ManagedDatabaseBindings.SingleAsync()).Status = "revoked";
+        await db.SaveChangesAsync();
+        Assert.Null(await DatabaseLifecycleGuards.AppDeletionBlockerAsync(db, "app_test", default));
     }
 
     [Fact]
@@ -117,5 +141,45 @@ public sealed class DatabaseManagementTests : IAsyncLifetime
     {
         Assert.DoesNotContain("secret", JsonSerializer.Serialize(new ManagedDatabase { EncryptedCredentialsJson = "secret" }));
         Assert.DoesNotContain("secret", JsonSerializer.Serialize(new DatabaseBackupPolicy { EncryptedKeyMaterialJson = "secret" }));
+    }
+    [Fact]
+    public async Task DeletedSourceCanRetireIndefiniteRetentionWithoutMovingRepositoryOrRequiringSourceHost()
+    {
+        var database = await service.CreateDatabaseAsync(new("org_test", "retained", AppId: "app_test"), actor, default);
+        (await db.DatabaseOperations.SingleAsync()).Status = "completed";
+        database.Status = "deleted";
+        var policy = await db.DatabaseBackupPolicies.SingleAsync();
+        policy.Enabled = false; policy.KeepLastCopies = true; policy.RepositoryAppId = "retained-repository";
+        policy.EncryptedKeyMaterialJson = "retained-key-custody";
+        await db.SaveChangesAsync();
+        var changed = await service.SetPolicyAsync(database.Id, new(false, KeepLastCopies: false), actor, default);
+        Assert.False(changed.Enabled);
+        Assert.False(changed.KeepLastCopies);
+        Assert.Equal("retained-repository", changed.RepositoryAppId);
+        Assert.Equal("retained-key-custody", changed.EncryptedKeyMaterialJson);
+        var configure = await db.DatabaseOperations.SingleAsync(x => x.Kind == "configure-backup");
+        Assert.Equal(database.Id, configure.DatabaseId);
+        Assert.Equal("queued", configure.Status);
+        var purge = new DatabaseBackupPurgeService(db, service);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => purge.QueueAsync(database.Id, new("retained"), actor, default));
+        configure.Status = "completed";
+        await db.SaveChangesAsync();
+        Assert.Equal("purge-backups", (await purge.QueueAsync(database.Id, new("retained"), actor, default)).Kind);
+    }
+
+    [Fact]
+    public async Task DeletedSourceCannotReenableBackupsOrReplaceRetainedDestination()
+    {
+        var database = await service.CreateDatabaseAsync(new("org_test", "retained", AppId: "app_test"), actor, default);
+        (await db.DatabaseOperations.SingleAsync()).Status = "completed";
+        database.Status = "deleted";
+        var policy = await db.DatabaseBackupPolicies.SingleAsync();
+        policy.Enabled = false; policy.KeepLastCopies = true; policy.RepositoryAppId = "retained-repository";
+        await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SetPolicyAsync(database.Id, new(true, "retained-repository"), actor, default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SetPolicyAsync(database.Id, new(false, "different-repository"), actor, default));
+        Assert.Equal("retained-repository", policy.RepositoryAppId);
+        Assert.True(policy.KeepLastCopies);
+        Assert.Single(await db.DatabaseOperations.ToListAsync());
     }
 }

@@ -25,6 +25,72 @@ public sealed class DeploymentPipelineExecutorTests : IClassFixture<WorkerSqlite
         _harness = harness;
     }
 
+    [Theory]
+    [InlineData(true, true, false, DatabaseMode.Postgres, false, true)]
+    [InlineData(false, true, false, DatabaseMode.Postgres, false, false)]
+    [InlineData(true, false, false, DatabaseMode.Postgres, false, false)]
+    [InlineData(true, true, true, DatabaseMode.Postgres, false, false)]
+    [InlineData(true, true, false, DatabaseMode.None, false, false)]
+    [InlineData(true, true, false, DatabaseMode.Sqlite, false, false)]
+    [InlineData(true, true, false, DatabaseMode.Postgres, true, false)]
+    public async Task EmptyDesiredSetRequiresExactLiveManagedServerDeployment(
+        bool registered, bool exactDeployment, bool deleted, DatabaseMode database, bool foreignOrganization, bool admitted)
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var (org, app) = await _harness.SeedOrgAndAppAsync("infra" + suffix);
+        var now = DateTimeOffset.UtcNow;
+        var deployment = new Deployment { Id = "dep_infra_" + suffix, OrganizationId = org.Id, AppId = app.Id,
+            Database = database, RequestedServiceNamesJson = "[]", OwnershipToken = "infra-owner-" + suffix, Status = DeploymentStatus.Provisioning,
+            CreatedAt = now, UpdatedAt = now };
+        await using (var db = _harness.CreateDbContext())
+        {
+            db.Deployments.Add(deployment);
+            if (registered)
+            {
+                var ownerId = org.Id;
+                if (foreignOrganization)
+                {
+                    ownerId = "org_other_" + suffix;
+                    db.Organizations.Add(new Organization { Id = ownerId, Name = "Other", Slug = "other-" + suffix });
+                }
+                var account = new ProviderAccount { Id = "provider_infra_" + suffix, OrganizationId = ownerId,
+                    Name = "Fixture", CredentialPath = "fixture", CredentialGeneration = "fixture" };
+                var plan = new ProviderPlan { Id = "plan_infra_" + suffix, OrganizationId = ownerId,
+                    ProviderAccountId = account.Id, Name = "Fixture", NormalizedName = "FIXTURE", Region = "fixture", Sku = "fixture" };
+                db.ProviderAccounts.Add(account);
+                db.ProviderPlans.Add(plan);
+                db.ManagedDatabaseServers.Add(new ManagedDatabaseServer { Id = "dbserver_" + suffix, OrganizationId = ownerId,
+                    Name = "Fixture", PlanId = plan.Id, RuntimeAppId = app.Id,
+                    RuntimeDeploymentId = exactDeployment ? deployment.Id : "dep_different", Status = deleted ? "deleted" : "creating" });
+            }
+            await db.SaveChangesAsync();
+        }
+        var scopeFactory = _harness.CreateScopeFactory();
+        var pipelineOptions = Options.Create(new DeploymentPipelineOptions());
+        var sshOptions = Options.Create(new SshDeploymentOptions { PrivateKeyContent = "MOCK_KEY" });
+        var ssh = new MockSshDeploymentClient();
+        var executor = new DeploymentPipelineExecutor(scopeFactory,
+            new ResolveProvisionServerStep(scopeFactory, _ => new MockVpsProviderClient(), pipelineOptions, TimeProvider.System),
+            new DnsSetupStep(scopeFactory, new MockCloudflareDnsClient(), pipelineOptions, TimeProvider.System),
+            new SshDeployStep(scopeFactory, new MockArtifactRetriever(), ssh, sshOptions, pipelineOptions,
+                new TestHostEnvironment { ContentRootPath = Path.GetTempPath() }, TimeProvider.System),
+            new HealthCheckFinalizeStep(scopeFactory, new HttpClient(new MockHttpMessageHandler()), pipelineOptions, TimeProvider.System),
+            ssh, sshOptions, TimeProvider.System);
+        var context = new PipelineStepContext { DeploymentId = deployment.Id, OrganizationId = org.Id, AppId = app.Id, OwnershipToken = "infra-owner-" + suffix };
+        if (admitted)
+        {
+            await executor.RefreshDesiredServicesAsync(context, default);
+            await using var verify = _harness.CreateDbContext();
+            Assert.Empty(await verify.DeploymentServices.Where(x => x.DeploymentId == deployment.Id).ToListAsync());
+            Assert.Equal(DatabaseMode.Postgres, (await verify.Deployments.SingleAsync(x => x.Id == deployment.Id)).Database);
+        }
+        else
+        {
+            var failure = await Assert.ThrowsAsync<PipelineStepException>(() => executor.RefreshDesiredServicesAsync(context, default));
+            Assert.Equal("invalid_service_set", failure.FailureCode);
+        }
+    }
+
     [Fact]
     public async Task ConnectedLocalSshPipeline_CompletesWithOneDeploymentId()
     {

@@ -134,20 +134,26 @@ public sealed partial class DatabaseOperationProcessor
         }
     }
 
-    private async Task<bool> ReconcileBackupPolicyAsync(DatabaseOperation operation, ManagedDatabase database, CancellationToken ct)
+    internal async Task<bool> ReconcileBackupPolicyAsync(DatabaseOperation operation, ManagedDatabase database, CancellationToken ct)
     {
         var policy = await db.DatabaseBackupPolicies.SingleAsync(x => x.DatabaseId == database.Id && x.OrganizationId == database.OrganizationId, ct);
         await db.Entry(policy).ReloadAsync(ct);
         ValidateScheduledPolicy(operation, policy);
         if (policy.EncryptedKeyMaterialJson is null) { return true; }
         var material = ReadBackupMaterial(policy);
-        var repositoryIds = await db.DatabaseBackupArtifacts.Where(x => x.DatabaseId == database.Id && x.OrganizationId == database.OrganizationId)
+        var repositoryIds = await db.DatabaseBackupArtifacts.Where(x => x.DatabaseId == database.Id && x.OrganizationId == database.OrganizationId && x.Status != "purged")
             .Select(x => x.RepositoryAppId).Distinct().ToListAsync(ct);
         if (policy.RepositoryAppId is not null && !repositoryIds.Contains(policy.RepositoryAppId)) { repositoryIds.Add(policy.RepositoryAppId); }
         foreach (var repositoryId in repositoryIds)
         {
             await db.Entry(policy).ReloadAsync(ct);
             ValidateScheduledPolicy(operation, policy);
+            if (!await db.Apps.AnyAsync(x => x.Id == repositoryId && x.OrganizationId == database.OrganizationId && x.DeletionStatus == null, ct))
+            {
+                if (await db.DatabaseBackupArtifacts.AnyAsync(x => x.DatabaseId == database.Id && x.RepositoryAppId == repositoryId && x.Status == "complete", ct))
+                    throw new InvalidOperationException("A retained backup repository is unavailable.");
+                continue;
+            }
             var repository = await BackupRepositoryAsync(new DatabaseBackupPolicy { OrganizationId = database.OrganizationId, RepositoryAppId = repositoryId }, ct);
             var active = policy.Enabled && database.Status != "deleted" && repositoryId == policy.RepositoryAppId;
             var artifacts = await db.DatabaseBackupArtifacts.Where(x => x.DatabaseId == database.Id && x.OrganizationId == database.OrganizationId && x.RepositoryAppId == repositoryId && x.Status == "complete")

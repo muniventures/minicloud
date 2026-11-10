@@ -232,7 +232,7 @@ public sealed class DeploymentPipelineExecutor : IDeploymentPipelineExecutor
         }
     }
 
-    private Task RefreshDesiredServicesAsync(PipelineStepContext context, CancellationToken ct) => Steps.PipelineDb.ExecuteInTransactionAsync(_scopeFactory, async (db, token) =>
+    internal Task RefreshDesiredServicesAsync(PipelineStepContext context, CancellationToken ct) => Steps.PipelineDb.ExecuteInTransactionAsync(_scopeFactory, async (db, token) =>
     {
         if (db.Database.IsNpgsql()) { await db.Database.ExecuteSqlRawAsync($"SELECT pg_advisory_xact_lock({Minicloud.Common.Registry.ImagePublicationService.LockKey})", token); }
         var stored = await db.Deployments.Include(x => x.Services).Include(x => x.App)
@@ -241,8 +241,11 @@ public sealed class DeploymentPipelineExecutor : IDeploymentPipelineExecutor
         var names = JsonSerializer.Deserialize<HashSet<string>>(stored.RequestedServiceNamesJson)!;
         var requested = stored.Services.Where(x => names.Contains(x.Name)).ToArray();
         var desired = await new DeploymentServiceSetService().BuildMergedServicesAsync(db, stored.AppId, requested, token);
+        var managedInfrastructureOnly = desired.Count == 0 && stored.Database == DatabaseMode.Postgres &&
+            await db.ManagedDatabaseServers.AnyAsync(server => server.OrganizationId == stored.OrganizationId &&
+                server.RuntimeAppId == stored.AppId && server.RuntimeDeploymentId == stored.Id && server.Status != "deleted", token);
         var validation = Minicloud.Common.Validation.ControlPlaneValidation.ValidateMergedDeploymentServices(desired, stored.Database == DatabaseMode.Sqlite);
-        if (!validation.IsValid) { throw new PipelineStepException("invalid_service_set", "Active service set changed incompatibly while deployment was queued."); }
+        if (!managedInfrastructureOnly && !validation.IsValid) { throw new PipelineStepException("invalid_service_set", "Active service set changed incompatibly while deployment was queued."); }
         var retained = stored.Services.Where(x => !names.Contains(x.Name)).ToArray();
         db.DeploymentServices.RemoveRange(retained);
         foreach (var service in retained) { stored.Services.Remove(service); }

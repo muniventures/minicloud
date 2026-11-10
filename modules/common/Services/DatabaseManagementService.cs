@@ -70,10 +70,12 @@ public sealed class DatabaseManagementService(MinicloudDbContext db, ControlPlan
     public async Task<DatabaseBackupPolicy> SetPolicyAsync(string id, BackupPolicyRequest request, ActorIdentity actor, CancellationToken ct)
     {
         var database = await GetAsync(id, actor, true, ct);
-        if (database.Status == "deleted" || await db.DatabaseOperations.AnyAsync(x => x.DatabaseId == id && x.BackupPolicyId == null && (x.Status == "queued" || x.Status == "running" || x.Status == "cancelling"), ct))
+        if (await db.DatabaseOperations.AnyAsync(x => x.DatabaseId == id && x.BackupPolicyId == null && (x.Status == "queued" || x.Status == "running" || x.Status == "cancelling"), ct))
             throw new InvalidOperationException("Wait for active database operations before changing backup policy.");
+        var policy = await db.DatabaseBackupPolicies.SingleAsync(x => x.DatabaseId == id && x.OrganizationId == database.OrganizationId, ct);
+        if (database.Status == "deleted" && (request.Enabled || request.RepositoryAppId is not null && request.RepositoryAppId != policy.RepositoryAppId))
+            throw new InvalidOperationException("Deleted sources only support disabled retention updates without changing the retained repository.");
         database.Revision++;
-        var policy = await db.DatabaseBackupPolicies.SingleAsync(x => x.DatabaseId == id, ct);
         await ApplyPolicyAsync(policy, request, ct);
         policy.Revision++;
         policy.UpdatedAt = clock.GetUtcNow();

@@ -13,3 +13,12 @@ it("defaults disabled policies to recorded expiry and submits explicit indefinit
   fireEvent.click(screen.getByRole("button", { name: "Save backup policy" }));
   expect(save).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, keepLastCopies: true }));
 });
+
+it("retained-source mode forces captures disabled even if the initial policy was enabled", () => {
+  const save = vi.fn();
+  const initial = { ...defaultPolicy, enabled: true, repositoryAppId: "old-repository", frequencyHours: 6, retentionDays: 90, minimumCopies: 4, keepLastCopies: true };
+  render(<BackupPolicyForm initial={initial} repositories={[]} busy={false} retainedSource onSave={save} />);
+  expect(screen.getByRole("checkbox", { name: "Enable scheduled backups" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Save backup policy" }));
+  expect(save).toHaveBeenCalledWith({ ...initial, enabled: false });
+});

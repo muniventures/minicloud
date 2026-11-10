@@ -70,6 +70,24 @@ public sealed class AppDeletionTests
     }
 
     [Fact]
+    public async Task RevokedDatabaseBindingDoesNotPreventApplicationCleanup()
+    {
+        await using var harness = new WorkerSqliteTestHarness();
+        await harness.InitializeAsync();
+        var (org, app) = await harness.SeedOrgAndAppAsync();
+        await using var db = harness.CreateDbContext();
+        (await db.Apps.SingleAsync()).DeletionStatus = "queued";
+        db.ManagedDatabases.Add(new ManagedDatabase { Id = "database", OrganizationId = org.Id, Name = "source" });
+        db.ManagedDatabaseBindings.Add(new ManagedDatabaseBinding { Id = "binding", OrganizationId = org.Id, DatabaseId = "database", AppId = app.Id, ServiceName = "web", Status = "revoked" });
+        await db.SaveChangesAsync();
+        var processor = new AppDeletionProcessor(db, _ => throw new Exception("Provider should not be used"), new Dns(), NullLogger<AppDeletionProcessor>.Instance);
+        Assert.True(await processor.ProcessNextAsync(default));
+        Assert.Empty(await db.Apps.ToListAsync());
+        Assert.Empty(await db.ManagedDatabaseBindings.ToListAsync());
+        Assert.Single(await db.ManagedDatabases.ToListAsync());
+    }
+
+    [Fact]
     public async Task EmptyApplicationDoesNotNeedProviderConfiguration()
     {
         await using var harness = new WorkerSqliteTestHarness();
