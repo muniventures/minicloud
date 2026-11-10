@@ -57,6 +57,25 @@ public sealed class DatabaseManagementTests : IAsyncLifetime
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateDatabaseAsync(new("org_test", "second", ServerId: "server"), actor, default));
     }
 
+    [Theory]
+    [InlineData("applied", false)]
+    [InlineData("revoking", false)]
+    [InlineData("revoked", true)]
+    public async Task DatabaseDeletionRequiresEveryApplicationBindingRevoked(string bindingStatus, bool admitted)
+    {
+        db.ManagedDatabaseServers.Add(new ManagedDatabaseServer { Id = "server", OrganizationId = "org_test", Name = "shared", PlanId = "plan", Status = "ready" });
+        await db.SaveChangesAsync();
+        var database = await service.CreateDatabaseAsync(new("org_test", "source", ServerId: "server"), actor, default);
+        (await db.DatabaseOperations.SingleAsync()).Status = "completed";
+        database.Status = "ready";
+        db.ManagedDatabaseBindings.Add(new ManagedDatabaseBinding { Id = "binding", OrganizationId = "org_test", DatabaseId = database.Id, AppId = "app_test", ServiceName = "web", Status = bindingStatus });
+        await db.SaveChangesAsync();
+        if (admitted)
+            Assert.Equal("delete", (await service.OperateAsync(database.Id, new("delete"), actor, default)).Kind);
+        else
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.OperateAsync(database.Id, new("delete"), actor, default));
+    }
+
     [Fact]
     public async Task BackupNeedsOwnedIndependentDestination()
     {

@@ -111,6 +111,10 @@ public sealed class DatabaseManagementService(MinicloudDbContext db, ControlPlan
         var database = await GetAsync(id, actor, true, ct);
         if (request.Kind is not ("backup" or "restore" or "migrate" or "delete" or "rotate-credentials")) throw new ArgumentException("Unsupported database operation.");
         if (await db.DatabaseOperations.AnyAsync(x => x.DatabaseId == id && (x.Status == "queued" || x.Status == "running" || x.Status == "cancelling"), ct)) throw new InvalidOperationException("A database operation is already active.");
+        if (request.Kind == "delete" && database.AppId is not null)
+            throw new InvalidOperationException("Application-hosted database lifecycle is managed through its application.");
+        if (request.Kind == "delete" && await db.ManagedDatabaseBindings.AnyAsync(x => x.DatabaseId == id && x.OrganizationId == database.OrganizationId && x.Status != "revoked", ct))
+            throw new InvalidOperationException("Unbind application services before deleting this database.");
         if (request.Kind is "restore" or "migrate")
         {
             if (request.TargetName is null) throw new ArgumentException("A new target database name is required.");

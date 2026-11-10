@@ -305,6 +305,8 @@ public sealed partial class DatabaseOperationProcessor(
         if (operation.Kind is "create-database" or "delete")
         {
             if (database.AppId is not null) { throw new InvalidOperationException("Application lifecycle is managed separately."); }
+            if (operation.Kind == "delete" && await db.ManagedDatabaseBindings.AnyAsync(x => x.DatabaseId == database.Id && x.OrganizationId == database.OrganizationId && x.Status != "revoked", ct))
+                throw new InvalidOperationException("Unbind application services before deleting this database.");
             var credentials = database.EncryptedCredentialsJson is null
                 ? new DatabaseConnectionCredentials("db_" + database.Id["database_".Length..], "user_" + database.Id["database_".Length..], Convert.ToBase64String(RandomNumberGenerator.GetBytes(36)))
                 : JsonSerializer.Deserialize<DatabaseConnectionCredentials>(encryption.Decrypt(database.EncryptedCredentialsJson), Json)!;

@@ -54,8 +54,69 @@ public sealed class DatabaseBindingTests : IAsyncLifetime
         await service.BindAsync("database_test", new("app_test", ["backend"]), actor, default);
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.BindAsync("database_test", new("app_test", ["backend"]), actor, default));
         var binding = await db.ManagedDatabaseBindings.SingleAsync(); binding.Status = "applied";
+        (await db.DatabaseOperations.SingleAsync()).Status = "completed";
         await db.SaveChangesAsync();
         Assert.Single(await service.BindAsync("database_test", new("app_test", ["backend"]), actor, default));
         Assert.Single(await db.DatabaseOperations.ToListAsync());
+    }
+    [Theory]
+    [InlineData("queued")]
+    [InlineData("running")]
+    [InlineData("cancelling")]
+    public async Task BindAndUnbindCannotOverlapAnActiveDatabaseMutation(string status)
+    {
+        var database = await db.ManagedDatabases.SingleAsync();
+        var initialRevision = database.Revision;
+        db.DatabaseOperations.Add(new DatabaseOperation { Id = "active_op", OrganizationId = "org_test", DatabaseId = database.Id, Kind = "rotate-credentials", Status = status });
+        await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.BindAsync(database.Id, new("app_test", ["backend"]), actor, default));
+        db.ManagedDatabaseBindings.Add(new ManagedDatabaseBinding { Id = "binding_applied", OrganizationId = "org_test", DatabaseId = database.Id, AppId = "app_test", ServiceName = "backend", Status = "applied" });
+        await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.UnbindAsync(database.Id, "binding_applied", actor, default));
+        Assert.Equal("applied", (await db.ManagedDatabaseBindings.SingleAsync()).Status);
+        Assert.Equal(initialRevision, database.Revision);
+        Assert.Single(await db.DatabaseOperations.ToListAsync());
+    }
+
+    [Fact]
+    public async Task UnbindRequiresDeploymentAuthorityBeforeChangingBindingStatus()
+    {
+        db.ManagedDatabaseBindings.Add(new ManagedDatabaseBinding { Id = "binding_applied", OrganizationId = "org_test", DatabaseId = "database_test", AppId = "app_test", ServiceName = "backend", Status = "applied" });
+        await db.SaveChangesAsync();
+        var withoutDeploy = actor with { Scopes = new HashSet<string> { ApiKeyScopes.DatabasesManage, ApiKeyScopes.AppsWrite, ApiKeyScopes.SecretsWrite } };
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.UnbindAsync("database_test", "binding_applied", withoutDeploy, default));
+        Assert.Equal("applied", (await db.ManagedDatabaseBindings.SingleAsync()).Status);
+        Assert.Empty(await db.DatabaseOperations.ToListAsync());
+    }
+
+    [Fact]
+    public async Task BindingMutationsAdvanceSourceRevisionAndRevokedUnbindRemainsIdempotent()
+    {
+        var database = await db.ManagedDatabases.SingleAsync();
+        var initialRevision = database.Revision;
+        var binding = Assert.Single(await service.BindAsync(database.Id, new("app_test", ["backend"]), actor, default));
+        Assert.Equal(initialRevision + 1, database.Revision);
+        (await db.DatabaseOperations.SingleAsync()).Status = "completed";
+        binding.Status = "applied";
+        await db.SaveChangesAsync();
+        await service.UnbindAsync(database.Id, binding.Id, actor, default);
+        Assert.Equal(initialRevision + 2, database.Revision);
+        Assert.Equal("revoking", binding.Status);
+        binding.Status = "revoked";
+        await db.SaveChangesAsync();
+        await service.UnbindAsync(database.Id, binding.Id, actor, default);
+        Assert.Equal(initialRevision + 2, database.Revision);
+        Assert.Equal(2, await db.DatabaseOperations.CountAsync());
+    }
+    [Fact]
+    public async Task StaleDatabaseRevisionRollsBackBindingAndQueuedOperationAtomically()
+    {
+        await using var concurrent = new MinicloudDbContext(new DbContextOptionsBuilder<MinicloudDbContext>().UseSqlite(connection).Options);
+        var current = await concurrent.ManagedDatabases.SingleAsync();
+        current.Revision++;
+        await concurrent.SaveChangesAsync();
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => service.BindAsync("database_test", new("app_test", ["backend"]), actor, default));
+        Assert.Empty(await concurrent.ManagedDatabaseBindings.AsNoTracking().ToListAsync());
+        Assert.Empty(await concurrent.DatabaseOperations.AsNoTracking().ToListAsync());
     }
 }
