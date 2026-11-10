@@ -363,13 +363,6 @@ preflight() {
     exit 1
   fi
 
-  if has_external_ghcr_images; then
-    if [ -z "${GHCR_TOKEN}" ]; then
-      echo "GHCR_READ_TOKEN environment secret is required for Minicloud-owned GHCR pulls."
-      exit 1
-    fi
-  fi
-
   if [ "${DATABASE}" != "postgres" ] && [ "${DATABASE}" != "sqlite" ] && [ "${DATABASE}" != "none" ]; then
     echo "Unsupported database '${DATABASE}'."
     exit 1
@@ -1845,7 +1838,7 @@ configure_openbao() {
 
 start_infra() {
   phase "start_infra"
-  if has_external_ghcr_images; then
+  if has_external_ghcr_images && [ -n "${GHCR_TOKEN}" ]; then
     echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
   fi
 
