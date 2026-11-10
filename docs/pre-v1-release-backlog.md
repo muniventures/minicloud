@@ -9,6 +9,8 @@ Both items are required before v1. Status: planned.
 
 Status: deferred; acceptance outcomes below remain unverified.
 
+The database-release repairs have a separate [ordered specification and parallel execution plan](specs/database-release-repairs/00-execution-plan.md).
+
 - Complete hosted database backup, download and restore acceptance with data verification, network connectivity checks, and migration acceptance.
 - Review lifecycle states observed during acceptance: failed database creation remained `creating`; server deletion remained `deleting` until a normal retry. Causes are unconfirmed.
 - Improve generic or buffered operation diagnostics.
