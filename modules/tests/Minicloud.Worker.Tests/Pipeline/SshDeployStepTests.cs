@@ -23,6 +23,48 @@ public sealed class SshDeployStepTests : IClassFixture<WorkerSqliteTestHarness>
         _harness = harness;
     }
 
+    [Theory]
+    [InlineData("cancel")]
+    [InlineData("pipeline")]
+    [InlineData("remote-quiescence")]
+    [InlineData("flush-fails")]
+    public async Task FailedExecutionFlushesSparseOutputAndPreservesOriginalFailure(string kind)
+    {
+        var name = "ssh-log-" + kind;
+        var (org, app) = await _harness.SeedOrgAndAppAsync(name);
+        var deployment = Deployment("dep-" + name, org.Id, app.Id, DeploymentStatus.Deploying, DateTimeOffset.UtcNow);
+        deployment.OwnershipToken = "owner-" + name;
+        await using (var db = _harness.CreateDbContext())
+        {
+            db.Deployments.Add(deployment);
+            db.DeploymentServices.Add(Service("svc-" + name, deployment.Id, "worker", null, "busybox:1", 8080, false, "/", "/health"));
+            await db.SaveChangesAsync();
+        }
+        using var cancellation = new CancellationTokenSource();
+        Exception failure = kind switch
+        {
+            "cancel" => new OperationCanceledException(cancellation.Token),
+            "pipeline" or "flush-fails" => new PipelineStepException("synthetic_failure", "Original pipeline failure."),
+            _ => new RemoteQuiescenceException("Original remote quiescence failure.")
+        };
+        var scopes = new FailingLogScopeFactory(_harness.CreateScopeFactory());
+        var ssh = new MockSshDeploymentClient(streamingExec: async (_, onOutput) =>
+        {
+            await onOutput!("deploy", "received before execution failed");
+            if (kind == "cancel") { cancellation.Cancel(); }
+            if (kind == "flush-fails") { scopes.Fail = true; }
+            throw failure;
+        });
+        var actual = await Record.ExceptionAsync(() => ExecuteStepAsync(org.Id, app.Id, app.Slug,
+            deployment.Id, deployment.OwnershipToken, ssh, new MockArtifactRetriever([]),
+            new FixedSecretResolver(), cancellation.Token, scopes));
+        Assert.Same(failure, actual);
+        await using var read = _harness.CreateDbContext();
+        var logs = read.DeploymentLogs.Where(x => x.DeploymentId == deployment.Id).ToList();
+        if (kind == "flush-fails") { Assert.Empty(logs); }
+        else { Assert.Equal("received before execution failed", Assert.Single(logs).Content); }
+    }
+
     [Fact]
     public async Task RedispatchGateWaitsForCurrentPreparationInsteadOfStaleMarker()
     {
@@ -628,7 +670,9 @@ public sealed class SshDeployStepTests : IClassFixture<WorkerSqliteTestHarness>
         string ownershipToken,
         ISshDeploymentClient ssh,
         IArtifactRetriever artifacts,
-        IAppServiceSecretResolver secretResolver)
+        IAppServiceSecretResolver secretResolver,
+        CancellationToken cancellationToken = default,
+        IServiceScopeFactory? scopeFactory = null)
     {
         var tempDir = Directory.CreateTempSubdirectory("minicloud-test-partial-");
         try
@@ -637,7 +681,7 @@ public sealed class SshDeployStepTests : IClassFixture<WorkerSqliteTestHarness>
             Directory.CreateDirectory(scriptDir);
             await File.WriteAllTextAsync(Path.Combine(scriptDir, "remote-deploy.sh"), "#!/bin/bash\necho deploy");
             var step = new SshDeployStep(
-                _harness.CreateScopeFactory(services => services.AddSingleton(secretResolver)), artifacts, ssh,
+                scopeFactory ?? _harness.CreateScopeFactory(services => services.AddSingleton(secretResolver)), artifacts, ssh,
                 Options.Create(new SshDeploymentOptions { PrivateKeyContent = "MOCK_PRIVATE_KEY" }),
                 Options.Create(new DeploymentPipelineOptions()),
                 new TestHostEnvironment { ContentRootPath = tempDir.FullName }, TimeProvider.System,
@@ -651,7 +695,7 @@ public sealed class SshDeployStepTests : IClassFixture<WorkerSqliteTestHarness>
                 AppSlug = appSlug,
                 ServerIp = "192.0.2.77",
                 ServiceHostnames = { ["web"] = ["legacy.example.test", "nexus.example.test"] }
-            }, CancellationToken.None);
+            }, cancellationToken);
         }
         finally
         {
@@ -702,15 +746,24 @@ public sealed class SshDeployStepTests : IClassFixture<WorkerSqliteTestHarness>
             EnvJson = envJson
         };
 
+    private sealed class FailingLogScopeFactory(IServiceScopeFactory inner) : IServiceScopeFactory
+    {
+        public bool Fail { get; set; }
+        public IServiceScope CreateScope() => Fail
+            ? throw new InvalidOperationException("Synthetic log persistence failure.")
+            : inner.CreateScope();
+    }
+
     private sealed class MockSshDeploymentClient(
         Func<SshDeploymentRequest, Task<SshDeploymentResult>>? exec = null,
-        Func<string, Task<int>>? commandCallback = null) : ISshDeploymentClient
+        Func<string, Task<int>>? commandCallback = null,
+        Func<SshDeploymentRequest, Func<string, string, Task>?, Task<SshDeploymentResult>>? streamingExec = null) : ISshDeploymentClient
     {
         public Task<SshDeploymentResult> ExecuteDeploymentAsync(
             SshDeploymentRequest request,
             Func<string, string, Task>? onOutputLine = null,
             CancellationToken cancellationToken = default) =>
-            exec is not null
+            streamingExec is not null ? streamingExec(request, onOutputLine) : exec is not null
                 ? exec(request)
                 : Task.FromResult(new SshDeploymentResult(0, true, "sha123", []));
 

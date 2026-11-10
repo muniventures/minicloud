@@ -55,6 +55,20 @@ def dispatch(request):
     raise ValueError('Unsupported operation')
 
 
+def failure_result(error):
+    result = {'status': 'failed', 'errorType': type(error).__name__}
+    # Only fixed classifications cross the private transport; never messages,
+    # subprocess arguments/stdout/stderr or credential-bearing payloads.
+    stage = getattr(error, 'stage', None)
+    if stage in ('access-tls', 'access-rules', 'access-listener', 'access-readiness', 'access-tls-verification'):
+        result['errorStage'] = stage
+    cause = getattr(error, 'cause_type', None)
+    if cause in ('CalledProcessError', 'TimeoutExpired', 'TimeoutError', 'ValueError', 'RuntimeError',
+                 'OSError', 'FileNotFoundError', 'PermissionError'):
+        result['causeType'] = cause
+    return result
+
+
 if __name__ == '__main__':
     os.umask(0o077)
     def stop_operation(signum, frame):
@@ -67,5 +81,5 @@ if __name__ == '__main__':
         print('__MINICLOUD_DATABASE_RESULT__=' + json.dumps(result))
         print('__MINICLOUD_DEPLOY_COMPLETE__=' + request['operationId'])
     except Exception as error:
-        print('__MINICLOUD_DATABASE_RESULT__=' + json.dumps({'status':'failed','errorType':type(error).__name__}))
+        print('__MINICLOUD_DATABASE_RESULT__=' + json.dumps(failure_result(error)))
         raise SystemExit(1)

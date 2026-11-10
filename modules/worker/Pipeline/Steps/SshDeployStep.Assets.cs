@@ -81,10 +81,19 @@ public sealed partial class SshDeployStep
         }, JsonOptions);
         var uploads = new[] { RuntimeHelperUpload("runtime-maintenance.py"), AssetHelperUpload(), new SshDeploymentArtifactUpload(release.Name, release.Name + ".zip", token => _artifactRetriever.OpenArtifactStreamAsync(release.ArtifactId, token), release.Artifact.SizeBytes ?? 0) };
         var logs = new DeploymentLogWriter(_scopeFactory, _timeProvider, context.DeploymentId, _options.LogBatchSize);
-        var result = await _sshClient.ExecuteDeploymentAsync(new(context.ServerIp, string.IsNullOrWhiteSpace(context.SshUsername) ? _sshOptions.Username : context.SshUsername,
-            key, context.RemoteDirectory, payload, script, uploads, _options.SshCommandTimeout),
-            (source, line) => logs.AppendAsync(ClassifySource(line), line, ct), ct);
-        await logs.FlushAsync(ct);
+        SshDeploymentResult result;
+        try
+        {
+            result = await _sshClient.ExecuteDeploymentAsync(new(context.ServerIp, string.IsNullOrWhiteSpace(context.SshUsername) ? _sshOptions.Username : context.SshUsername,
+                key, context.RemoteDirectory, payload, script, uploads, _options.SshCommandTimeout),
+                (source, line) => logs.AppendAsync(ClassifySource(line), line, ct), ct);
+            await logs.FlushAsync(ct);
+        }
+        catch
+        {
+            await FlushFailureLogsAsync(logs, context.DeploymentId);
+            throw;
+        }
         if (result.ExitCode != 0 || !result.CompletionMarkerFound)
         { throw new PipelineStepException("asset_release_invalid", "Customer asset build/publication failed; consumer binding unchanged."); }
         const string marker = "__MINICLOUD_ASSET_MANIFEST__=";

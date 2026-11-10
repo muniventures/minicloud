@@ -27,6 +27,11 @@ case "$arch" in
     ;;
 esac
 
+if [ "$rid_os-$rid_arch" = "osx-x64" ]; then
+  echo "Prebuilt Minicloud CLI releases support macOS on Apple Silicon only. Build modules/cli from source on Intel Macs." >&2
+  exit 1
+fi
+
 asset="minicloud-${rid_os}-${rid_arch}.tar.gz"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM

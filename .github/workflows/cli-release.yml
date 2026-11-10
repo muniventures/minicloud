@@ -50,10 +50,6 @@ jobs:
             os: ubuntu-24.04-arm
             archive: tar.gz
             arch: ARM64
-          - rid: osx-x64
-            os: macos-15-intel
-            archive: tar.gz
-            arch: X64
           - rid: osx-arm64
             os: macos-15
             archive: tar.gz
@@ -201,12 +197,12 @@ jobs:
       - name: Verify release contents
         run: |
           set -euo pipefail
-          for rid in linux-x64 linux-arm64 osx-x64 osx-arm64; do
+          for rid in linux-x64 linux-arm64 osx-arm64; do
             test -f "dist/minicloud-${rid}.tar.gz"
           done
           test -f dist/minicloud-win-x64.zip
           cp install.sh install.ps1 dist/
-          test "$(find dist -type f | wc -l)" -eq 7
+          test "$(find dist -type f | wc -l)" -eq 6
           (cd dist && sha256sum minicloud-*.tar.gz minicloud-*.zip > checksums.txt)
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
@@ -222,7 +218,7 @@ jobs:
           else
             gh release create "$TAG" --verify-tag --draft --generate-notes dist/*
           fi
-          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" -eq 8
+          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" -eq 7
           release_flags=()
           if [[ "$TAG" == *-* ]]; then release_flags+=(--prerelease); fi
           gh release edit "$TAG" --draft=false "${release_flags[@]}"

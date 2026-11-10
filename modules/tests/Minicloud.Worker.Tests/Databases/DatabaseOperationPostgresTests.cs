@@ -88,7 +88,7 @@ public sealed class DatabaseOperationPostgresTests
             {
                 Assert.Equal("failed", operation.Status);
                 Assert.Equal("database_authority_changed", operation.ErrorCode);
-                Assert.Equal("deleting", server.Status);
+                Assert.Equal("failed", server.Status);
             }
             else
             {
@@ -181,6 +181,117 @@ public sealed class DatabaseOperationPostgresTests
             });
             Assert.Equal("completed", (await db.DatabaseOperations.AsNoTracking().SingleAsync()).Status);
             Assert.Equal("ready", (await db.ManagedDatabases.AsNoTracking().SingleAsync()).Status);
+        });
+    }
+
+    [Theory]
+    [InlineData("create-database", "creating", "failed", false)]
+    [InlineData("create-database", "creating", "failed", true)]
+    [InlineData("backup", "ready", "ready", false)]
+    [InlineData("backup", "ready", "ready", true)]
+    public async Task TerminalFailureUpdatesOnlyCreationState(string kind, string status, string expected, bool expired)
+    {
+        await WithPostgres(async options =>
+        {
+            await using var db = new MinicloudDbContext(options);
+            await db.Database.MigrateAsync();
+            var now = DateTimeOffset.UtcNow;
+            db.Organizations.Add(new Organization { Id = "org", Name = "Synthetic", Slug = "synthetic" });
+            db.ManagedDatabases.Add(new ManagedDatabase { Id = "database_fixture", OrganizationId = "org", Name = "Synthetic", Status = status });
+            db.DatabaseOperations.Add(new DatabaseOperation
+            {
+                Id = "operation", OrganizationId = "org", DatabaseId = "database_fixture", Kind = kind,
+                Status = expired ? "running" : "queued", ActorJson = "{}", RequestJson = "{}",
+                OwnershipToken = expired ? "old-owner" : null, LeaseExpiresAt = expired ? now.AddMinutes(-1) : null,
+                CreatedAt = now, UpdatedAt = now
+            });
+            await db.SaveChangesAsync();
+            var processor = new DatabaseOperationProcessor(db, new ControlPlaneAuthorization(db), null!, null!, null!, null!,
+                new IdGenerator(), TimeProvider.System, null!, Options.Create(new SshDeploymentOptions()),
+                Options.Create(new DatabasePlatformOptions()), null!);
+
+            Assert.True(await processor.ProcessNextAsync(default));
+
+            var operation = await db.DatabaseOperations.AsNoTracking().SingleAsync();
+            Assert.Equal("failed", operation.Status);
+            Assert.Equal(expired ? "database_operation_interrupted_reconciliation_required" : "database_authority_changed", operation.ErrorCode);
+            Assert.Equal(expected, (await db.ManagedDatabases.AsNoTracking().SingleAsync()).Status);
+            Assert.Null(operation.OwnershipToken);
+            Assert.Null(operation.LeaseExpiresAt);
+        });
+    }
+
+    [Fact]
+    public async Task ExpiredOperationDoesNotFailDatabaseOwnedByAnotherActiveOperation()
+    {
+        await WithPostgres(async options =>
+        {
+            await using var db = new MinicloudDbContext(options);
+            await db.Database.MigrateAsync();
+            var now = DateTimeOffset.UtcNow;
+            db.Organizations.Add(new Organization { Id = "org", Name = "Synthetic", Slug = "synthetic" });
+            db.ManagedDatabases.Add(new ManagedDatabase { Id = "database_fixture", OrganizationId = "org", Name = "Synthetic", Status = "creating", Revision = 9 });
+            db.DatabaseOperations.AddRange(
+                new DatabaseOperation { Id = "old", OrganizationId = "org", DatabaseId = "database_fixture", Kind = "create-database", Status = "running", ActorJson = "{}", RequestJson = "{}", OwnershipToken = "old-owner", LeaseExpiresAt = now.AddMinutes(-1), CreatedAt = now.AddMinutes(-5), UpdatedAt = now.AddMinutes(-2) },
+                new DatabaseOperation { Id = "new", OrganizationId = "org", DatabaseId = "database_fixture", Kind = "create-database", Status = "running", ActorJson = "{}", RequestJson = "{}", OwnershipToken = "new-owner", LeaseExpiresAt = now.AddMinutes(30), CreatedAt = now, UpdatedAt = now });
+            await db.SaveChangesAsync();
+            var processor = new DatabaseOperationProcessor(db, new ControlPlaneAuthorization(db), null!, null!, null!, null!,
+                new IdGenerator(), TimeProvider.System, null!, Options.Create(new SshDeploymentOptions()), Options.Create(new DatabasePlatformOptions()), null!);
+
+            Assert.True(await processor.ProcessNextAsync(default));
+
+            Assert.Equal("failed", (await db.DatabaseOperations.AsNoTracking().SingleAsync(x => x.Id == "old")).Status);
+            var current = await db.DatabaseOperations.AsNoTracking().SingleAsync(x => x.Id == "new");
+            Assert.Equal("running", current.Status);
+            Assert.Equal("new-owner", current.OwnershipToken);
+            var database = await db.ManagedDatabases.AsNoTracking().SingleAsync();
+            Assert.Equal("creating", database.Status);
+            Assert.Equal(9, database.Revision);
+        });
+    }
+
+    [Fact]
+    public async Task BackingAppDeletionFailureTerminatesServerOperationAndExplicitRetryCanProceed()
+    {
+        await WithPostgres(async options =>
+        {
+            await using var db = new MinicloudDbContext(options);
+            await db.Database.MigrateAsync();
+            var now = DateTimeOffset.UtcNow;
+            db.Organizations.Add(new Organization { Id = "org", Name = "Synthetic", Slug = "synthetic" });
+            db.ProviderAccounts.Add(new ProviderAccount { Id = "account", OrganizationId = "org", Name = "Synthetic", CredentialPath = "synthetic", CredentialGeneration = "1" });
+            db.ProviderPlans.Add(new ProviderPlan { Id = "plan", OrganizationId = "org", ProviderAccountId = "account", Name = "synthetic", NormalizedName = "SYNTHETIC", Region = "synthetic", Sku = "synthetic" });
+            var app = new MinicloudApp { Id = "app", OrganizationId = "org", Name = "Synthetic", Slug = "db-synthetic", DeletionStatus = "failed" };
+            db.Apps.Add(app);
+            db.ManagedDatabaseServers.Add(new ManagedDatabaseServer { Id = "dbserver_test", OrganizationId = "org", Name = "synthetic", PlanId = "plan", Status = "deleting", RuntimeAppId = "app" });
+            db.ApiKeys.Add(new ApiKey { Id = "key", OrganizationId = "org", Name = "Synthetic", KeyPrefix = "synthetic", KeyHash = "synthetic", ExpiresAt = now.AddHours(1), ScopesJson = JsonSerializer.Serialize(new[] { ApiKeyScopes.DatabasesManage }) });
+            var actor = JsonSerializer.Serialize(new ActorIdentity("api_key", null, "key", "org", new HashSet<string> { ApiKeyScopes.DatabasesManage }));
+            db.DatabaseOperations.Add(new DatabaseOperation { Id = "operation", OrganizationId = "org", ServerId = "dbserver_test", Kind = "delete-server", Status = "queued", ActorJson = actor, RequestJson = "{}", CreatedAt = now, UpdatedAt = now });
+            await db.SaveChangesAsync();
+            var processor = new DatabaseOperationProcessor(db, new ControlPlaneAuthorization(db), null!, null!, null!, null!,
+                new IdGenerator(), TimeProvider.System, null!, Options.Create(new SshDeploymentOptions()), Options.Create(new DatabasePlatformOptions()), null!);
+
+            Assert.True(await processor.ProcessNextAsync(default));
+            Assert.Equal("queued", app.DeletionStatus); // A new explicit request may retry.
+            app.DeletionStatus = "failed";
+            await db.SaveChangesAsync();
+            Assert.True(await processor.ProcessNextAsync(default));
+            Assert.Equal("failed", (await db.DatabaseOperations.AsNoTracking().SingleAsync()).Status);
+            Assert.Equal("failed", (await db.ManagedDatabaseServers.AsNoTracking().SingleAsync()).Status);
+            Assert.Equal("failed", app.DeletionStatus); // Polling does not restart failed cleanup.
+
+            var server = await db.ManagedDatabaseServers.SingleAsync();
+            server.Status = "deleting"; // Existing DELETE admission starts a fresh operation.
+            db.DatabaseOperations.Add(new DatabaseOperation { Id = "retry", OrganizationId = "org", ServerId = server.Id, Kind = "delete-server", Status = "queued", ActorJson = actor, RequestJson = "{}", CreatedAt = now.AddMinutes(1), UpdatedAt = now.AddMinutes(1) });
+            await db.SaveChangesAsync();
+            Assert.True(await processor.ProcessNextAsync(default));
+            app = await db.Apps.SingleAsync();
+            Assert.Equal("queued", app.DeletionStatus);
+            db.Apps.Remove(app);
+            await db.SaveChangesAsync();
+            Assert.True(await processor.ProcessNextAsync(default));
+            Assert.Equal("completed", (await db.DatabaseOperations.AsNoTracking().SingleAsync(x => x.Id == "retry")).Status);
+            Assert.Equal("deleted", (await db.ManagedDatabaseServers.AsNoTracking().SingleAsync()).Status);
         });
     }
 

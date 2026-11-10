@@ -2,6 +2,10 @@
 
 The current command is `minicloud`.
 
+Prebuilt releases support Linux x64/arm64, macOS Apple Silicon (arm64), and
+Windows x64. Intel Macs require a source build of `modules/cli` using .NET 10.
+The existing installers verify release archive checksums before installation.
+
 ## Instances
 
 The CLI has no default hosted instance. The first command needing a connection
