@@ -2,9 +2,16 @@
 
 The current command is `minicloud`.
 
-Prebuilt releases support Linux x64/arm64, macOS Apple Silicon (arm64), and
-Windows x64. Intel Macs require a source build of `modules/cli` using .NET 10.
-The existing installers verify release archive checksums before installation.
+New prebuilt CLI releases are no longer published. Use the CLI source with
+.NET 10 from a checkout of this repository:
+
+```sh
+dotnet run --project modules/cli -- --help
+```
+
+Replace `--help` with the desired command and arguments. Historical release
+assets remain available; the existing installers and reusable customer workflow
+still consume those assets pending their source-build migration.
 
 ## Instances
 

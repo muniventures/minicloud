@@ -1,13 +1,18 @@
 # T20 — Remove prebuilt CLI distribution
 
-Status: ready for implementation after T00. Documentation only; no release assets have been changed.
+Status: partial implementation. The CLI release workflow is removed; historical assets are unchanged. Installer/customer-workflow source acquisition and source-build smoke coverage remain pending after T00.
+
+Repository administration remains separate: an authorized maintainer must remove
+any obsolete CLI release-build required status checks from branch protection.
+Deleting the workflow does not remove those settings; leave backend/dashboard
+requirements intact.
 
 ## Assignment
 
 - **Repository:** public `muniventures/minicloud`.
 - **Depends on:** T00's source-version, release-channel and CLI/server compatibility contract.
 - **Can run in parallel with:** T10 DB repair investigation and T30 identity implementation. Coordinate with T40 on release naming and source metadata; their implementation files remain separate.
-- **Owner:** one CLI distribution agent. Own `.github/workflows/cli-release.yml`, `.github/workflows/customer-deploy.yml`, `install.sh`, `install.ps1`, `scripts/verify-cli-release.py`, delivery sections of `docs/cli.md`, `docs/github-actions.md` and directly affected README/installation links and focused tests.
+- **Owner:** one CLI distribution agent. Own `.github/workflows/customer-deploy.yml`, `install.sh`, `install.ps1`, `scripts/verify-cli-release.py`, delivery sections of `docs/cli.md`, `docs/github-actions.md` and directly affected README/installation links and focused tests. Do not restore the removed CLI release workflow.
 - **Shared-file rule:** reserve workflow, installer and delivery-document edits with the integration owner. T40 owns the new server-release workflow; T43 owns the distinct `install-server.sh`. Neither edits T20's files concurrently. T52/T62 retain command-feature ownership; T80 updates final source pins after their merges.
 
 ## Outcome and boundary
@@ -20,7 +25,7 @@ This supersedes the **future binary-publication requirement** in [DB repair R5](
 
 | Path | Existing dependency to replace |
 | --- | --- |
-| `.github/workflows/cli-release.yml` | Four platform build jobs publish self-contained archives, checksum assets and a GitHub binary release. |
+| Former `.github/workflows/cli-release.yml` | Removed entirely, including the four-platform release-build matrix, archive publication and tag/manual triggers. Ordinary backend CI still builds/tests CLI source through `Minicloud.slnx`; do not recreate binary-release CI. |
 | `install.sh`, `install.ps1` | Download platform archives from a pinned release or repository-wide `releases/latest`. |
 | `.github/workflows/customer-deploy.yml` | `Install Minicloud CLI` downloads `minicloud-linux-x64.tar.gz`; `minicloud_version` defaults to `latest`. |
 | `modules/cli/Minicloud.Cli.csproj` | Existing .NET 10 executable referencing `modules/contracts`; source material must include that dependency. |
@@ -28,7 +33,7 @@ This supersedes the **future binary-publication requirement** in [DB repair R5](
 
 ## Implementation contract
 
-The frozen selector, initial SHA, version-output, publish-mode and server-channel decisions are in [T00](00-contracts.md#frozen-integration-decisions). They supersede the alternatives below: implement Git acquisition, not an archive downloader. Known public callers are `install.sh`, `install.ps1`, `.github/workflows/customer-deploy.yml`, `.github/workflows/cli-release.yml`, `scripts/verify-cli-release.py`, `docs/github-actions.md` and the installation section of `docs/cli.md` (which currently describes prebuilt releases and Intel Mac source builds). Older DB repair specs are historical requirements, not additional binary callers. T70 inventories private callers in its authorized repository; no private caller is a prerequisite for implementing T20.
+The frozen selector, initial SHA, version-output, publish-mode and server-channel decisions are in [T00](00-contracts.md#frozen-integration-decisions). They supersede the alternatives below: implement Git acquisition, not an archive downloader. Remaining public callers are `install.sh`, `install.ps1`, `.github/workflows/customer-deploy.yml`, `scripts/verify-cli-release.py`, `docs/github-actions.md` and the installation section of `docs/cli.md`. The former CLI release workflow has been removed. Older DB repair specs are historical requirements, not additional binary callers. T70 inventories private callers in its authorized repository; no private caller is a prerequisite for implementing T20.
 
 1. Preserve existing installer paths as **CLI** entry points and preserve configuration inputs where applicable. Replace binary acquisition with clear, documented source-build behavior; never repurpose these paths as server installers. Require .NET 10 and fail before modifying an existing installation when prerequisites or source verification fail. Do not silently install an SDK or require elevated writes when a user-selected install directory works.
 2. T00 records the supported source selector and initial default before implementation: an exact 40-character canonical commit SHA or an explicit CLI version tag resolved once to its commit. Replace the workflow's floating `latest` default with a reviewed exact source pin. T80 advances that pin to a merged revision containing the final auth/SSH/numbered-deployment client before final validation. Reject unrecognized selectors; never treat `server-v*`, a branch name or repository-wide latest release as a CLI source version. Print the resolved revision without credentials.
@@ -36,7 +41,7 @@ The frozen selector, initial SHA, version-output, publish-mode and server-channe
 4. Publish the existing CLI project with the version and source revision from that pin. For example, `dotnet publish modules/cli/Minicloud.Cli.csproj --configuration Release --output <temporary-output>` is the build entry point; choose explicit runtime settings and install all required output files so the result runs on the documented target. Preserve the public `minicloud` command and Windows executable naming. Do not advertise an untested architecture or require an Intel Mac CI build.
 5. Build in temporary storage, verify version/help before replacing an installed CLI, and clean up only this invocation's temporary files. Preserve prior installed output on acquisition/build failure. Document SDK versus runtime requirements for the chosen publish mode.
 6. Update the reusable customer workflow to build that pinned source with a pinned `actions/setup-dotnet` action on its ephemeral runner. Keep the customer's source checkout and working directory intact. Preserve workflow inputs, token masking, generated configuration, instance selection, service scope and the existing CLI deploy invocation. Do not replace the CLI with direct API/SSH deployment or introduce a hosted default instance.
-7. Remove CLI binary archive/publication and installer-asset publication jobs. Keep source build, CLI contract tests, version/help and mocked API smoke checks in CI. Source/version metadata may continue using the existing CLI version sequence; server releases use independent `server-v*` tags and explicit server discovery. No source pin may accidentally resolve from a server release.
+7. Keep CLI binary archive/publication and installer-asset publication jobs removed. Ordinary backend CI already builds source and runs CLI contract tests; add version/help and mocked API smoke checks for source-built output without restoring the release matrix. Source/version metadata may continue using the existing CLI version sequence; server releases use independent `server-v*` tags and explicit server discovery. No source pin may accidentally resolve from a server release.
 8. Align supported installation instructions, workflow input examples and `scripts/verify-cli-release.py` terminology with source builds. A developer workstation/CI runner may need source and an SDK; installing the packaged **server** must not need either. List known callers from a repository search before changing installer inputs, and hand off private workflow callers without editing historical private product modules.
 
 ## Acceptance criteria and handoff
