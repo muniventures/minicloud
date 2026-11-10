@@ -37,6 +37,7 @@ public sealed partial class DatabaseOperationProcessor
                 targetPolicy.FrequencyHours = oldPolicy.FrequencyHours;
                 targetPolicy.RetentionDays = oldPolicy.RetentionDays;
                 targetPolicy.MinimumCopies = oldPolicy.MinimumCopies;
+                targetPolicy.KeepLastCopies = oldPolicy.KeepLastCopies;
                 targetPolicy.Status = targetPolicy.Enabled ? "pending" : "disabled";
                 foreach (var policyDatabaseId in new[] { source.Id, migratedTargetId! })
                     db.DatabaseOperations.Add(new DatabaseOperation { Id = ids.NewId("dbop"), OrganizationId = source.OrganizationId, DatabaseId = policyDatabaseId, Kind = "configure-backup", ActorJson = operation.ActorJson, RequestJson = "{}", CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow() });
