@@ -124,6 +124,3 @@ export function verifyAppDomain(appId: string, domainId: string) {
 export function listAppStorage(appId: string, signal?: AbortSignal) {
   return apiRequest<import("../models/controlPlane").AppStorageVolume[]>(`/api/environments/${encodeURIComponent(appId)}/storage`, { signal });
 }
-
-
-

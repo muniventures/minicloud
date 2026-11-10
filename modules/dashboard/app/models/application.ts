@@ -52,4 +52,3 @@ export type Application = {
   createdAt: string;
   updatedAt: string;
 };
-

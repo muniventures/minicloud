@@ -76,4 +76,3 @@ export function updateEnvironment(applicationId: string, environmentId: string, 
 export function deleteEnvironment(applicationId: string, environmentId: string, confirmation: string) {
   return apiRequest<void>(`/api/apps/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}`, { method: "DELETE", body: { confirmation } });
 }
-
