@@ -10,6 +10,34 @@ namespace Minicloud.Worker.Tests.Pipeline;
 
 public sealed class SshDeploymentClientFailureTests
 {
+    [Fact]
+    public async Task RemoteCommandConnectionStopsWhenOwnershipIsCancelled()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        using var rsa = RSA.Create(2048);
+        var client = new SshDeploymentClient(new SshDeploymentOptions
+        {
+            Port = port,
+            ConnectionTimeout = TimeSpan.FromSeconds(30),
+        });
+        using var cancellation = new CancellationTokenSource();
+        var execution = client.ExecuteCommandAsync("127.0.0.1", "minicloud",
+            rsa.ExportPkcs8PrivateKeyPem(), "touch /tmp/should-not-run",
+            (_, _) => Task.CompletedTask, cancellation.Token);
+
+        // Hold the SSH handshake open after accepting the connection. Losing
+        // ownership must interrupt connection setup, before any command starts.
+        using var connection = await listener.AcceptTcpClientAsync()
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(execution.IsCompleted);
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            execution.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
     [SftpFact]
     public async Task RealSftpPermissionFailureDoesNotOpenArtifactOrRemoteExecutionWhenConfigured()
     {

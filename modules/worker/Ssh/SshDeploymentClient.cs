@@ -178,7 +178,9 @@ public sealed class SshDeploymentClient : ISshDeploymentClient
         }
         catch (OperationCanceledException) when (leaseFailure.Task.IsCompletedSuccessfully)
         {
-            throw new RemoteQuiescenceException($"Worker lease refresh failed: {(await leaseFailure.Task).Message}");
+            var failure = await leaseFailure.Task;
+            _logger?.LogWarning(failure, "Worker ownership lease refresh failed during SSH deployment.");
+            throw new RemoteQuiescenceException($"Worker lease refresh failed: {failure.Message}");
         }
         finally
         {
@@ -418,12 +420,13 @@ public sealed class SshDeploymentClient : ISshDeploymentClient
         return await Task.Run(async () =>
         {
             using var client = CreateClient(host, () => new SshClient(connectionInfo));
-            client.Connect();
+            await client.ConnectAsync(cancellationToken);
             try
             {
                 using var command = client.CreateCommand(commandText);
                 command.CommandTimeout = commandTimeout;
 
+                cancellationToken.ThrowIfCancellationRequested();
                 var asyncResult = command.BeginExecute();
                 var executeTask = Task.Factory.FromAsync(asyncResult, _ => command.EndExecute(asyncResult));
 
