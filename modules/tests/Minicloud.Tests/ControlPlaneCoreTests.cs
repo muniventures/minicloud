@@ -70,6 +70,26 @@ public class ApiKeyTokenServiceTests
     }
 }
 
+public class ProviderPlanMappingTests
+{
+    [Theory]
+    [InlineData(AppPlan.P0D0, "s-1vcpu-512mb-10gb")]
+    [InlineData(AppPlan.P0D1, "s-1vcpu-1gb")]
+    [InlineData(AppPlan.P0D2, "s-1vcpu-2gb")]
+    public void DigitalOcean_plans_default_to_nyc3_and_respect_region_overrides(AppPlan plan, string sku)
+    {
+        var options = new ProviderPlanOptions();
+        var mapping = ProviderPlanMapping.FromAppPlan(plan, options);
+
+        Assert.Equal(Minicloud.Common.Providers.CloudProvider.DigitalOcean, mapping.Provider);
+        Assert.Equal("nyc3", mapping.Region);
+        Assert.Equal(sku, mapping.Sku);
+
+        options.DigitalOceanRegion = "nyc2";
+        Assert.Equal("nyc2", ProviderPlanMapping.FromAppPlan(plan, options).Region);
+    }
+}
+
 public class ControlPlaneValidationTests
 {
     [Theory]

@@ -14,7 +14,7 @@ public class ProviderPlanOptions
     public string VultrSmallSku { get; set; } = "vc2-1c-0.5gb-v6";
     public string VultrMediumSku { get; set; } = "vc2-1c-0.5gb";
     public string VultrLargeSku { get; set; } = "vc2-1c-1gb";
-    public string DigitalOceanRegion { get; set; } = "nyc1";
+    public string DigitalOceanRegion { get; set; } = "nyc3";
     public string DigitalOceanSmallSku { get; set; } = "s-1vcpu-512mb-10gb";
     public string DigitalOceanMediumSku { get; set; } = "s-1vcpu-1gb";
     public string DigitalOceanLargeSku { get; set; } = "s-1vcpu-2gb";

@@ -250,11 +250,13 @@ public sealed class AppDeletionTests
         public List<string> Deleted { get; } = [];
         public List<string> Lookups { get; } = [];
         public ProviderServerInfo? FoundServer { get; set; }
+        public bool FailLookup { get; set; }
         public CloudProvider Provider => CloudProvider.Hetzner;
         public Task DeleteServerAsync(string id, CancellationToken cancellationToken = default) { Deleted.Add(id); return Task.CompletedTask; }
         public Task<ProviderServerInfo?> FindServerAsync(string name, CancellationToken cancellationToken = default)
         {
             Lookups.Add(name);
+            if (FailLookup) { throw new HttpRequestException("Provider unavailable"); }
             return Task.FromResult(FoundServer);
         }
         public Task<ProviderServerInfo> CreateServerAsync(CreateServerRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();

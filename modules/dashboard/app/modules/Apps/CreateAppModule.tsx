@@ -92,7 +92,7 @@ export function CreateAppModule() {
                   {catalog.plans.map(option => <option key={option.id} value={option.name}>{option.name} — {planDescription(option)}</option>)}
                 </select>
                 {catalog.error && <p role="alert" className="text-sm text-destructive">{catalog.error}</p>}
-                {!catalog.loading && !catalog.error && !catalog.plans.length && <p className="text-sm text-muted-foreground">No enabled plans. <Link className="underline" to={dashboardRoutes.providers.path}>Configure a provider and plan</Link> first.</p>}
+                {!catalog.loading && !catalog.error && !catalog.plans.length && <p className="text-sm text-muted-foreground">No enabled plans. <Link className="underline" to={dashboardRoutes.plans.path}>Configure a provider and plan</Link> first.</p>}
               </div>
               <div className="grid gap-2">
                 <Label>Database</Label>

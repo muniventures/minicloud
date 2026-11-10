@@ -16,7 +16,7 @@ import { SignUpModule } from "./modules/Auth/SignUpModule";
 import { TeamSettingsModule } from "./modules/Settings/TeamSettingsModule";
 import { CliLoginModule } from "./modules/CliLogin/CliLoginModule";
 
-import { ProvidersModule } from "./modules/Providers/ProvidersModule";
+import { ProviderAccountsModule, ProvidersModule } from "./modules/Providers/ProvidersModule";
 
 export const routes: RouteObject[] = [
   {
@@ -36,7 +36,9 @@ export const routes: RouteObject[] = [
       { path: "/apps/new", element: <CreateAppModule /> },
       { path: "/databases", element: <DatabasesModule /> },
       { path: "/databases/:databaseId", element: <DatabaseDetailModule /> },
-      { path: "/providers", element: <ProvidersModule /> },
+      { path: "/plans", element: <ProvidersModule /> },
+      { path: "/plans/accounts", element: <ProviderAccountsModule /> },
+      { path: "/providers", element: <Navigate to="/plans" replace /> },
       { path: "/apps/:appId", element: <AppDetailModule /> },
       { path: "/apps/:appId/deployments", element: <DeploymentsModule /> },
       { path: "/apps/:appId/deployments/:deploymentId", element: <DeploymentDetailModule /> },

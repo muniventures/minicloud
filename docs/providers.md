@@ -11,7 +11,8 @@ provider credentials requires the separate `providers:write` operator scope.
 
 ## Configure an account
 
-Open **Providers** in the dashboard. Add an account name, select a supported
+Open **Plans** in the dashboard and select **Provider accounts** (or **Add plan**
+and **Connect account**). Add an account name, select a supported
 provider, and enter its API credential. DigitalOcean accounts can also specify a
 project; Vultr accounts can specify an OS ID. Credentials are write-only and
 stored in OpenBao. An organization Owner or Admin manages accounts and plans.
@@ -20,8 +21,9 @@ The connection check uses read-only provider requests. It does not allocate a
 server or guarantee available quota. Accounts with identical provider types
 remain independent entries with separate credentials and plans.
 
-Add a plan under the account. Configure the provider's exact region and SKU,
-image, and `linux/amd64` or `linux/arm64`. For Vultr, the image field is an optional
+Add a plan in **Plans** and select an enabled provider account. Configure the
+provider's exact location (region code) and server type (SKU), and under
+**Advanced settings**, the image and `linux/amd64` or `linux/arm64`. For Vultr, the image field is an optional
 numeric OS ID override; omission uses the account default. The initial plan name
 is a UUID; replace it with a name you want to use. Names may contain spaces and
 Unicode and must be unique across the organization's accounts, ignoring case

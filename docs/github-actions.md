@@ -39,9 +39,9 @@ Current plan codes:
 | `P0-V-0` | Vultr | `ewr` | `vc2-1c-0.5gb-v6` | $2.50/month, IPv6-only |
 | `P0-V-1` | Vultr | `ewr` | `vc2-1c-0.5gb` | $3.50/month |
 | `P0-V-2` | Vultr | `ewr` | `vc2-1c-1gb` | $5.00/month |
-| `P0-D-0` | DigitalOcean | `nyc1` | `s-1vcpu-512mb-10gb` | $4.00/month |
-| `P0-D-1` | DigitalOcean | `nyc1` | `s-1vcpu-1gb` | $6.00/month |
-| `P0-D-2` | DigitalOcean | `nyc1` | `s-1vcpu-2gb` | $12.00/month |
+| `P0-D-0` | DigitalOcean | `nyc3` | `s-1vcpu-512mb-10gb` | $4.00/month |
+| `P0-D-1` | DigitalOcean | `nyc3` | `s-1vcpu-1gb` | $6.00/month |
+| `P0-D-2` | DigitalOcean | `nyc3` | `s-1vcpu-2gb` | $12.00/month |
 
 Set workflow permissions:
 
