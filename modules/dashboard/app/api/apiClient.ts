@@ -8,7 +8,7 @@ type RequestOptions = {
   signal?: AbortSignal;
 };
 
-export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+async function authorizedRequest(path: string, options: RequestOptions): Promise<Response> {
   const token = await getCurrentIdToken();
   if (!token) {
     throw new ApiError(401, { code: "unauthenticated", message: "Sign in is required.", details: [] });
@@ -24,6 +24,11 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     body: options.body === undefined ? undefined : JSON.stringify(options.body)
   });
 
+  return response;
+}
+
+export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const response = await authorizedRequest(path, options);
   if (response.status === 204) {
     return undefined as T;
   }
@@ -62,4 +67,14 @@ function normalizeError(status: number, payload: unknown): ApiErrorBody {
     message: "The request failed.",
     details: []
   };
+}
+
+export async function apiDownload(path: string, signal?: AbortSignal): Promise<Blob> {
+  const response = await authorizedRequest(path, { signal });
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") ?? "";
+    const payload = contentType.includes("application/json") ? await response.json() : undefined;
+    throw new ApiError(response.status, normalizeError(response.status, payload));
+  }
+  return response.blob();
 }

@@ -200,6 +200,9 @@ else
 fi
 OPENBAO_BOOTSTRAP_FILE="${OPENBAO_DIR}/bootstrap.json"
 POSTGRES_DB="${APP_NAME//-/_}"
+if jq -e '.managed_database_server == true' "${PAYLOAD_FILE}" >/dev/null; then
+  POSTGRES_DB="postgres"
+fi
 
 phase() {
   finish_phase succeeded
@@ -215,6 +218,9 @@ compose() {
     args+=(-f "${INFRA_COMPOSE_FILE}")
   fi
   args+=(-f "${APP_COMPOSE_FILE}")
+  if [ -f "${APP_DIR}/compose.database-access.json" ]; then
+    args+=(-f "${APP_DIR}/compose.database-access.json")
+  fi
   docker compose "${args[@]}" "$@"
 }
 
@@ -374,6 +380,7 @@ preflight() {
   fi
 
   if jq -e '.asset_publication != null' "${PAYLOAD_FILE}" >/dev/null; then return; fi
+  if jq -e '.managed_database_server == true and .database == "postgres" and (.services | type == "array" and length == 0)' "${PAYLOAD_FILE}" >/dev/null; then return; fi
   if [ -z "${SERVICES_JSON}" ] || ! printf '%s' "${SERVICES_JSON}" | jq -e 'type == "array" and length > 0' >/dev/null; then
     echo "services payload must be a non-empty JSON array."
     exit 1
@@ -679,7 +686,8 @@ render_next_configs() {
           ($service.env // {}) + {REGISTRY_HTTP_SECRET: (env.REGISTRY_HTTP_SECRET // "")}
         else
         ($service.env // {})
-        + (if $database == "sqlite" then
+        + (if $service.managed_database_binding == true then {}
+          elif $database == "sqlite" then
             {DATABASE_URL: "sqlite:////data/sqlite/app.db"}
           elif $database == "postgres" then
             {
@@ -742,6 +750,7 @@ render_next_configs() {
                 env_file: [$env_file],
                 environment: service_environment($service)
               }
+              + (if $service.managed_database_binding == true then {extra_hosts: ["host.docker.internal:host-gateway"]} else {} end)
               + (if ($service.public // false) then {ports: ["127.0.0.1:\($service.host_port):\($service.port)"]} else {} end)
               + (if (service_volumes($service) | length) > 0 then {volumes: service_volumes($service)} else {} end)
               + (if (service_depends_on($service) | length) > 0 then {depends_on: service_depends_on($service)} else {} end)

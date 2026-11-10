@@ -602,6 +602,257 @@ namespace Minicloud.Common.Migrations
                     b.ToTable("custom_domain_registrations", (string)null);
                 });
 
+            modelBuilder.Entity("Minicloud.Common.Models.DatabaseBackupArtifact", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("BackupId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("backup_id");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DatabaseId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("database_id");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("KeyVersion")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("key_version");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("RepositoryAppId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("repository_app_id");
+
+                    b.Property<string>("Sha256")
+                        .HasColumnType("text")
+                        .HasColumnName("sha256");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("size_bytes");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.ToTable("database_backup_artifacts", (string)null);
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.DatabaseBackupPolicy", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DatabaseId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("database_id");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enabled");
+
+                    b.Property<string>("EncryptedKeyMaterialJson")
+                        .HasColumnType("text")
+                        .HasColumnName("encrypted_key_material_json");
+
+                    b.Property<int>("FrequencyHours")
+                        .HasColumnType("integer")
+                        .HasColumnName("frequency_hours");
+
+                    b.Property<bool>("KeepLastCopies")
+                        .HasColumnType("boolean")
+                        .HasColumnName("keep_last_copies");
+
+                    b.Property<string>("KeyVersion")
+                        .HasColumnType("text")
+                        .HasColumnName("key_version");
+
+                    b.Property<DateTimeOffset?>("LastAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_attempt_at");
+
+                    b.Property<string>("LastErrorCode")
+                        .HasColumnType("text")
+                        .HasColumnName("last_error_code");
+
+                    b.Property<DateTimeOffset?>("LastSuccessAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_success_at");
+
+                    b.Property<int>("MinimumCopies")
+                        .HasColumnType("integer")
+                        .HasColumnName("minimum_copies");
+
+                    b.Property<DateTimeOffset?>("NextDueAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_due_at");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("RepositoryAppId")
+                        .HasColumnType("text")
+                        .HasColumnName("repository_app_id");
+
+                    b.Property<int>("RetentionDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("retention_days");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L)
+                        .HasColumnName("revision");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DatabaseId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId");
+
+                    b.ToTable("database_backup_policies", (string)null);
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.DatabaseOperation", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ActorJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("actor_json");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempt_count");
+
+                    b.Property<string>("BackupPolicyId")
+                        .HasColumnType("text")
+                        .HasColumnName("backup_policy_id");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DatabaseId")
+                        .HasColumnType("text")
+                        .HasColumnName("database_id");
+
+                    b.Property<string>("ErrorCode")
+                        .HasColumnType("text")
+                        .HasColumnName("error_code");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text")
+                        .HasColumnName("error_message");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kind");
+
+                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_expires_at");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("OwnershipToken")
+                        .HasColumnType("text")
+                        .HasColumnName("ownership_token");
+
+                    b.Property<string>("RequestJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("request_json");
+
+                    b.Property<string>("ResultJson")
+                        .HasColumnType("text")
+                        .HasColumnName("result_json");
+
+                    b.Property<long?>("ScheduledPolicyRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("scheduled_policy_revision");
+
+                    b.Property<string>("ServerId")
+                        .HasColumnType("text")
+                        .HasColumnName("server_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.ToTable("database_operations", (string)null);
+                });
+
             modelBuilder.Entity("Minicloud.Common.Models.Deployment", b =>
                 {
                     b.Property<string>("Id")
@@ -1480,6 +1731,335 @@ namespace Minicloud.Common.Migrations
                     b.HasIndex("OrganizationId", "AppId", "ServiceName");
 
                     b.ToTable("image_publications", (string)null);
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ManagedDatabase", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AccessMode")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("access_mode");
+
+                    b.Property<string>("AllowedCidrsJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("allowed_cidrs_json");
+
+                    b.Property<string>("AppId")
+                        .HasColumnType("text")
+                        .HasColumnName("app_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("EncryptedCredentialsJson")
+                        .HasColumnType("text")
+                        .HasColumnName("encrypted_credentials_json");
+
+                    b.Property<string>("Engine")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("engine");
+
+                    b.Property<string>("EngineVersion")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("engine_version");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<string>("NetworkId")
+                        .HasColumnType("text")
+                        .HasColumnName("network_id");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Placement")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("placement");
+
+                    b.Property<string>("PrivateIp")
+                        .HasColumnType("text")
+                        .HasColumnName("private_ip");
+
+                    b.Property<string>("RecoverySourceAppId")
+                        .HasColumnType("text")
+                        .HasColumnName("recovery_source_app_id");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision");
+
+                    b.Property<string>("ServerId")
+                        .HasColumnType("text")
+                        .HasColumnName("server_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("OrganizationId", "NetworkId");
+
+                    b.HasIndex("OrganizationId", "ServerId");
+
+                    b.HasIndex("ServerId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("managed_databases", (string)null);
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ManagedDatabaseBinding", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AppId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("app_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DatabaseId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("database_id");
+
+                    b.Property<string>("Host")
+                        .HasColumnType("text")
+                        .HasColumnName("host");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<int>("Port")
+                        .HasColumnType("integer")
+                        .HasColumnName("port");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision");
+
+                    b.Property<string>("ServiceName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("service_name");
+
+                    b.Property<string>("SslMode")
+                        .HasColumnType("text")
+                        .HasColumnName("ssl_mode");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppId", "ServiceName")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "AppId");
+
+                    b.HasIndex("OrganizationId", "DatabaseId");
+
+                    b.ToTable("managed_database_bindings", (string)null);
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ManagedDatabaseNetwork", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("CreationAttempted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("creation_attempted");
+
+                    b.Property<string>("IpRange")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("ip_range");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<string>("NetworkZone")
+                        .HasColumnType("text")
+                        .HasColumnName("network_zone");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("ProviderAccountId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("provider_account_id");
+
+                    b.Property<long>("ProviderAccountRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("provider_account_revision");
+
+                    b.Property<string>("ProviderNetworkId")
+                        .HasColumnType("text")
+                        .HasColumnName("provider_network_id");
+
+                    b.Property<string>("Region")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("region");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<string>("SubnetRange")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("subnet_range");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Name")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "ProviderAccountId");
+
+                    b.HasIndex("ProviderAccountId", "ProviderNetworkId")
+                        .IsUnique();
+
+                    b.ToTable("managed_database_networks", (string)null);
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ManagedDatabaseServer", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Engine")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("engine");
+
+                    b.Property<string>("EngineVersion")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("engine_version");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("mode");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("PlanId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("plan_id");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision");
+
+                    b.Property<string>("RuntimeAppId")
+                        .HasColumnType("text")
+                        .HasColumnName("runtime_app_id");
+
+                    b.Property<string>("RuntimeDeploymentId")
+                        .HasColumnType("text")
+                        .HasColumnName("runtime_deployment_id");
+
+                    b.Property<string>("RuntimeServerId")
+                        .HasColumnType("text")
+                        .HasColumnName("runtime_server_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("OrganizationId", "Name")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "PlanId");
+
+                    b.ToTable("managed_database_servers", (string)null);
                 });
 
             modelBuilder.Entity("Minicloud.Common.Models.MinicloudApp", b =>
@@ -2763,6 +3343,33 @@ namespace Minicloud.Common.Migrations
                     b.Navigation("Organization");
                 });
 
+            modelBuilder.Entity("Minicloud.Common.Models.DatabaseBackupArtifact", b =>
+                {
+                    b.HasOne("Minicloud.Common.Models.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.DatabaseBackupPolicy", b =>
+                {
+                    b.HasOne("Minicloud.Common.Models.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.DatabaseOperation", b =>
+                {
+                    b.HasOne("Minicloud.Common.Models.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Minicloud.Common.Models.Deployment", b =>
                 {
                     b.HasOne("Minicloud.Common.Models.MinicloudApp", "App")
@@ -2934,6 +3541,76 @@ namespace Minicloud.Common.Migrations
                         .IsRequired();
 
                     b.Navigation("App");
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ManagedDatabase", b =>
+                {
+                    b.HasOne("Minicloud.Common.Models.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Minicloud.Common.Models.ManagedDatabaseNetwork", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "NetworkId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Minicloud.Common.Models.ManagedDatabaseServer", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ServerId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ManagedDatabaseBinding", b =>
+                {
+                    b.HasOne("Minicloud.Common.Models.MinicloudApp", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "AppId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Minicloud.Common.Models.ManagedDatabase", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "DatabaseId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ManagedDatabaseNetwork", b =>
+                {
+                    b.HasOne("Minicloud.Common.Models.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Minicloud.Common.Models.ProviderAccount", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProviderAccountId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ManagedDatabaseServer", b =>
+                {
+                    b.HasOne("Minicloud.Common.Models.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Minicloud.Common.Models.ProviderPlan", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "PlanId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Minicloud.Common.Models.MinicloudApp", b =>

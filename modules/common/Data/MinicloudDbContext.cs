@@ -51,8 +51,82 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
     public DbSet<ProviderPlanName> ProviderPlanNames => Set<ProviderPlanName>();
     public DbSet<ProviderCredentialCleanup> ProviderCredentialCleanups => Set<ProviderCredentialCleanup>();
 
+    public DbSet<ManagedDatabaseServer> ManagedDatabaseServers => Set<ManagedDatabaseServer>();
+    public DbSet<ManagedDatabase> ManagedDatabases => Set<ManagedDatabase>();
+    public DbSet<DatabaseBackupPolicy> DatabaseBackupPolicies => Set<DatabaseBackupPolicy>();
+    public DbSet<DatabaseBackupArtifact> DatabaseBackupArtifacts => Set<DatabaseBackupArtifact>();
+    public DbSet<DatabaseOperation> DatabaseOperations => Set<DatabaseOperation>();
+
+    public DbSet<ManagedDatabaseBinding> ManagedDatabaseBindings => Set<ManagedDatabaseBinding>();
+    public DbSet<ManagedDatabaseNetwork> ManagedDatabaseNetworks => Set<ManagedDatabaseNetwork>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<ManagedDatabaseNetwork>(entity =>
+        {
+            entity.ToTable("managed_database_networks");
+            entity.HasKey(x => x.Id);
+            entity.HasAlternateKey(x => new { x.OrganizationId, x.Id });
+            entity.HasIndex(x => new { x.OrganizationId, x.Name }).IsUnique();
+            entity.HasIndex(x => new { x.ProviderAccountId, x.ProviderNetworkId }).IsUnique();
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+            entity.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ProviderAccount>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ProviderAccountId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ManagedDatabaseServer>(entity =>
+        {
+            entity.ToTable("managed_database_servers");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.OrganizationId);
+            entity.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => new { x.OrganizationId, x.Name }).IsUnique();
+            entity.HasOne<ProviderPlan>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PlanId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+        });
+        modelBuilder.Entity<ManagedDatabase>(entity =>
+        {
+            entity.ToTable("managed_databases");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.OrganizationId);
+            entity.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.AppId).IsUnique();
+            entity.HasIndex(x => new { x.ServerId, x.Name }).IsUnique();
+            entity.HasOne<ManagedDatabaseNetwork>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.NetworkId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ManagedDatabaseServer>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ServerId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+        });
+        modelBuilder.Entity<DatabaseBackupPolicy>(entity =>
+        {
+            entity.ToTable("database_backup_policies");
+            entity.Property(x => x.Revision).HasDefaultValue(1L).IsConcurrencyToken();
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.OrganizationId);
+            entity.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.DatabaseId).IsUnique();
+        });
+        modelBuilder.Entity<DatabaseBackupArtifact>(entity =>
+        {
+            entity.ToTable("database_backup_artifacts");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.OrganizationId);
+            entity.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<DatabaseOperation>(entity =>
+        {
+            entity.ToTable("database_operations");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.OrganizationId);
+            entity.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ManagedDatabaseBinding>(entity =>
+        {
+            entity.ToTable("managed_database_bindings");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+            entity.HasIndex(x => new { x.AppId, x.ServiceName }).IsUnique();
+            entity.HasOne<ManagedDatabase>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.DatabaseId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<MinicloudApp>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.AppId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<ProviderAccount>(entity =>
         {
             entity.ToTable("provider_accounts");

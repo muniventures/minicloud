@@ -2,6 +2,8 @@ namespace Minicloud.Common.Services;
 
 public static class ApiKeyScopes
 {
+    public const string DatabasesRead = "databases:read";
+    public const string DatabasesManage = "databases:manage";
     public const string AppsRead = "apps:read";
     public const string AppsWrite = "apps:write";
     public const string DeploymentsCreate = "deployments:create";
@@ -31,6 +33,8 @@ public static class ApiKeyScopes
 
     public static readonly ISet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
+        DatabasesRead,
+        DatabasesManage,
         AppsRead,
         AppsWrite,
         DeploymentsCreate,

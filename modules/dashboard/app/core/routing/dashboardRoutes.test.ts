@@ -9,6 +9,6 @@ describe("dashboardRoutes", () => {
   });
 
   it("exposes primary navigation routes", () => {
-    expect(navigationRoutes.map((route) => route.key)).toEqual(["apps", "providers", "deployments"]);
+    expect(navigationRoutes.map((route) => route.key)).toEqual(["apps", "databases", "providers", "deployments"]);
   });
 });

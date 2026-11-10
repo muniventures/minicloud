@@ -43,6 +43,20 @@ public sealed class AppDeletionProcessor(
                 {
                     throw new InvalidOperationException("An active deployment must finish before deletion.");
                 }
+                var databaseBlocker = await DatabaseLifecycleGuards.AppDeletionBlockerAsync(db, app.Id, ct, allowManagedServerDeletion: true);
+                if (databaseBlocker is not null) { throw new InvalidOperationException(databaseBlocker); }
+                var sourceDatabases = await db.ManagedDatabases.Where(x => x.AppId == app.Id).ToListAsync(ct);
+                foreach (var source in sourceDatabases)
+                {
+                    source.Status = "deleted";
+                    source.Revision++;
+                    foreach (var policy in await db.DatabaseBackupPolicies.Where(x => x.DatabaseId == source.Id).ToListAsync(ct))
+                    {
+                        policy.Enabled = false;
+                        policy.Status = "source-deleted";
+                        policy.NextDueAt = null;
+                    }
+                }
                 await DeleteInfrastructureAsync(app, ct);
                 if (db.Database.IsNpgsql()) { await db.Database.ExecuteSqlRawAsync($"SELECT pg_advisory_xact_lock({Minicloud.Common.Registry.ImagePublicationService.LockKey})", ct); }
                 var audits = await db.AuditEvents.Where(x => x.AppId == app.Id).ToListAsync(ct);

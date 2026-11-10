@@ -42,6 +42,8 @@ public sealed class ControlPlaneAuthorization(MinicloudDbContext db)
 
     private static string? ScopeFor(OrganizationAction action) => action switch
     {
+        OrganizationAction.ReadDatabases => ApiKeyScopes.DatabasesRead,
+        OrganizationAction.ManageDatabases => ApiKeyScopes.DatabasesManage,
         OrganizationAction.ReadApps => ApiKeyScopes.AppsRead,
         OrganizationAction.WriteApps => ApiKeyScopes.AppsWrite,
         OrganizationAction.ReadDeployments => ApiKeyScopes.DeploymentsRead,
@@ -63,6 +65,8 @@ public sealed class ControlPlaneAuthorization(MinicloudDbContext db)
 
     private static bool RoleAllows(OrganizationRole role, OrganizationAction action) => action switch
     {
+        OrganizationAction.ReadDatabases => true,
+        OrganizationAction.ManageDatabases => role is OrganizationRole.Owner or OrganizationRole.Admin or OrganizationRole.Developer,
         OrganizationAction.ReadProviders or OrganizationAction.ReadPlans => true,
         OrganizationAction.ManageProviders or OrganizationAction.ManagePlans => role is OrganizationRole.Owner or OrganizationRole.Admin,
         OrganizationAction.ReadApps or OrganizationAction.ReadDeployments or OrganizationAction.ReadRuntime or OrganizationAction.ReadSecrets or OrganizationAction.ReadApplicationLogs => true,
@@ -76,6 +80,8 @@ public sealed class ControlPlaneAuthorization(MinicloudDbContext db)
 
 public enum OrganizationAction
 {
+    ReadDatabases,
+    ManageDatabases,
     ReadApps,
     WriteApps,
     ReadDeployments,

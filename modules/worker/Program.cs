@@ -218,6 +218,13 @@ builder.Services.AddScoped<IDeploymentPipelineExecutor, DeploymentPipelineExecut
 
 builder.Services.AddScoped<Minicloud.Worker.Deletion.AppDeletionProcessor>();
 builder.Services.AddHostedService<Minicloud.Worker.Deletion.AppDeletionWorker>();
+builder.Services.AddScoped<Minicloud.Worker.Databases.DatabaseOperationProcessor>();
+builder.Services.AddScoped<DeploymentLifecycleService>();
+builder.Services.AddScoped<IAppSecretService, AppSecretService>();
+builder.Services.AddScoped<DatabaseManagementService>();
+builder.Services.AddScoped<DatabaseNetworkService>();
+builder.Services.Configure<Minicloud.Worker.Databases.DatabasePlatformOptions>(builder.Configuration.GetSection(Minicloud.Worker.Databases.DatabasePlatformOptions.SectionName));
+builder.Services.AddHostedService<Minicloud.Worker.Databases.DatabaseOperationWorker>();
 
 // Queue Consumer Background Service
 builder.Services.AddSingleton<PostgresDeploymentQueueConsumer>();
