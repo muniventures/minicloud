@@ -7,6 +7,8 @@ namespace Minicloud.Common.Data;
 public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
+    public DbSet<BrowserSession> BrowserSessions => Set<BrowserSession>();
+    public DbSet<BootstrapRecord> BootstrapRecords => Set<BootstrapRecord>();
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<OrganizationMember> OrganizationMembers => Set<OrganizationMember>();
     public DbSet<MinicloudApplication> Applications => Set<MinicloudApplication>();
@@ -232,12 +234,31 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
         modelBuilder.Entity<User>(entity =>
         {
             entity.ToTable("users");
-            entity.HasIndex(x => x.FirebaseUid).IsUnique();
+            entity.HasIndex(x => x.KratosIdentityId).IsUnique();
             entity.HasIndex(x => x.Email).IsUnique();
-            entity.Property(x => x.FirebaseUid).HasColumnName("firebase_uid");
+            entity.Property(x => x.KratosIdentityId).HasColumnName("kratos_identity_id");
             entity.Property(x => x.DisplayName).HasColumnName("display_name");
             entity.Property(x => x.CreatedAt).HasColumnName("created_at");
             entity.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+        });
+
+        modelBuilder.Entity<BrowserSession>(entity =>
+        {
+            entity.ToTable("browser_sessions");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.TokenHash).IsUnique();
+            entity.HasIndex(x => x.UserId);
+            entity.HasIndex(x => x.KratosSessionId).IsUnique();
+            entity.HasIndex(x => new { x.UserId, x.RevokedAt, x.IdleExpiresAt });
+            entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<BootstrapRecord>(entity =>
+        {
+            entity.ToTable("bootstrap_records");
+            entity.HasKey(x => x.InstallationId);
+            entity.HasIndex(x => x.OperationId).IsUnique();
+            entity.Property(x => x.State).HasMaxLength(32);
         });
 
         modelBuilder.Entity<Organization>(entity =>

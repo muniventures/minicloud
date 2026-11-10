@@ -12,7 +12,7 @@ public sealed record ActorIdentity(
     string? OrganizationId,
     IReadOnlySet<string> Scopes)
 {
-    public bool IsDashboardUser => Kind == "firebase";
+    public bool IsDashboardUser => Kind == "browser_session";
 
     public bool IsApiKey => Kind == "api_key";
 
