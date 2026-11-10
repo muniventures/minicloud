@@ -251,9 +251,49 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         var submit = new CreateDeploymentRequest(seed.AppId, "none", null,
             [new DeploymentServiceRequest("api", "example/api:latest", 8080, true, "/", "/health")], PreparationId: pending.Id);
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/deployments", submit)).StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsync($"/api/deployments/{pending.Id}/dispatch", null)).StatusCode);
+        var redispatch = await client.PostAsync($"/api/deployments/{pending.Id}/dispatch", null);
+        Assert.Equal(HttpStatusCode.Conflict, redispatch.StatusCode);
+        using var redispatchError = JsonDocument.Parse(await redispatch.Content.ReadAsStringAsync());
+        Assert.Equal("preparation_not_submitted",
+            redispatchError.RootElement.GetProperty("error").GetProperty("code").GetString());
         Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/deployments/preparations",
             start with { IdempotencyKey = Guid.NewGuid().ToString("D") })).StatusCode);
+    }
+
+    [Fact]
+    public async Task DispatchRejectsActiveDeploymentWithStructuredCodeAndPreservesOwnership()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var seed = await SeedAsync("org_active_redispatch", "app_active_redispatch", now);
+        const string deploymentId = "dep_active_redispatch";
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+            db.Deployments.Add(new Deployment
+            {
+                Id = deploymentId,
+                OrganizationId = seed.OrganizationId,
+                AppId = seed.AppId,
+                Status = DeploymentStatus.Deploying,
+                OwnershipToken = "synthetic-active-owner",
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var response = await client.PostAsync($"/api/deployments/{deploymentId}/dispatch", null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var error = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("deployment_active", error.RootElement.GetProperty("error").GetProperty("code").GetString());
+        await using var verifyScope = _factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+        var deployment = await verifyDb.Deployments.SingleAsync(x => x.Id == deploymentId);
+        Assert.Equal(DeploymentStatus.Deploying, deployment.Status);
+        Assert.Equal("synthetic-active-owner", deployment.OwnershipToken);
     }
 
     [Fact]
