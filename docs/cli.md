@@ -555,14 +555,21 @@ minicloud deploy --no-publish
 
 ```bash
 minicloud status
-minicloud status <deployment-id>
-minicloud status [deployment-id] --watch
-minicloud logs <app-or-deployment-id>
+minicloud status <deployment-number>
+minicloud status [deployment-number] --watch
+minicloud logs [app-or-deployment-number]
+minicloud deploy cancel <deployment-number>
 minicloud apps list
 minicloud apps inspect <app>
 ```
 
-`status` checks the current status of a deployment. Use `--watch` (or `-w`) to follow an ongoing deployment until completion. Deployment tracking automatically tolerates transient network disconnections and sleep/wake cycles, reconnecting when the network becomes available.
+Deployments are identified by a number such as `20261110.1`: the UTC creation date and a counter for that organization and day. `deploy` prints the number it created, and `status`, `logs`, `deploy cancel` and `apps inspect` accept or display the same number. Numbers are validated locally; opaque internal IDs such as `dep_...` are not accepted.
+
+A deployment number is only unique within its organization, so the CLI always sends the organization with it. The organization is `--organization <id>` when given; otherwise the token's only organization; otherwise the organization of the app in `minicloud.yml` (or `--config`). With several organizations and no config, pass `--organization`. Without a number, `status` and `logs` use the latest deployment in that organization.
+
+`logs` treats a deployment number as a deployment and any other value as an app name or ID; app logs are runtime logs for that app.
+
+`status` checks the current status of a deployment. Use `--watch` (or `-w`) to follow an ongoing deployment until completion. Deployment tracking automatically tolerates transient network disconnections and sleep/wake cycles, reconnecting when the network becomes available. Add `--diagnostics` to also print the internal deployment ID when correlating with support or server logs; ordinary output shows only the number.
 
 `apps inspect` prints the latest deployment and the active service inventory,
 including public/private state, port, runtime state, and assigned domains.
@@ -639,7 +646,7 @@ reference reports `missing_service_secret`, including the service, secret name a
 environment variable, and exits with validation code 2. Configure the real secret
 or remove its deployment reference until that integration is configured.
 
-`minicloud status <deployment-id>` and `minicloud logs <deployment-id>` include
+`minicloud status <deployment-number>` and `minicloud logs <deployment-number>` include
 the deployment failure code and message. Secret-store outages report
 `secret_store_unavailable`; preparation failures do not wait for an unrelated SSH
 readiness timeout. CLI 2.0.1 requires the updated control API's

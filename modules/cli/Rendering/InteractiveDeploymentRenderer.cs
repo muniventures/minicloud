@@ -46,7 +46,7 @@ public sealed class InteractiveDeploymentRenderer : IDeploymentRenderer
     private string _deployDetail = "creating deployment";
     private bool _deployReconnecting;
     private string? _deployStatus;
-    private string? _deploymentId;
+    private string? _deploymentNumber;
     private string? _deployPhase;
     private string? _deployActivityDetail;
 
@@ -211,41 +211,41 @@ public sealed class InteractiveDeploymentRenderer : IDeploymentRenderer
         }
     }
 
-    public void DeploymentCreated(string deploymentId, string status)
+    public void DeploymentCreated(string deploymentNumber, string status)
     {
         lock (_lock)
         {
             _deployState = StageState.Active;
-            _deploymentId = deploymentId;
+            _deploymentNumber = deploymentNumber;
             _deployStatus = status;
             _deployPhase = "Deploying";
-            _deployDetail = $"{deploymentId}  {status}";
+            _deployDetail = $"{deploymentNumber}  {status}";
             _tracker?.OnDeploymentCreated();
             Redraw();
         }
     }
 
-    public void DeploymentStatusUpdated(string deploymentId, string status, string? consoleUrl = null)
+    public void DeploymentStatusUpdated(string deploymentNumber, string status, string? consoleUrl = null)
     {
         lock (_lock)
         {
-            _deploymentId = deploymentId;
+            _deploymentNumber = deploymentNumber;
             _deployStatus = status;
             _deployReconnecting = false;
-            _deployDetail = $"{deploymentId}  {status}";
+            _deployDetail = $"{deploymentNumber}  {status}";
             Redraw();
         }
     }
 
-    public void DeploymentActivityUpdated(string deploymentId, string phase, string? detail = null)
+    public void DeploymentActivityUpdated(string deploymentNumber, string phase, string? detail = null)
     {
         lock (_lock)
         {
-            _deploymentId = deploymentId;
+            _deploymentNumber = deploymentNumber;
             _deployPhase = phase;
             _deployActivityDetail = detail;
             _deployReconnecting = false;
-            _deployDetail = $"{deploymentId}  {phase.ToLowerInvariant()}";
+            _deployDetail = $"{deploymentNumber}  {phase.ToLowerInvariant()}";
             Redraw();
         }
     }
@@ -259,14 +259,14 @@ public sealed class InteractiveDeploymentRenderer : IDeploymentRenderer
         }
     }
 
-    public void DeploymentReconnected(string deploymentId, string status)
+    public void DeploymentReconnected(string deploymentNumber, string status)
     {
         lock (_lock)
         {
-            _deploymentId = deploymentId;
+            _deploymentNumber = deploymentNumber;
             _deployReconnecting = false;
             _deployStatus = status;
-            _deployDetail = $"{deploymentId}  {status}";
+            _deployDetail = $"{deploymentNumber}  {status}";
             Redraw();
         }
     }
@@ -357,9 +357,9 @@ public sealed class InteractiveDeploymentRenderer : IDeploymentRenderer
                 lines.Add(result.FailureMessage);
             }
 
-            if (!string.IsNullOrWhiteSpace(result.DeploymentId))
+            if (!string.IsNullOrWhiteSpace(result.DeploymentNumber))
             {
-                lines.Add($"Logs: minicloud logs {result.DeploymentId}");
+                lines.Add($"Logs: minicloud logs {result.DeploymentNumber}");
             }
             else
             {
@@ -514,11 +514,11 @@ public sealed class InteractiveDeploymentRenderer : IDeploymentRenderer
                             !string.Equals(_deployPhase, "Deploying", StringComparison.OrdinalIgnoreCase) &&
                             !string.Equals(_deployPhase, _deployStatus, StringComparison.OrdinalIgnoreCase))
                         {
-                            lines.Add($"      {_deploymentId}  {cyan}{_deployPhase}{reset}".TrimEnd());
+                            lines.Add($"      {_deploymentNumber}  {cyan}{_deployPhase}{reset}".TrimEnd());
                         }
                         else
                         {
-                            lines.Add($"      {_deploymentId}  {_deployStatus}".TrimEnd());
+                            lines.Add($"      {_deploymentNumber}  {_deployStatus}".TrimEnd());
                         }
                         if (!string.IsNullOrWhiteSpace(_deployActivityDetail))
                         {

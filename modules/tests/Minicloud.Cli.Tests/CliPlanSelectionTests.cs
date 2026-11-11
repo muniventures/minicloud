@@ -131,10 +131,10 @@ public sealed class CliPlanSelectionTests
                 using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
                 SubmittedApp = body.RootElement.GetProperty("appId").GetString();
                 SubmittedPlan = body.RootElement.GetProperty("plan").GetString();
-                response = new { id = "dep_plan", appId = SubmittedApp, status = "queued" };
+                response = new { id = "dep_plan", number = "20261110.3", appId = SubmittedApp, status = "queued" };
             }
-            else if (path.StartsWith("/api/deployments/dep_plan"))
-                response = path.EndsWith("/logs") ? Array.Empty<object>() : new { id = "dep_plan", appId = SubmittedApp, organizationId = "org", database = "sqlite", status = "succeeded", services = Array.Empty<object>() };
+            else if (path.StartsWith("/api/deployments/20261110.3"))
+                response = path.EndsWith("/logs") ? Array.Empty<object>() : new { id = "dep_plan", number = "20261110.3", appId = SubmittedApp, organizationId = "org", database = "sqlite", status = "succeeded", services = Array.Empty<object>() };
             else throw new InvalidOperationException(request.Method + " " + path);
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(response) };
         }
