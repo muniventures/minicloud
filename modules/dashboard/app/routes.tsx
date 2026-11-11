@@ -49,7 +49,7 @@ export const routes: RouteObject[] = [
       { path: "/apps/:applicationId", element: <AppLandingRedirect /> },
       { path: "/apps/:applicationId/environments/:environmentId/:tab", element: <AppDetailModule /> },
       { path: "/deployments", element: <DeploymentsModule /> },
-      { path: "/deployments/:deploymentId", element: <DeploymentDetailModule /> },
+      { path: "/deployments/:deploymentNumber", element: <DeploymentDetailModule /> },
       { path: "/settings/api-keys", element: <ApiKeysModule /> },
       { path: "/settings/account", element: <AccountFlowForm kind="settings" returnTo="/settings/account" /> },
       { path: "/settings/team", element: <TeamSettingsModule /> }

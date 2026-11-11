@@ -20,6 +20,7 @@ describe("SidebarNavigation", () => {
           capabilities: { password: true, google: false, emailRecovery: false, bootstrapState: "ready" },
           logout,
           refreshSession: async () => {},
+          selectOrganization: () => false,
           profile: {
             id: "user-1",
             email: "muni@example.test",

@@ -78,4 +78,5 @@ it.each(["https://evil.test", "//evil.test", "/\\evil.test", "/%2f%2fevil.test",
 it("preserves dashboard deep links and query strings", () => {
   expect(safeReturnPath("/cli/login?session=request-1")).toBe("/cli/login?session=request-1");
   expect(safeReturnPath("/apps/app/environments/prod/services?service=web")).toBe("/apps/app/environments/prod/services?service=web");
+  expect(safeReturnPath("/deployments/20261110.1?organizationId=org%2F2&tab=logs")).toBe("/deployments/20261110.1?organizationId=org%2F2&tab=logs");
 });
