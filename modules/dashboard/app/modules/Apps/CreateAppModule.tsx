@@ -12,6 +12,8 @@ import { PageScaffold } from "../../core/components/PageScaffold";
 import { dashboardRoutes } from "../../core/routing/dashboardRoutes";
 import type { DatabaseMode } from "../../models/controlPlane";
 import { planDescription, usePlanCatalog } from "../Providers/usePlanCatalog";
+import { SshAccessFields } from "./components/SshAccessFields";
+import { buildSshAccessRequest, defaultSshAccessDraft, sshErrorMessage, type SshAccessDraft } from "./sshAccess";
 
 export function CreateAppModule() {
   const { selectedOrganization } = useAuth();
@@ -27,16 +29,25 @@ export function CreateAppModule() {
   useEffect(() => {
     currentOrganizationId.current = selectedOrganization?.id;
     setPlan("");
+    setSshDraft(defaultSshAccessDraft);
     return () => { currentOrganizationId.current = undefined; };
   }, [selectedOrganization?.id]);
   const [database, setDatabase] = useState<DatabaseMode>("sqlite");
+  const [sshDraft, setSshDraft] = useState<SshAccessDraft>(defaultSshAccessDraft);
+  const selectedPlan = catalog.plans.find(item => item.name === plan);
+  const sshAccount = selectedPlan ? { id: selectedPlan.providerAccountId, name: selectedPlan.providerName, providerType: selectedPlan.providerType } : null;
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!canCreate || !selectedOrganization || !catalog.plans.some(item => item.name === plan)) {
+    if (!canCreate || !selectedOrganization || !selectedPlan) {
+      return;
+    }
+    const ssh = buildSshAccessRequest(sshDraft, selectedPlan.providerAccountId);
+    if (!ssh.request) {
+      setError(ssh.error);
       return;
     }
 
@@ -48,11 +59,11 @@ export function CreateAppModule() {
         organizationId,
         name,
         slug: slug || slugify(name),
-        initialEnvironment: { name: environmentName, plan, database }
+        initialEnvironment: { name: environmentName, plan, database, sshAccess: ssh.request }
       });
       if (currentOrganizationId.current === organizationId) navigate(`/apps/${app.id}`);
     } catch (submitError) {
-      if (currentOrganizationId.current === organizationId) setError(submitError instanceof Error ? submitError.message : "Unable to create app.");
+      if (currentOrganizationId.current === organizationId) setError(sshErrorMessage(submitError, "Unable to create app."));
     } finally {
       setIsSubmitting(false);
     }
@@ -117,7 +128,10 @@ export function CreateAppModule() {
                 </Select>
               </div>
             </div>
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            {selectedPlan ? (
+              <SshAccessFields idPrefix="app" organizationId={selectedOrganization?.id} account={sshAccount} draft={sshDraft} onChange={setSshDraft} disabled={isSubmitting} />
+            ) : null}
+            {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
             <Button className="w-fit" disabled={isSubmitting || catalog.loading || !catalog.plans.some(item => item.name === plan)} type="submit">
               {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Create app
