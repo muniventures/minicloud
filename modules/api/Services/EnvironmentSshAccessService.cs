@@ -160,18 +160,42 @@ public sealed class EnvironmentSshAccessService(
         var localKeys = db.ProviderSshKeys.Local.Where(x =>
             x.OrganizationId == organizationId && x.ProviderAccountId == providerAccountId).ToArray();
         var byFingerprint = localKeys.ToDictionary(x => x.Fingerprint, StringComparer.Ordinal);
-        var byProviderId = localKeys.Where(x => x.ProviderKeyId is not null)
-            .ToDictionary(x => x.ProviderKeyId!, StringComparer.Ordinal);
-
+        var observedFingerprints = localKeys.Where(x => x.ProviderKeyId is not null)
+            .ToDictionary(x => x.ProviderKeyId!, x => x.Fingerprint, StringComparer.Ordinal);
+        var inventory = new List<(ProviderSshKeyInfo Key, ValidatedSshPublicKey Validated)>();
+        var inconsistentFingerprints = new HashSet<string>(StringComparer.Ordinal);
         foreach (var providerKey in providerKeys)
         {
             if (string.IsNullOrWhiteSpace(providerKey.Id) ||
                 !SshPublicKeyParser.TryParse(providerKey.PublicKey, out var validated))
                 continue;
 
-            // A changed provider reference must fail closed, not rebind to another fingerprint.
-            if (!byProviderId.TryGetValue(providerKey.Id, out var local))
-                byFingerprint.TryGetValue(validated!.Fingerprint, out local);
+            inventory.Add((providerKey, validated!));
+            if (observedFingerprints.TryGetValue(providerKey.Id, out var observed) &&
+                !string.Equals(observed, validated!.Fingerprint, StringComparison.Ordinal))
+            {
+                inconsistentFingerprints.Add(observed);
+                inconsistentFingerprints.Add(validated.Fingerprint);
+            }
+            else
+                observedFingerprints.TryAdd(providerKey.Id, validated!.Fingerprint);
+        }
+
+        // Quarantine every fingerprint implicated by a contradictory ID for this entire response.
+        // Do not let an alias rebound or a later correct duplicate erase the inconsistency.
+        foreach (var local in localKeys.Where(x => inconsistentFingerprints.Contains(x.Fingerprint)))
+        {
+            local.RegistrationState = "unknown";
+            local.UpdatedAt = now;
+            result[local.Id] = local;
+        }
+
+        foreach (var (providerKey, validated) in inventory)
+        {
+            if (inconsistentFingerprints.Contains(validated.Fingerprint))
+                continue;
+
+            byFingerprint.TryGetValue(validated.Fingerprint, out var local);
             if (local is null)
             {
                 local = new ProviderSshKey
@@ -181,7 +205,7 @@ public sealed class EnvironmentSshAccessService(
                     ProviderAccountId = providerAccountId,
                     ProviderKeyId = providerKey.Id,
                     Name = string.IsNullOrWhiteSpace(providerKey.Name) ? "SSH key" : providerKey.Name,
-                    PublicKey = validated!.PublicKey,
+                    PublicKey = validated.PublicKey,
                     Fingerprint = validated.Fingerprint,
                     KeyType = validated.KeyType,
                     RegistrationState = "discovered",
@@ -190,19 +214,10 @@ public sealed class EnvironmentSshAccessService(
                 };
                 db.ProviderSshKeys.Add(local);
                 byFingerprint.Add(local.Fingerprint, local);
-                byProviderId.Add(providerKey.Id, local);
-            }
-            else if (!string.Equals(local.Fingerprint, validated!.Fingerprint, StringComparison.Ordinal))
-            {
-                local.RegistrationState = "unknown";
-                local.UpdatedAt = now;
             }
             else
             {
-                if (local.ProviderKeyId is not null)
-                    byProviderId.Remove(local.ProviderKeyId);
                 local.ProviderKeyId = providerKey.Id;
-                byProviderId[providerKey.Id] = local;
                 local.Name = string.IsNullOrWhiteSpace(providerKey.Name) ? local.Name : providerKey.Name;
                 local.PublicKey = validated.PublicKey;
                 if (local.RegistrationState is "pending" or "registering" or "unknown" or "failed")
