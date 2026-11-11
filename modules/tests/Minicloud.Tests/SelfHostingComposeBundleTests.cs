@@ -96,6 +96,8 @@ public sealed class SelfHostingComposeBundleTests
         var publicBaseUrl = Text(((YamlMappingNode)((YamlMappingNode)kratos["serve"])["public"])["base_url"]);
         var api = Environment(Service("api"));
         Assert.Equal(api["Kratos__PublicBaseUrl"], publicBaseUrl);
+        // Kratos rejects its whole config at startup when log.level is outside its schema enum.
+        Assert.Contains(Text(((YamlMappingNode)kratos["log"])["level"]), new[] { "trace", "debug", "info", "warning", "error", "fatal", "panic" });
         Assert.Equal("http://kratos:4434/", api["Kratos__AdminBaseUrl"]);
         Assert.Equal("false", api["Database__RunMigrationsOnStartup"]);
         Assert.DoesNotContain("kratos\", \"healthcheck", string.Join("\", \"", Sequence((YamlMappingNode)Service("kratos")["healthcheck"], "test")));
@@ -125,7 +127,7 @@ public sealed class SelfHostingComposeBundleTests
             .Select(match => match.Groups[1].Value).Where(name => !Regex.IsMatch(name, "^MINICLOUD_[A-Z]+_IMAGE$")).ToHashSet();
         Assert.Equal(
             ["API_HOSTNAME", "API_URL", "APP_DOMAIN", "CONSOLE_HOSTNAME", "CONSOLE_URL", "MANAGE_DNS_RECORDS",
-             "MINICLOUD_INSTALLATION_ID", "MINICLOUD_SECRETS_DIR", "MINICLOUD_SOURCE_URL", "OPENBAO_ROOT_TOKEN_FILE"],
+             "MINICLOUD_HOST_ID", "MINICLOUD_INSTALLATION_ID", "MINICLOUD_SECRETS_DIR", "MINICLOUD_SOURCE_URL", "OPENBAO_ROOT_TOKEN_FILE"],
             variables.Order());
         var guide = File.ReadAllText(Path.Combine(FindRepository(), "docs", "self-hosting.md"));
         Assert.All(variables, variable => Assert.Contains(variable, guide));

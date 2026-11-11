@@ -78,7 +78,10 @@ public sealed class MaintenanceAuthorityPostgresTests
             Assert.Equal(6, refusals);
             var active = status.Work.Single(x => x.Category == "admitted_activities" && x.State == "active");
             Assert.Equal(leases.Count, active.Count);
-            Assert.Equal(leases.Select(x => x.Id).Order(), active.Ids.Order());
+            // Drain status lists at most MaxListedIds ids (ordinal order); Count above covers the rest.
+            Assert.Equal(
+                leases.Select(x => x.Id).Order(StringComparer.Ordinal).Take(MaintenanceAuthorityService.MaxListedIds),
+                active.Ids);
             Assert.False(status.Drained);
             foreach (var lease in leases) await lease.DisposeAsync();
             Assert.True((await service.DrainStatusAsync(Installation)).Drained);

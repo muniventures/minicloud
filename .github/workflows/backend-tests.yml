@@ -36,6 +36,17 @@ jobs:
           python3 -B -m unittest discover -s scripts/database-platform -p 'test_*.py' -q
           python3 -B -m unittest discover -s modules/backup-repository -p 'test_*.py' -q
           python3 scripts/database-platform/test-postgres-integration.py
+      - name: Install authenticated recovery test dependency
+        env:
+          AGE_VERSION: v1.3.2
+          AGE_SHA256: cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10
+        run: |
+          # Pinned upstream release instead of the Ubuntu archive; the checksum must match exactly.
+          archive="$RUNNER_TEMP/age.tar.gz"
+          curl -fsSL --retry 3 -o "$archive" "https://github.com/FiloSottile/age/releases/download/${AGE_VERSION}/age-${AGE_VERSION}-linux-amd64.tar.gz"
+          echo "${AGE_SHA256}  ${archive}" | sha256sum -c -
+          sudo tar -xzf "$archive" -C /usr/local/bin --strip-components=1 age/age age/age-keygen
+          age --version
       - name: Verify self-hosting initialization scripts
         run: python3 -B -m unittest discover -s scripts/self-hosting -p 'test_*.py' -q
       - name: Run backend, worker, CLI and deployment integration tests

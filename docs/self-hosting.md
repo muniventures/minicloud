@@ -7,8 +7,19 @@ host based on these source assets. Once a versioned release is available, use
 its signed installer and release documentation; never build a production host
 from a checkout or substitute floating image tags.
 
-The public control-plane installer and setup flow now have source implementations;
-upgrade/recovery and installation qualification remain open. The
+The public control-plane installer, setup flow and coordinated maintenance
+now have source implementations. Installation and maintenance have not been
+qualified on a real host. The [maintenance guide](server-maintenance.md)
+documents `backup`, `upgrade`, `restore`, `restore-confirm` and `transfer`.
+These operations fence and drain through the maintenance authority and never
+stop accepted work.
+
+`transfer`, and the transfer inside `restore`, revoke an old host only when it
+next reaches this database. An old host running on its own restored database
+copy, or an unreachable host that still holds live provider credentials, is
+**not** stopped. You must shut it down or rotate those credentials yourself.
+The independently encrypted recovery-dependency archives (`*-recovery`) are not
+full backups. The
 [versioned installer/manual guide](server-installer.md) documents exact-release
 verification, protected inputs, shared staged Compose operations and resumable
 readiness. It is not a claim that a server release exists.
@@ -63,6 +74,7 @@ references (`MINICLOUD_*_IMAGE`) come from the generated, digest-pinned
 | `MINICLOUD_SOURCE_URL` | Optional. The public source link shown in the dashboard. |
 | `MINICLOUD_SECRETS_DIR` | Root-owned directory (`0700`) holding the files below. |
 | `MINICLOUD_INSTALLATION_ID` | Persistent non-secret installation identity from host metadata, shared by API and bootstrap inputs. Never regenerate it on restart. |
+| `MINICLOUD_HOST_ID` | Optional non-secret host-local maintenance identity from `<root>/host-id`, written by the packaged maintenance tooling and never backed up. Leave empty for manual Compose; `transfer` binds the maintenance authority to it. |
 | `OPENBAO_ROOT_TOKEN_FILE` | Used only by the `openbao-configure` maintenance service. Unset during normal operation. |
 
 The dashboard container receives only `MINICLOUD_API_URL`,
@@ -154,7 +166,9 @@ and preserve awaiting-DNS/TLS, awaiting-operator, ready and failed distinctions.
 
 The same entry point exposes `maintenance <status|fence|drain-status|release|transfer>`
 for upgrade, restore and host-transfer fencing. See
-[server maintenance authority](server-maintenance-authority.md).
+[server maintenance authority](server-maintenance-authority.md). Operators
+normally run these through the installer's `maintenance` operations described
+in the [maintenance guide](server-maintenance.md) rather than directly.
 
 ### OpenBao lifecycle
 
