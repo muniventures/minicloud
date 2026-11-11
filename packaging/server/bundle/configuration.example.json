@@ -1,0 +1,13 @@
+{
+  "apiUrl": "https://api.cloud.example.com",
+  "consoleUrl": "https://cloud.example.com",
+  "appDomain": "apps.example.com",
+  "apiHostname": "api.cloud.example.com",
+  "consoleHostname": "cloud.example.com",
+  "manageDnsRecords": false,
+  "sourceUrl": "https://github.com/muniventures/minicloud",
+  "recovery": {
+    "openBaoUnsealMaterialPath": "/path/on/off-host/recovery-media",
+    "backupDestination": "operator-managed-off-host-location"
+  }
+}

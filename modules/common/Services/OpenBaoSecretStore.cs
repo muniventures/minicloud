@@ -57,13 +57,14 @@ public sealed class OpenBaoSecretStore(HttpClient httpClient, IOptions<OpenBaoSe
 
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string relativePath, object? body, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(_options.Address) || string.IsNullOrWhiteSpace(_options.Token))
+        if (string.IsNullOrWhiteSpace(_options.Address))
         {
             throw new SecretStoreUnavailableException("OpenBao is not configured.");
         }
 
+        var token = await ReadTokenAsync(cancellationToken);
         using var request = new HttpRequestMessage(method, new Uri(new Uri(_options.Address.TrimEnd('/') + "/"), relativePath));
-        request.Headers.Add("X-Vault-Token", _options.Token);
+        request.Headers.Add("X-Vault-Token", token);
         if (body is not null)
         {
             request.Content = JsonContent.Create(body, options: JsonOptions);
@@ -98,6 +99,36 @@ public sealed class OpenBaoSecretStore(HttpClient httpClient, IOptions<OpenBaoSe
         {
             throw new SecretStoreUnavailableException("OpenBao request failed.", ex);
         }
+    }
+
+    private async Task<string> ReadTokenAsync(CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(_options.TokenFile))
+        {
+            string token;
+            try
+            {
+                token = (await File.ReadAllTextAsync(_options.TokenFile, cancellationToken)).TrimEnd('\r', '\n');
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or ArgumentException or NotSupportedException)
+            {
+                throw new SecretStoreUnavailableException("OpenBao token file could not be read.", ex);
+            }
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new SecretStoreUnavailableException("OpenBao token file is empty.");
+            }
+
+            return token;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_options.Token))
+        {
+            return _options.Token;
+        }
+
+        throw new SecretStoreUnavailableException("OpenBao is not configured.");
     }
 
     private string PathFor(string organizationId, string appId, string serviceName, string name) =>

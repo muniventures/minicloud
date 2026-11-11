@@ -132,6 +132,80 @@ public sealed class ProviderCredentialTests : IClassFixture<SqliteTestHarness>
     }
 
     [Fact]
+    public async Task OpenBaoReadsRenewableTokenFileOnEveryRequestAndNeverExposesIt()
+    {
+        var fixture = CreateOpenBaoTokenFixture();
+        try
+        {
+            var tokenFile = Path.Combine(fixture, "agent-token");
+            await File.WriteAllTextAsync(tokenFile, "agent-token-one\r\n");
+            var observedTokens = new List<string>();
+            var reject = false;
+            using var http = new HttpClient(new Transport((request, _) =>
+            {
+                observedTokens.Add(request.Headers.GetValues("X-Vault-Token").Single());
+                return reject
+                    ? new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent("agent-token-two") }
+                    : Json("{\"data\":{\"data\":{\"value\":\"fixture\"}}}");
+            }));
+            var store = new OpenBaoSecretStore(http, Options.Create(new OpenBaoSecretStoreOptions
+            {
+                Address = "https://bao.fixture",
+                Token = "legacy-token",
+                TokenFile = tokenFile
+            }));
+            var reference = new StoredSecretReference("openbao", "synthetic/path", null);
+
+            Assert.Equal("fixture", await store.GetAsync(reference, default));
+            await File.WriteAllTextAsync(tokenFile, "agent-token-two\n");
+            Assert.Equal("fixture", await store.GetAsync(reference, default));
+            Assert.Equal(["agent-token-one", "agent-token-two"], observedTokens);
+
+            reject = true;
+            var failure = await Assert.ThrowsAsync<SecretStoreUnavailableException>(() => store.GetAsync(reference, default));
+            Assert.DoesNotContain("agent-token-two", failure.ToString());
+        }
+        finally
+        {
+            Directory.Delete(fixture, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task OpenBaoConfiguredTokenFileFailsClosedWhenMissingOrEmpty()
+    {
+        var fixture = CreateOpenBaoTokenFixture();
+        try
+        {
+            var tokenFile = Path.Combine(fixture, "missing-token");
+            var requests = 0;
+            using var http = new HttpClient(new Transport((_, _) =>
+            {
+                requests++;
+                return Json("{\"data\":{\"data\":{\"value\":\"fixture\"}}}");
+            }));
+            var store = new OpenBaoSecretStore(http, Options.Create(new OpenBaoSecretStoreOptions
+            {
+                Address = "https://bao.fixture",
+                Token = "legacy-token-must-not-be-used",
+                TokenFile = tokenFile
+            }));
+            var reference = new StoredSecretReference("openbao", "synthetic/path", null);
+
+            var missing = await Assert.ThrowsAsync<SecretStoreUnavailableException>(() => store.GetAsync(reference, default));
+            Assert.DoesNotContain("legacy-token-must-not-be-used", missing.ToString());
+            await File.WriteAllTextAsync(tokenFile, "\r\n");
+            var empty = await Assert.ThrowsAsync<SecretStoreUnavailableException>(() => store.GetAsync(reference, default));
+            Assert.DoesNotContain("legacy-token-must-not-be-used", empty.ToString());
+            Assert.Equal(0, requests);
+        }
+        finally
+        {
+            Directory.Delete(fixture, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task VultrPlansRejectIgnoredImageNamesAndAcceptExplicitOsOverrides()
     {
         await using var db = harness.CreateDbContext();
@@ -179,6 +253,19 @@ public sealed class ProviderCredentialTests : IClassFixture<SqliteTestHarness>
     private static ProviderAccountService Accounts(MinicloudDbContext db, ISecretStore store, ProviderAccountClientFactory factory) =>
         new(db, store, factory, new IdGenerator(), TimeProvider.System, Options.Create(new OpenBaoSecretStoreOptions { EnvironmentPrefix = "test" }));
     private static Organization Organization() => new() { Id = "org_" + Guid.NewGuid().ToString("N"), Name = "Org", Slug = "o" + Guid.NewGuid().ToString("N")[..8] };
+    private static string CreateOpenBaoTokenFixture()
+    {
+        var root = new DirectoryInfo(Directory.GetCurrentDirectory());
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "packaging", "server", "README.md")))
+        {
+            root = root.Parent;
+        }
+
+        if (root is null) throw new InvalidOperationException("Repository root not found.");
+        var fixture = Path.Combine(root.FullName, ".local", "artifacts", "openbao-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(fixture);
+        return fixture;
+    }
     private static HttpResponseMessage Json(string json) => new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
     private sealed class Transport(Func<HttpRequestMessage, string, HttpResponseMessage> respond) : HttpMessageHandler
     {

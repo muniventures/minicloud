@@ -1,0 +1,50 @@
+version: v1.3.1
+
+dsn: ""
+
+serve:
+  public:
+    # The API proxies browser flows and requires flow actions on this private origin.
+    base_url: http://kratos:4433/
+    host: 0.0.0.0
+    port: 4433
+  admin:
+    base_url: http://kratos:4434/
+    host: 0.0.0.0
+    port: 4434
+
+identity:
+  default_schema_id: user
+  schemas:
+    - id: user
+      url: file:///etc/config/identity.schema.json
+
+# Console-facing URLs below are placeholders; compose.yml derives them from CONSOLE_URL.
+selfservice:
+  default_browser_return_url: https://localhost/
+  allowed_return_urls: []
+  methods:
+    password:
+      enabled: true
+  flows:
+    error:
+      ui_url: https://localhost/sign-in
+    login:
+      ui_url: https://localhost/sign-in
+      lifespan: 10m
+    settings:
+      ui_url: https://localhost/settings/account
+      privileged_session_max_age: 15m
+      required_aal: highest_available
+    recovery:
+      enabled: false
+      ui_url: https://localhost/recovery
+      lifespan: 10m
+    verification:
+      enabled: false
+    registration:
+      enabled: false
+
+log:
+  leak_sensitive_values: false
+  level: warn

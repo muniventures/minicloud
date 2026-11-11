@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://minicloud.invalid/server-configuration.schema.json",
+  "title": "Minicloud server public configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiUrl", "consoleUrl", "appDomain", "apiHostname", "consoleHostname"],
+  "properties": {
+    "apiUrl": { "$ref": "#/$defs/httpsOrigin" },
+    "consoleUrl": { "$ref": "#/$defs/httpsOrigin" },
+    "appDomain": { "$ref": "#/$defs/hostname" },
+    "apiHostname": { "$ref": "#/$defs/hostname" },
+    "consoleHostname": { "$ref": "#/$defs/hostname" },
+    "manageDnsRecords": { "type": "boolean", "default": false },
+    "sourceUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "openBaoUnsealMaterialPath": { "type": "string", "minLength": 1 },
+        "backupDestination": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "httpsOrigin": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://[^/]+$"
+    },
+    "hostname": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^(?=.{1,253}$)(?!-)[A-Za-z0-9.-]+(?<!-)$"
+    }
+  }
+}

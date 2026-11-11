@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Options;
 using Minicloud.Api.Auth;
 using Minicloud.Common.Data;
 using Minicloud.Common.Contracts;
@@ -172,8 +173,12 @@ public static class MinicloudApiServiceCollectionExtensions
         services.AddScoped<AppServiceSecretService>();
         services.AddScoped<IAppServiceSecretResolver>(provider => provider.GetRequiredService<AppServiceSecretService>());
         services.AddSingleton<SecretEncryptionService>();
-        services.AddHttpClient<ISecretStore, OpenBaoSecretStore>();
-        services.AddHttpClient(nameof(OpenBaoTokenRenewalService));
+        services.AddHttpClient<ISecretStore, OpenBaoSecretStore>()
+            .ConfigurePrimaryHttpMessageHandler(provider =>
+                OpenBaoHttpHandler.Create(provider.GetRequiredService<IOptions<OpenBaoSecretStoreOptions>>().Value));
+        services.AddHttpClient(nameof(OpenBaoTokenRenewalService))
+            .ConfigurePrimaryHttpMessageHandler(provider =>
+                OpenBaoHttpHandler.Create(provider.GetRequiredService<IOptions<OpenBaoSecretStoreOptions>>().Value));
         services.AddHostedService<OpenBaoTokenRenewalService>();
         services.AddHostedService<ProviderCredentialCleanupWorker>();
         // T90: GitHub dispatch client and DeploymentWorkflowMonitor decommissioned.

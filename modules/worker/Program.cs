@@ -56,6 +56,13 @@ builder.Services.AddOptions<DeploymentPipelineOptions>()
     .ValidateOnStart();
 builder.Services.PostConfigure<DeploymentPipelineOptions>(options =>
 {
+    var publicKeyFile = builder.Configuration["Worker:Pipeline:SshPublicKeyFile"];
+    if (!string.IsNullOrWhiteSpace(publicKeyFile))
+    {
+        options.SshPublicKey = File.ReadAllText(publicKeyFile).TrimEnd('\r', '\n');
+        return;
+    }
+
     if (string.IsNullOrWhiteSpace(options.SshPublicKey))
     {
         options.SshPublicKey = builder.Configuration["MINICLOUD_SSH_PUBLIC_KEY"]
@@ -141,7 +148,8 @@ builder.Services.AddMinicloudDbContext(new MinicloudDatabaseOptions
     MinicloudConnectionString = builder.Configuration.GetConnectionString("Minicloud"),
     DefaultConnectionString = builder.Configuration.GetConnectionString("DefaultConnection"),
     DatabaseConnectionString = builder.Configuration.GetConnectionString("Database"),
-    DatabaseUrl = builder.Configuration["DATABASE_URL"]
+    DatabaseUrl = builder.Configuration["DATABASE_URL"],
+    PasswordFile = builder.Configuration["Database:PasswordFile"]
 });
 builder.Services.AddMinicloudCommon();
 builder.Services.AddMinicloudRegistry(x => builder.Configuration.GetSection("Registry").Bind(x), x => builder.Configuration.GetSection("Worker:Pipeline").Bind(x));
@@ -150,7 +158,9 @@ builder.Services.AddScoped<ControlPlaneAuthorization>();
 builder.Services.AddMinicloudSecrets(
     configureEncryption: options => builder.Configuration.GetSection(SecretEncryptionOptions.SectionName).Bind(options),
     configureStore: options => builder.Configuration.GetSection(OpenBaoSecretStoreOptions.SectionName).Bind(options));
-builder.Services.AddHttpClient<ISecretStore, OpenBaoSecretStore>();
+builder.Services.AddHttpClient<ISecretStore, OpenBaoSecretStore>()
+    .ConfigurePrimaryHttpMessageHandler(provider =>
+        OpenBaoHttpHandler.Create(provider.GetRequiredService<IOptions<OpenBaoSecretStoreOptions>>().Value));
 builder.Services.AddScoped<IAppServiceSecretResolver, AppServiceSecretService>();
 
 // Storage and Artifact Retrieval

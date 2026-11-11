@@ -1,98 +1,140 @@
 # Self-hosting Minicloud
 
-The Compose setup runs the control plane on one Linux host and provisions application VPSs in your configured Hetzner, DigitalOcean, or Vultr accounts. Use a single Firebase operator account and domains you control. DNS records can be created manually with any provider; Cloudflare automation is optional. The setup uses source builds on the application VPS. The CLI's local image build mode requires a separately configured registry.
+The packaged self-hosting stack is under active development. T40's server
+release foundation is merged, but no server images or release bundle have been
+published or qualified yet. Do not create a `server-v*` release or expose a
+host based on these source assets. Once a versioned release is available, use
+its signed installer and release documentation; never build a production host
+from a checkout or substitute floating image tags.
 
-## Prepare the control plane
+The public control-plane installer, setup flow, upgrade and recovery procedures
+are being completed in T42–T44. `compose.self-host.yml` is the release-stack
+entry point and includes the versioned Compose definition in
+`packaging/server/bundle/compose.yml`. It requires an exact release's digest
+`images.env`, runtime `server-release.json`, validated host configuration and
+root-protected secret files under `MINICLOUD_SECRETS_DIR`. The installer will
+create and validate this state before starting services. See the [packaged
+installation contract](specs/v1.0-self-hosted-installation.md) and [server
+release trust/interface](../packaging/server/README.md) for implementation
+status and non-negotiable boundaries.
 
-1. Choose a main service hostname for the dashboard (for example `cloud.example.com`) and its API hostname (`api.cloud.example.com`), and an application subdomain suffix inside your DNS zone. Set API_HOSTNAME and CONSOLE_HOSTNAME to the hostnames in API_URL and CONSOLE_URL. Set the API and dashboard DNS records to the control-plane host. Configure a reverse proxy there to terminate TLS and forward to loopback ports 3210 and 3200, respectively.
-2. Create a Firebase project and web app, enable your sign-in method, and authorize the dashboard hostname. Create an operator account and copy its Firebase user ID. The API admits only the configured operator ID in this setup.
-3. Prepare a persistent OpenBao instance reachable from the containers. Enable KV v2 at your chosen mount path. Supply a scoped renewable token with access to Minicloud's paths and permission to renew itself. Back up the database, OpenBao data, artifact volume, and stable encryption key together.
-4. Create a dedicated deployment SSH key under `local/ssh/deploy-key`, restrict it to its owner, and create an empty `local/ssh/host-pins` file. Supply the matching public key. Add cloud provider credentials through the dashboard after startup; they are stored in OpenBao rather than installation-global provider token settings. Supply DNS tokens only if using Cloudflare automation. The provisioned deploy user can administer Docker and the server, so protect its private key as a root credential.
-5. Copy `.env.example` to `.env` and fill in the settings. Use a random database password and a separate stable encryption key. Keep `.env` and `local/ssh/` on the control-plane host.
-
-```sh
-chmod 600 .env local/ssh/deploy-key
-docker compose -f compose.self-host.yml up -d --build
-docker compose -f compose.self-host.yml ps
-curl --fail https://api.cloud.example.com/health
-```
-
-## Deploy an app
-
-Sign in to the dashboard, open **Providers**, add an account and a named plan,
-then create an app using that plan. Several accounts of the same provider can
-coexist. See [Providers and plans](providers.md), including the explicit import
-procedure for existing installations. Point the CLI at
-the main service hostname; it derives the API by prefixing `api.` and validates
-`GET /api/instance` before saving the instance. The API returns the installation's
-application domain, so the CLI does not need a separate domain setting.
+For local development only, start the synthetic PostgreSQL and OpenBao
+development services:
 
 ```sh
-minicloud instance add personal cloud.example.com
-minicloud login
-minicloud init
+docker compose -f compose.dev.yml up -d postgres openbao openbao-init
 ```
 
-Alternatively, run `minicloud login` on a fresh installation and enter the main
-service URL when prompted. Use `minicloud login --token <your-api-key>` for an
-API key created in the dashboard. Each instance has its own saved token.
-Use `minicloud instance list` and `minicloud instance use <name>` to switch.
-Configure API DNS and TLS at `api.<main-service-hostname>` before connecting.
-The API must include the instance-info endpoint introduced with this CLI version.
+`compose.dev.yml` uses a disposable OpenBao development root token and must
+never be used for a hosted installation. Run the API/dashboard from source using
+the commands in the repository [README](../README.md); the production stack's
+OpenBao, Kratos and Caddy configuration is separate.
 
-Set `buildMode: source` for services that build from a `sourcePath`, then run
-`minicloud deploy`. On initial provisioning the worker refuses SSH until the
-VPS host key is trusted. Use the provider console to verify the server identity
-and obtain the server's OpenSSH SHA256 host key fingerprints. Add one line per
-trusted key to `local/ssh/host-pins` in the form
-`<server-ip> SHA256:<fingerprint>`, then retry the deployment. Trust only keys
-obtained through an independent channel. Review `minicloud status` and
-`minicloud logs` after the deployment.
+Server containers expose only the dashboard/API behind Caddy on TCP 80/443.
+PostgreSQL, OpenBao and Kratos administration stay on the private Compose
+network. Database credentials, encryption keys, OpenBao AppRole material and
+deployment SSH keys are mounted from protected files, not image build
+arguments or public dashboard configuration. OpenBao recovery material and
+encrypted backups must remain independently recoverable off-host; container
+restart is not a substitute for an unseal or recovery procedure.
 
-For GitHub Actions, set the reusable workflow's `minicloud_api_url` input to
-your API origin, set `buildMode: source` on each source-backed service, and
-supply a dedicated Minicloud key. See the [workflow reference](github-actions.md).
+## Stack reference
 
-## DNS and HTTPS
+This section describes the source bundle that the installer (T43) will
+prepare. It is not yet a supported manual installation procedure.
 
-The default `MANAGE_DNS_RECORDS=false` never creates or deletes provider records.
-On first provisioning, inspect deployment events for each generated hostname and
-server IP. Create DNS-only A records (or AAAA for IPv6) at your DNS provider.
-Remove stale A/AAAA records pointing elsewhere. The worker waits for propagation;
-if it times out, create the records and retry. Each app has its own VPS: a single
-wildcard pointing at the control plane cannot route all apps. Branch apps and
-additional managed aliases need records pointing at their own app server.
+### Operator inputs
 
-Application VPSs require public TCP 80 and 443 for Caddy and certificate issuance.
-Restrictive CAA records must permit Caddy's ACME issuer. Do not use a CDN proxy
-while qualifying DNS and certificates. Configure TLS for the control-plane API
-and dashboard separately. Allow the dashboard origin in Firebase Authentication's
-authorized domains and any enabled OAuth provider's redirect configuration.
+The bundle reads these values from the release environment. The image
+references (`MINICLOUD_*_IMAGE`) come from the generated, digest-pinned
+`images.env`.
 
-For automatic generated-host DNS, set `MANAGE_DNS_RECORDS=true` and supply
-`CLOUDFLARE_ZONE_ID` for the zone containing APP_DOMAIN and a scoped DNS-edit token
-in `CLOUDFLARE_API_TOKEN`. This automation covers generated hostnames only.
+| Variable | Purpose |
+| --- | --- |
+| `API_URL` | Public HTTPS API origin, such as `https://api.cloud.example.com`. |
+| `CONSOLE_URL` | Public HTTPS dashboard origin. It is also used for CORS, the exact-origin CSRF check and Kratos return URLs. |
+| `API_HOSTNAME`, `CONSOLE_HOSTNAME` | The Caddy site hostnames for the API and dashboard. These are also reserved from app routing. |
+| `APP_DOMAIN` | The managed application domain suffix. |
+| `MANAGE_DNS_RECORDS` | Optional. Defaults to `false`. |
+| `MINICLOUD_SOURCE_URL` | Optional. The public source link shown in the dashboard. |
+| `MINICLOUD_SECRETS_DIR` | Root-owned directory (`0700`) holding the files below. |
+| `OPENBAO_ROOT_TOKEN_FILE` | Used only by the `openbao-configure` maintenance service. Unset during normal operation. |
 
-To use a custom service domain, register the apex or subdomain in the app's Domains
-page. Publish the returned persistent TXT proof at
-`_minicloud-verification.<registered-domain>`, verify ownership, and attach a
-hostname to a public service. Point that hostname's A/AAAA records at the app VPS.
-Every resolved address must match the server. No customer DNS token is required.
-Unbinding removes the runtime route; remove DNS records manually when no longer
-needed. Retain TXT proof while keeping the registration.
+The dashboard container receives only `MINICLOUD_API_URL`,
+`MINICLOUD_APP_DOMAIN` and `MINICLOUD_SOURCE_URL`. At startup it validates them
+and writes `runtime-config.json`, so one image serves any installation.
 
-API and dashboard hosts, enabled telemetry hosts, and APP_DOMAIN are reserved
-for the installation. Additional reservations use `ManagedDomains__ReservedHostnames`.
-A reservation covers its descendants, without reserving unrelated names in the
-operator's zone. Keep these settings consistent across API and worker.
+### Protected files
 
-Telemetry is optional and is not installed by this Compose file. If deployed,
-set `Telemetry__TelemetryServiceUrl`, management/signing keys and the telemetry
-service's `Telemetry__AccessOrigin`. Set `TELEMETRY_INGESTION_URL`,
-`TELEMETRY_ACCESS_ORIGIN`, `TELEMETRY_HOSTNAME` and `TELEMETRY_ACCESS_HOSTNAME`
-for the control plane. Proxy both HTTPS hosts to telemetry and keep Loki/Grafana
-private. The dashboard displays the configured ingestion URL returned by the API.
-Do not enable application logs before configuring this separate stack.
+Create each file under `MINICLOUD_SECRETS_DIR` with mode `0600`, using
+independent random values:
 
-Live authentication, unrelated-domain deployment, certificate issuance, custom
-binding and route removal still require qualification on a disposable installation.
+- `postgres-admin-password`, `app-db-password`, `kratos-db-password`
+- `secret-encryption-key`
+- `kratos.env`: credentials only. See `secrets.env.example`. The `DSN`
+  password must match `kratos-db-password`, URL-encoded.
+- `openbao-server.crt`, `openbao-server.key` and `openbao-ca.crt`: a private CA
+  and a server certificate whose SAN includes `openbao`. The API and worker
+  trust this CA only for OpenBao, and public HTTPS keeps the system trust store.
+- `openbao-approle/role-id`, `openbao-approle/secret-id`: written by
+  `openbao-configure`.
+- `deploy-ssh-public-key`, plus `ssh/deploy-key` and `ssh/host-pins`. Each
+  `host-pins` line is `<host> SHA256:<fingerprint>`, and the worker refuses
+  unpinned hosts.
+
+### Startup order
+
+1. `database-initialize` creates or verifies the `minicloud` and `kratos` roles
+   and databases. It refuses databases that exist with an unexpected owner.
+2. `kratos-migrate` and `api-migrate` run once, then exit. `api-migrate` holds a
+   PostgreSQL advisory lock, so concurrent runs serialize. It refuses a
+   populated database that has no Minicloud migration history, and a database
+   migrated by a newer release.
+3. `kratos`, `api`, `worker`, `dashboard` and `caddy` start after their
+   dependencies are healthy or complete. They start in that order.
+
+Each `docker compose up` re-runs initialization and migrations idempotently,
+so upgrades do not depend on first-volume scripts.
+
+First-operator seeding is not part of this stack yet. It must call T30's
+shared bootstrap host entry point, which is not available in this source
+revision.
+
+### OpenBao lifecycle
+
+OpenBao uses persistent file storage and TLS 1.3 on the private network. After
+the first start, initialize it once. Store the unseal keys and root token
+off-host, never in OpenBao or in its data volume backup.
+
+```sh
+bao_cli="bao -address=https://openbao:8200 -ca-cert=/run/secrets/openbao-ca.crt"
+docker compose exec openbao sh -c "$bao_cli operator init"
+docker compose exec openbao sh -c "$bao_cli operator unseal"  # repeat until unsealed
+```
+
+Then run the configuration service, pointing `OPENBAO_ROOT_TOKEN_FILE` at a
+temporary protected copy of the root token:
+
+```sh
+docker compose --profile maintenance run --rm openbao-configure
+```
+
+This service is idempotent. It creates the KV v2 mount, the scoped `minicloud`
+policy and the AppRole (with a 24-hour periodic token), and writes the AppRole
+credentials. Delete the temporary root-token copy afterwards.
+
+`openbao-agent` exchanges the AppRole credentials for a periodic token and
+renews it. It writes the token to a memory-backed volume, which the API and
+worker read on each request.
+
+OpenBao starts sealed after every host or container restart. Until an operator
+unseals it, the agent cannot authenticate and secret operations fail as
+unavailable (`SecretStoreUnavailableException`). Other data stays intact.
+
+To rotate the AppRole secret ID:
+
+1. Generate a new one with the root or an operator token.
+2. Replace `openbao-approle/secret-id`.
+3. Restart `openbao-agent`.
+
+The policy does not cover the optional Grafana operator secret path.
