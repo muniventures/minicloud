@@ -14,7 +14,7 @@ Migration `MaintenanceAuthority` adds three tables:
 | Table | Purpose |
 |---|---|
 | `maintenance_authority` | Singleton row (`id = 1`): `installation_id`, `epoch`, `state` (`open`/`fenced`), `holder_operation_id`, `host_id`, `transfer_operation_id`, timestamps. |
-| `maintenance_activities` | Leases for admitted API writes and scheduler passes. Rows renew every 30 s and expire after 2 min. |
+| `maintenance_activities` | Durable records of admitted API writes and scheduler passes. Heartbeats renew every 30 s and become stale after 2 min; rows block drain until recorded completion removes them. |
 | `maintenance_participants` | API and worker processes with the epoch they registered and when they were last seen. |
 
 Each mutation runs in one transaction. It takes `SELECT … FOR UPDATE` on the
@@ -131,10 +131,41 @@ These kinds of work block drain:
 
 - **Deployments**: queued, waiting for build, running, or uncertain (finished but still owned).
 - **Database operations**: queued, retrying, leased, cancelling, or uncertain. A lease that has expired counts as uncertain, and so does a `*_reconciliation_required` failure with no later completed operation on the same target.
-- **Other work**: queued or preparing app deletions, uploading image publications, and active admitted activities.
+- **Other work**: queued or preparing app deletions, uploading image publications, and all recorded admitted activities.
 
-Expired activity leases, DNS and domain work, credential cleanups and telemetry
-are reported for information only. Each work category lists at most 50 IDs.
+Admitted activities report `active` while their heartbeat is current and
+`uncertain` once `expiresAt <= observedAt`. Both states have `blocksDrain: true`.
+Expiry is lost liveness evidence, not proof of completion. Renewal failure does
+not cancel accepted API or scheduler work: it may finish normally and remove
+its row even after expiry. Failed completion recording also leaves a blocker.
+Neither participant heartbeat loss/restart, fence release nor epoch/host
+transfer reconciles these rows.
+
+Pending DNS and domain work, credential cleanup queues and telemetry are
+informational only; an admitted pass processing them still blocks drain.
+Each work category lists at most 50 IDs; its count includes every matching row.
+
+### Uncertain activity recovery
+
+`drain-status` remains `not_drained` (exit 2) while any activity row remains,
+however old it is. Maintenance timeout must abort the capture/upgrade/shutdown
+attempt, not treat expiry as permission to proceed. Keep the fence held while
+investigating the reported activity IDs. Renewal/completion warnings include
+the activity ID; the durable row identifies its participant, kind, detail and
+admission epoch.
+
+If the original work is still running, allow it to finish and record completion.
+If completion cannot be recorded or the participant has died, this producer
+provides no force-clear command or automatic garbage collection. Recovery
+requires a separately authorized operator procedure: positively establish that
+the originating process cannot resume mutation, reconcile its database and
+external side effects, and only then explicitly clear the individually verified
+activity record. An old heartbeat, missing participant, changed epoch or host ID,
+or a maintenance holder's identity is not that evidence. Do not blanket-delete
+expired rows or use release/transfer as a drain bypass. Recheck drain under the
+holding fence after any recovery; without such evidence, leave maintenance
+blocked. Process isolation and remote-outcome reconciliation remain live
+operator gates, not guarantees supplied by this command.
 
 ## Limitations
 

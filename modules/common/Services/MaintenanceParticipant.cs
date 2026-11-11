@@ -288,7 +288,7 @@ public sealed class MaintenanceParticipant
     }
 }
 
-/// <summary>A renewed durable activity row; disposing it records completion.</summary>
+/// <summary>A renewed durable activity row; only recorded completion removes its drain blocker.</summary>
 public sealed class MaintenanceActivityLease : IAsyncDisposable
 {
     private readonly IServiceScopeFactory scopes;
@@ -327,7 +327,7 @@ public sealed class MaintenanceActivityLease : IAsyncDisposable
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    logger?.LogWarning("Maintenance activity renewal failed ({FailureType}); the lease will expire if this persists.", ex.GetType().Name);
+                    logger?.LogWarning("Maintenance activity {ActivityId} renewal failed ({FailureType}); accepted work continues and drain remains blocked until completion is recorded.", Id, ex.GetType().Name);
                 }
             }
         }
@@ -354,8 +354,7 @@ public sealed class MaintenanceActivityLease : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            // An unremoved row keeps drain conservative until its lease expires.
-            logger?.LogWarning("Maintenance activity completion was not recorded ({FailureType}).", ex.GetType().Name);
+            logger?.LogWarning("Maintenance activity {ActivityId} completion was not recorded ({FailureType}); drain remains blocked and requires reconciliation.", Id, ex.GetType().Name);
         }
     }
 }

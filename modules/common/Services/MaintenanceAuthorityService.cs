@@ -178,7 +178,7 @@ public sealed class MaintenanceAuthorityService(MinicloudDbContext db, TimeProvi
         var activities = await db.MaintenanceActivities.AsNoTracking()
             .Select(x => new { x.Id, x.ExpiresAt }).ToListAsync(ct);
         Add(work, "admitted_activities", "active", activities.Where(x => x.ExpiresAt > now).Select(x => x.Id), true);
-        Add(work, "admitted_activities", "expired", activities.Where(x => x.ExpiresAt <= now).Select(x => x.Id), false);
+        Add(work, "admitted_activities", "uncertain", activities.Where(x => x.ExpiresAt <= now).Select(x => x.Id), true);
 
         Add(work, "managed_dns", "pending", await db.Domains.AsNoTracking()
             .Where(d => d.Kind == DomainBindingService.KindMinicloudSubdomain && d.Status != DomainBindingService.StatusDisabled &&
