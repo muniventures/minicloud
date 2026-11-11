@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { useAuth } from "./AuthProvider";
+import { Link } from "react-router-dom";
 
 export function AccountStatus() {
   const { status, profileError, refreshSession } = useAuth();
@@ -10,6 +11,7 @@ export function AccountStatus() {
         status === "setup_blocked" ? "Instance setup is blocked. Contact the host administrator." :
         profileError ?? "Account service is temporarily unavailable."}</p>
       {status !== "initializing" ? <Button onClick={() => void refreshSession()}>Retry</Button> : null}
+      {status === "setup_required" ? <Link className="underline" to="/setup">Complete first operator setup</Link> : null}
     </div>
   );
 }

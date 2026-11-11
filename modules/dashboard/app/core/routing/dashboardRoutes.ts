@@ -20,6 +20,8 @@ function defineRoute(route: DashboardRouteDefinition) {
 }
 
 export const dashboardRoutes = {
+  setup: defineRoute({ key: "setup", name: "First operator setup", path: "/setup", layout: "standalone" }),
+  gettingStarted: defineRoute({ key: "gettingStarted", name: "Provider and plan guide", path: "/getting-started", layout: "main" }),
   signIn: defineRoute({ key: "signIn", name: "Sign in", path: "/sign-in", layout: "guest" }),
   recovery: defineRoute({ key: "recovery", name: "Recover account", path: "/recovery", layout: "guest" }),
   onboarding: defineRoute({ key: "onboarding", name: "Onboarding", path: "/onboarding", layout: "standalone" }),
