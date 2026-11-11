@@ -155,6 +155,88 @@ public sealed class MaintenanceAuthorityTests : IAsyncLifetime
         Assert.Equal(0, drained.BlockingCount);
     }
 
+    [Theory]
+    [InlineData("api", "api_write")]
+    [InlineData("worker", "managed_dns_reconcile")]
+    public async Task ExpiredActivitiesKeepDrainBlockedUntilAcceptedWorkCompletes(string role, string kind)
+    {
+        await SeedInstallationAsync();
+        var started = DateTimeOffset.UtcNow;
+        var participant = new MaintenanceParticipant(Scopes(), role, null, new FixedClock(started));
+        await using var db = _harness.CreateDbContext();
+        var service = new MaintenanceAuthorityService(db, new FixedClock(started + MaintenanceParticipant.ActivityLeaseDuration), null);
+        using var caller = new CancellationTokenSource();
+
+        Assert.True(await participant.RunActivityAsync(kind, true, async token =>
+        {
+            await service.FenceAsync(Installation, "op-expired");
+            var status = await service.DrainStatusAsync(Installation);
+            Assert.False(status.Drained);
+            Assert.Equal(("draining", 1), (status.Phase, status.BlockingCount));
+            var uncertain = Assert.Single(status.Work, x => x.Category == "admitted_activities");
+            Assert.Equal(("uncertain", true, 1), (uncertain.State, uncertain.BlocksDrain, uncertain.Count));
+            Assert.False(token.IsCancellationRequested);
+            var output = new StringWriter();
+            Assert.Equal(MaintenanceCommand.ExitNotDrained, await MaintenanceCommand.ExecuteAsync("drain-status",
+                new MaintenanceCommand.Input { InstallationId = Installation, OperationId = "op-expired" }, service, output));
+        }, caller.Token));
+
+        Assert.True((await service.DrainStatusAsync(Installation)).Drained);
+        Assert.Empty(await db.MaintenanceActivities.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task OrphanedActivitiesRemainUncertainAcrossRestartReleaseAndTransfer()
+    {
+        await SeedInstallationAsync();
+        var now = DateTimeOffset.UtcNow;
+        await using var db = _harness.CreateDbContext();
+        db.MaintenanceActivities.Add(new MaintenanceActivity
+        {
+            Id = "ma_orphan", Kind = "api_write", ParticipantId = "mp_gone", Epoch = 1,
+            StartedAt = now.AddDays(-31), ExpiresAt = now.AddDays(-30)
+        });
+        await db.SaveChangesAsync();
+        var service = Service(db, "host-new");
+        await service.FenceAsync(Installation, "op-first");
+        Assert.False((await service.DrainStatusAsync(Installation)).Drained);
+        await service.ReleaseAsync(Installation, "op-first");
+        await service.TransferAsync(Installation, "op-transfer", null);
+        var restarted = new MaintenanceParticipant(Scopes(), "api", "host-new", TimeProvider.System);
+        Assert.True((await restarted.RegisterAsync(default)).IsAdmitted);
+
+        var status = await service.DrainStatusAsync(Installation);
+        Assert.Equal(("draining", false, 1), (status.Phase, status.Drained, status.BlockingCount));
+        var uncertain = Assert.Single(status.Work, x => x.Category == "admitted_activities");
+        Assert.Equal(("uncertain", true), (uncertain.State, uncertain.BlocksDrain));
+        Assert.Equal("ma_orphan", Assert.Single(uncertain.Ids));
+        Assert.Equal(1L, (await db.MaintenanceActivities.AsNoTracking().SingleAsync()).Epoch);
+    }
+
+    [Fact]
+    public async Task FailedCompletionRecordingStillBlocksDrainAfterExpiry()
+    {
+        await SeedInstallationAsync();
+        var started = DateTimeOffset.UtcNow;
+        var participant = new MaintenanceParticipant(Scopes(), "api", null, new FixedClock(started));
+        var (decision, lease) = await participant.TryBeginActivityAsync("api_write", "POST Apps.Create", true, default);
+        Assert.True(decision.IsAdmitted);
+        await using var db = _harness.CreateDbContext();
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TRIGGER reject_activity_completion BEFORE DELETE ON maintenance_activities
+            BEGIN SELECT RAISE(FAIL, 'synthetic completion failure'); END;
+            """);
+        await lease!.DisposeAsync();
+
+        var service = new MaintenanceAuthorityService(db, new FixedClock(started.AddDays(1)), null);
+        await service.FenceAsync(Installation, "op-completion-failed");
+        var status = await service.DrainStatusAsync(Installation);
+        Assert.False(status.Drained);
+        Assert.Equal(1, status.BlockingCount);
+        var uncertain = Assert.Single(status.Work, x => x.Category == "admitted_activities");
+        Assert.Equal(("uncertain", true, lease.Id), (uncertain.State, uncertain.BlocksDrain, uncertain.Ids[0]));
+    }
+
     [Fact]
     public async Task DrainStatusReportsInFlightAndUncertainWorkAndIgnoresInformationalQueues()
     {
@@ -330,6 +412,11 @@ public sealed class MaintenanceAuthorityTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.ServiceUnavailable, revoked.StatusCode);
         Assert.Equal("maintenance_authority_revoked", (await revoked.Content.ReadFromJsonAsync<ErrorResponse>())!.Error.Code);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/environments/app_api")).StatusCode);
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     private sealed class MaintenanceApiFactory(SqliteConnection connection) : WebApplicationFactory<Program>
