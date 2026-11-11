@@ -125,7 +125,7 @@ public sealed class SelfHostingComposeBundleTests
             .Select(match => match.Groups[1].Value).Where(name => !Regex.IsMatch(name, "^MINICLOUD_[A-Z]+_IMAGE$")).ToHashSet();
         Assert.Equal(
             ["API_HOSTNAME", "API_URL", "APP_DOMAIN", "CONSOLE_HOSTNAME", "CONSOLE_URL", "MANAGE_DNS_RECORDS",
-             "MINICLOUD_SECRETS_DIR", "MINICLOUD_SOURCE_URL", "OPENBAO_ROOT_TOKEN_FILE"],
+             "MINICLOUD_INSTALLATION_ID", "MINICLOUD_SECRETS_DIR", "MINICLOUD_SOURCE_URL", "OPENBAO_ROOT_TOKEN_FILE"],
             variables.Order());
         var guide = File.ReadAllText(Path.Combine(FindRepository(), "docs", "self-hosting.md"));
         Assert.All(variables, variable => Assert.Contains(variable, guide));
