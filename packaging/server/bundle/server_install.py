@@ -29,6 +29,21 @@ class InstallError(Exception):
     pass
 
 
+RELEASE_SCOPED_MAINTENANCE = ("upgrade", "restore")
+MAINTENANCE_OPERATIONS = (
+    "status", "backup", "verify-backup", "remove-backup", "schedule-backup", "upgrade",
+    "restore", "restore-confirm", "transfer", "release", "stop", "remove",
+    "backup-recovery", "verify-recovery", "rehearse-recovery",
+    "retention-plan", "remove-recovery", "schedule-recovery")
+SUCCESS_STATES = (
+    "ready", "preflight_passed", "prepared", "initialized",
+    "maintenance_idle", "backup_saved", "backup_verified", "backup_removed", "upgraded", "restore_confirmed",
+    "transferred", "fence_released",
+    "recovery_dependencies_saved", "recovery_dependencies_verified",
+    "recovery_dependencies_rehearsed", "retention_plan", "recovery_archive_removed",
+    "schedule_authored_not_installed")
+
+
 def require(condition, message):
     if not condition:
         raise InstallError(message)
@@ -315,8 +330,11 @@ class Installer:
         self.manifest = read_json(args.assets_dir / "server-manifest.json")
         require(self.manifest["releaseTag"] == args.tag, "Selected release differs from manifest.")
         self.manifest["bundleBytes"] = (args.assets_dir / self.manifest["bundle"]["name"]).stat().st_size
+        # The release whose bundle is installed; differs from the selected release only during upgrade.
+        self.installed = self.manifest
 
-    def load_state(self):
+    def load_state(self, manifest=None):
+        manifest = self.manifest if manifest is None else manifest
         if self.root.exists():
             protected(self.root, True)
             require(self.state_path.exists(), "Unknown installation directory; refusing adoption.")
@@ -324,14 +342,15 @@ class Installer:
             state = read_json(self.state_path)
             require(isinstance(state, dict) and state.get("schemaVersion") == 1 and state.get("product") == "minicloud"
                     and state.get("root") == str(self.root), "Unknown installation metadata.")
-            require(state["releaseTag"] == self.args.tag, "Existing installation requires an explicit upgrade, not reinstall.")
+            require(state["releaseTag"] == manifest["releaseTag"], "Existing installation requires an explicit upgrade, not reinstall.")
             require(state["configuration"] == self.config and state["recoveryDir"] == str(self.args.recovery_dir)
                     and state["publicAddresses"] == self.args.public_address,
                     "Resume must use the original configuration, recovery path and public addresses.")
             for key in ("serverVersion", "sourceRevision", "images", "dependencies", "configurationSchemaVersion",
                         "identitySchemaVersion", "applicationMigration"):
-                require(state[key] == self.manifest[key], "Persisted release metadata mismatch.")
-            require(state["bundleSha256"] == self.manifest["bundle"]["sha256"], "Persisted archive identity mismatch.")
+                require(state[key] == manifest[key], "Persisted release metadata mismatch.")
+            require(state["bundleSha256"] == manifest["bundle"]["sha256"], "Persisted archive identity mismatch.")
+            self.installed = manifest
             require(type(state["credentialsComplete"]) is bool
                     and state["phase"] in ("initializing", "prepared", "initialized", "awaiting_dns_tls", "awaiting_operator", "ready"),
                     "Unknown installation checkpoint; explicit reconciliation required.")
@@ -370,7 +389,7 @@ class Installer:
             require(allow_incomplete, "Installed bundle is missing; resume initial extraction with install/prepare.")
             return
         protected(bundle, True)
-        expected = self.manifest["files"]
+        expected = self.installed["files"]
         directories = {parent.as_posix() for name in expected for parent in Path(name).parents
                        if parent != Path(".")}
         installed = {}
@@ -551,11 +570,25 @@ class Installer:
                     == run(["openssl", "x509", "-in", str(certificate), "-pubkey", "-noout"]),
                     "Existing OpenBao certificate/private key mismatch; preserve and reconcile.")
 
-    def environment(self):
+    def docker_environment(self):
         # Do not inherit Docker contexts, Compose overrides, registry credentials or secret env.
         env = {key: value for key, value in os.environ.items() if key in ("PATH", "HOME", "LANG", "SSL_CERT_FILE", "SSL_CERT_DIR")}
+        env["DOCKER_HOST"] = "unix:///var/run/docker.sock"
+        return env
+
+    def host_id(self):
+        # Host-local identity: never part of a backup, so a restored copy elsewhere gets its own.
+        path = self.root / "host-id"
+        if not path.exists():
+            return ""
+        protected(path)
+        value = path.read_text().strip()
+        require(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value), "Invalid protected host identity.")
+        return value
+
+    def environment(self):
+        env = self.docker_environment()
         env.update({
-            "DOCKER_HOST": "unix:///var/run/docker.sock",
             "API_URL": self.config["apiUrl"], "CONSOLE_URL": self.config["consoleUrl"],
             "API_HOSTNAME": self.config["apiHostname"], "CONSOLE_HOSTNAME": self.config["consoleHostname"],
             "APP_DOMAIN": self.config["appDomain"],
@@ -563,12 +596,13 @@ class Installer:
             "MINICLOUD_SOURCE_URL": self.config.get("sourceUrl", "https://github.com/muniventures/minicloud"),
             "MINICLOUD_INSTALLATION_ID": self.state["installationId"],
             "MINICLOUD_SECRETS_DIR": str(self.root / "secrets"),
+            "MINICLOUD_HOST_ID": self.host_id(),
         })
-        for component, reference in (self.manifest["images"] | self.manifest["dependencies"]).items():
+        for component, reference in (self.installed["images"] | self.installed["dependencies"]).items():
             env[f"MINICLOUD_{component.upper()}_IMAGE"] = reference
         return env
 
-    def compose(self, *arguments, input=None, allowed=(0,), root_token=None):
+    def compose_invocation(self, *arguments, root_token=None):
         self.verify_installed_bundle()
         bundle = self.root / "bundle"
         env = self.environment()
@@ -577,9 +611,13 @@ class Installer:
             env["OPENBAO_ROOT_TOKEN_FILE"] = str(root_token)
         if arguments[0] in ("up", "run"):
             arguments = (arguments[0], "--pull", "never", *arguments[1:])
-        return run(["docker", "compose", "--project-name", "minicloud", "--project-directory", str(bundle),
-                    "--env-file", str(bundle / "images.env"), "-f", str(bundle / "compose.yml"),
-                    "--profile", "maintenance", *arguments], input=input, allowed=allowed, env=env)
+        return ["docker", "compose", "--project-name", "minicloud", "--project-directory", str(bundle),
+                "--env-file", str(bundle / "images.env"), "-f", str(bundle / "compose.yml"),
+                "--profile", "maintenance", *arguments], env
+
+    def compose(self, *arguments, input=None, allowed=(0,), root_token=None):
+        command, env = self.compose_invocation(*arguments, root_token=root_token)
+        return run(command, input=input, allowed=allowed, env=env)
 
     def bao(self, *arguments, input=None, allowed=(0,)):
         # Bao flags precede positional paths ("write sys/unseal -").
@@ -612,19 +650,7 @@ class Installer:
             self.save(baoInitStarted=True)
             response = self.bao("operator", "init", "-format=json", "-key-shares=3", "-key-threshold=2")
             exclusive(material, response)
-        require(material.exists(), "Initialized OpenBao has no independent recovery file; restore original recovery material.")
-        protected(material)
-        keys = read_json(material)
-        require(isinstance(keys, dict) and isinstance(keys.get("unseal_keys_b64"), list)
-                and len(keys["unseal_keys_b64"]) >= 2
-                and all(isinstance(item, str) and item for item in keys["unseal_keys_b64"])
-                and isinstance(keys.get("root_token"), str) and keys["root_token"],
-                "Incomplete OpenBao recovery output.")
-        if status["sealed"]:
-            for key in keys["unseal_keys_b64"][:2]:
-                self.bao("write", "-format=json", "sys/unseal", "-", input=json.dumps({"key": key}).encode())
-        status = self.bao_status()
-        require(status["initialized"] and not status["sealed"], "OpenBao is not unsealed; preserve state.")
+        keys = self.unseal(status)
         token = recovery / "openbao-root-token"
         if token.exists():
             protected(token)
@@ -642,6 +668,25 @@ class Installer:
             protected(path)
         self.save(baoConfigured=True)
         self.compose("up", "-d", "--wait", "--wait-timeout", "180", "openbao-agent")
+
+    def unseal(self, status=None):
+        """Unseal with the original independent recovery material; never reinitialize."""
+        status = self.bao_status(wait=True) if status is None else status
+        material = self.args.recovery_dir / self.state["installationId"] / "openbao-recovery.json"
+        require(material.exists(), "Initialized OpenBao has no independent recovery file; restore original recovery material.")
+        protected(material)
+        keys = read_json(material)
+        require(isinstance(keys, dict) and isinstance(keys.get("unseal_keys_b64"), list)
+                and len(keys["unseal_keys_b64"]) >= 2
+                and all(isinstance(item, str) and item for item in keys["unseal_keys_b64"])
+                and isinstance(keys.get("root_token"), str) and keys["root_token"],
+                "Incomplete OpenBao recovery output.")
+        if status["sealed"]:
+            for key in keys["unseal_keys_b64"][:2]:
+                self.bao("write", "-format=json", "sys/unseal", "-", input=json.dumps({"key": key}).encode())
+        status = self.bao_status()
+        require(status["initialized"] and not status["sealed"], "OpenBao is not unsealed; preserve state.")
+        return keys
 
     def bootstrap(self, operation="status", output=None):
         arguments = ["run", "--rm", "-T", "--no-deps", "api-bootstrap", "bootstrap", operation,
@@ -721,6 +766,25 @@ class Installer:
                 "action": "Sign in; provider/plan configuration is explicit. Future version changes require upgrade."}
 
     def execute(self):
+        if self.args.command == "maintenance":
+            require("server_maintenance.py" in self.manifest["files"],
+                    "Selected release does not provide signed maintenance tooling.")
+            if self.args.maintenance_operation in RELEASE_SCOPED_MAINTENANCE:
+                # Upgrade/restore run the selected (independently verified) release's tooling and
+                # establish the installed state themselves; the installed bundle may differ or be absent.
+                with tarfile.open(self.args.assets_dir / self.manifest["bundle"]["name"], "r:gz") as archive:
+                    code = archive.extractfile("server_maintenance.py").read()
+                require(hashlib.sha256(code).hexdigest() == self.manifest["files"]["server_maintenance.py"],
+                        "Maintenance helper differs from the signed release.")
+            else:
+                self.load_state()
+                require(self.state is not None and self.state["credentialsComplete"],
+                        "Maintenance requires the original complete installation and verified exact installed release.")
+                self.verify_installed_bundle()
+                code = (self.root / "bundle/server_maintenance.py").read_bytes()
+            namespace = {"__name__": "minicloud_verified_maintenance"}
+            exec(compile(code, "verified-release/server_maintenance.py", "exec"), namespace)
+            return namespace["execute"](self, globals())
         result = self.preflight()
         if self.args.command == "preflight":
             return result
@@ -769,7 +833,8 @@ class Installer:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("preflight", "install", "prepare", "initialize", "activate", "status", "rotate-token"))
+    parser.add_argument("command", choices=("preflight", "install", "prepare", "initialize", "activate", "status", "rotate-token", "maintenance"))
+    parser.add_argument("maintenance_operation", nargs="?", choices=MAINTENANCE_OPERATIONS)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--assets-dir", type=Path, required=True)
     parser.add_argument("--root", type=Path, default=Path("/opt/minicloud"))
@@ -777,8 +842,24 @@ def main(argv=None):
     parser.add_argument("--recovery-dir", type=Path, required=True)
     parser.add_argument("--public-address", action="append", required=True)
     parser.add_argument("--token-output-name")
+    parser.add_argument("--backup-dir", type=Path)
+    parser.add_argument("--archive", type=Path)
+    parser.add_argument("--recipients-file", type=Path)
+    parser.add_argument("--identity-file", type=Path)
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--keep", type=int)
+    parser.add_argument("--confirm-backup-id")
+    parser.add_argument("--at")
+    parser.add_argument("--previous-assets-dir", type=Path)
+    parser.add_argument("--drain-timeout", type=int, default=1800)
+    parser.add_argument("--confirm-replace-live")
+    parser.add_argument("--confirm-operation-id")
+    parser.add_argument("--keep-fenced", action="store_true")
     args = parser.parse_args(argv)
     os.umask(0o077)
+    require(os.geteuid() == 0, "Run as root after independent signature verification.")
+    require((args.command == "maintenance") == (args.maintenance_operation is not None),
+            "Specify a maintenance operation only with the maintenance command.")
     require(all(path.is_absolute() for path in (args.assets_dir, args.root, args.config, args.recovery_dir)),
             "All paths must be absolute.")
     require(all(path == path.resolve() for path in (args.assets_dir, args.root, args.config, args.recovery_dir)),
@@ -787,13 +868,13 @@ def main(argv=None):
         installer = Installer(args)
         try:
             result = installer.execute()
-        except (InstallError, OSError, ValueError, KeyError, subprocess.TimeoutExpired) as error:
+        except (InstallError, OSError, ValueError, KeyError, TypeError, tarfile.TarError, subprocess.TimeoutExpired) as error:
             if installer.state:
                 installer.save(lastFailure="Installation/readiness failed; preserve state and inspect protected diagnostics.")
             detail = str(error) if isinstance(error, InstallError) else "Invalid/incomplete protected input or unavailable host dependency."
             raise InstallError(f"Failed: {detail} Original operation, volumes and credentials retained; resume after reconciliation.") from error
     print(json.dumps(result, sort_keys=True))
-    return 0 if result["state"] in ("ready", "preflight_passed", "prepared", "initialized") else 2
+    return 0 if result["state"] in SUCCESS_STATES else 2
 
 
 if __name__ == "__main__":

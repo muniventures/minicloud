@@ -18,6 +18,8 @@ x-shared-environment: &shared-environment
   OpenBao__CaCertificateFile: /run/secrets/openbao-ca.crt
   Secrets__EncryptionKeyFile: /run/secrets/secret-encryption-key
   DeploymentArtifacts__RootPath: /var/lib/minicloud/artifacts
+  # Host-local maintenance identity (<root>/host-id); empty until maintenance creates it.
+  Maintenance__HostId: ${MINICLOUD_HOST_ID:-}
 
 x-api-environment: &api-environment
   <<: *shared-environment
@@ -231,6 +233,7 @@ services:
       ConnectionStrings__Minicloud: Host=postgres;Port=5432;Database=minicloud;Username=minicloud
       Kratos__AdminBaseUrl: http://kratos:4434/
       Bootstrap__InstallationId: ${MINICLOUD_INSTALLATION_ID:?set the persistent MINICLOUD_INSTALLATION_ID}
+      Maintenance__HostId: ${MINICLOUD_HOST_ID:-}
     secrets:
       - app-db-password
     volumes:
