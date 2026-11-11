@@ -47,4 +47,4 @@ selfservice:
 
 log:
   leak_sensitive_values: false
-  level: warn
+  level: warning
