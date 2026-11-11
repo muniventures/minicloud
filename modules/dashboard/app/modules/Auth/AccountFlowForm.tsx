@@ -4,7 +4,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { getAccountFlow, startAccountFlow, submitAccountFlow, type BrowserFlow, type FlowKind, type FlowNode } from "../../api/accountApi";
+import {
+  browserNavigation, getAccountFlow, startAccountFlow, startProviderRedirect, submitAccountFlow,
+  type BrowserFlow, type FlowKind, type FlowNode
+} from "../../api/accountApi";
 import { accountErrorMessage } from "../../api/apiClient";
 import { useAuth } from "../../core/auth/AuthProvider";
 import { ApiError } from "../../models/controlPlane";
@@ -14,21 +17,28 @@ function fieldLabel(name: string) {
     case "identifier": case "traits.email": case "email": return "Email";
     case "password": return "Password";
     case "code": return "Recovery code";
-    case "traits.name": case "traits.name.first": return "Display name";
+    case "traits.name": return "Display name";
+    case "traits.name.first": return "First name";
+    case "traits.name.last": return "Last name";
     default: return "Account detail";
   }
 }
 
-function supportedNode(node: FlowNode, google: boolean) {
+function supportedNode(node: FlowNode) {
   if (node.name === "password" && node.type !== "password" ||
       node.name === "csrf_token" && node.type !== "hidden") return false;
-  if (node.group === "oidc") return google && node.name === "provider" && node.value === "google" && node.type === "submit";
   return ["default", "password", "profile", "code", "recovery"].includes(node.group) &&
     ["hidden", "text", "email", "password", "submit"].includes(node.type) &&
-    ["csrf_token", "identifier", "password", "method", "email", "code", "traits.email", "traits.name", "traits.name.first"].includes(node.name);
+    ["csrf_token", "identifier", "password", "method", "email", "code", "traits.email", "traits.name", "traits.name.first", "traits.name.last"].includes(node.name);
 }
 
-export function AccountFlowForm({ kind, returnTo = "/apps" }: { kind: FlowKind; returnTo?: string }) {
+export function AccountFlowForm({ kind, returnTo = "/apps", flowId, notice }: {
+  kind: FlowKind;
+  returnTo?: string;
+  /** Re-read this existing flow once (provider callback continuation) instead of starting a new one. */
+  flowId?: string;
+  notice?: string;
+}) {
   const { capabilities, refreshSession } = useAuth();
   const [flow, setFlow] = useState<BrowserFlow | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +57,7 @@ export function AccountFlowForm({ kind, returnTo = "/apps" }: { kind: FlowKind; 
     setRestartRequired(false);
     if (!enabled) return;
     setBusy(true);
-    startAccountFlow(kind, returnTo).then(result => {
+    (flowId && revision === 0 ? getAccountFlow(kind, flowId) : startAccountFlow(kind, returnTo)).then(result => {
       if (current === generation.current) setFlow(result.flow);
     }).catch(loadError => {
       if (current === generation.current) {
@@ -56,7 +66,28 @@ export function AccountFlowForm({ kind, returnTo = "/apps" }: { kind: FlowKind; 
       }
     }).finally(() => { if (current === generation.current) setBusy(false); });
     return () => { ++generation.current; };
-  }, [enabled, kind, returnTo, revision]);
+  }, [enabled, kind, returnTo, revision, flowId]);
+
+  async function continueWithGoogle() {
+    if (!flow || busy || restartRequired) return;
+    if (Date.parse(flow.expiresAt) <= Date.now()) {
+      setError("This form expired. Restart to try again.");
+      setRestartRequired(true);
+      return;
+    }
+    const current = generation.current;
+    setBusy(true);
+    setError(null);
+    try {
+      const destination = await startProviderRedirect(flow, "google", returnTo);
+      if (current === generation.current) browserNavigation.assign(destination);
+    } catch (providerError) {
+      if (current !== generation.current) return;
+      setError(accountErrorMessage(providerError));
+      setRestartRequired(true);
+      setBusy(false);
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -108,7 +139,9 @@ export function AccountFlowForm({ kind, returnTo = "/apps" }: { kind: FlowKind; 
     }
   }
 
-  const nodes = flow?.ui.nodes.filter(node => supportedNode(node, capabilities?.google === true)) ?? [];
+  const nodes = flow?.ui.nodes.filter(supportedNode) ?? [];
+  const google = capabilities?.google === true && kind !== "recovery" &&
+    flow?.ui.providers?.some(provider => provider.id === "google") === true;
   const hasSubmit = nodes.some(node => node.type === "submit");
   return (
     <Card className="w-full max-w-md">
@@ -120,6 +153,7 @@ export function AccountFlowForm({ kind, returnTo = "/apps" }: { kind: FlowKind; 
         {!enabled ? <p>This authentication method is not enabled. Contact the host administrator.</p> : null}
         {busy && !flow ? <p role="status">Loading account form</p> : null}
         {complete ? <p role="status">{kind === "settings" ? "Password updated." : "Account verified."}</p> : null}
+        {notice ? <p role="alert" className="text-sm text-destructive">{notice}</p> : null}
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
         {flow && !complete ? (
           <form key={flow.id} className="space-y-4" onSubmit={submit}>
@@ -130,14 +164,15 @@ export function AccountFlowForm({ kind, returnTo = "/apps" }: { kind: FlowKind; 
               if (node.type === "hidden") return <input key={key} type="hidden" name={node.name} value={node.value ?? ""} />;
               if (node.type === "submit") return (
                 <Button key={key} type="submit" name={node.name} value={node.value ?? ""} disabled={busy || restartRequired}>
-                  {node.group === "oidc" ? "Continue with Google" : kind === "login" ? "Sign in" : kind === "settings" ? "Save password" : "Continue recovery"}
+                  {kind === "login" ? "Sign in" : kind === "settings" ? node.value === "profile" ? "Save profile" : "Save password" : "Continue recovery"}
                 </Button>
               );
               return (
                 <div key={key} className="space-y-2">
                   <Label htmlFor={id}>{fieldLabel(node.name)}</Label>
                   <Input id={id} name={node.name} type={node.name === "password" ? "password" : node.type}
-                    autoComplete={node.name === "password" ? kind === "settings" ? "new-password" : "current-password" : node.name === "code" ? "one-time-code" : "username"}
+                    autoComplete={node.name === "password" ? kind === "settings" ? "new-password" : "current-password" : node.name === "code" ? "one-time-code" :
+                      node.name === "traits.name.first" ? "given-name" : node.name === "traits.name.last" ? "family-name" : "username"}
                     defaultValue={node.name === "password" || node.name === "code" ? "" : node.value ?? ""}
                     required={node.required} disabled={busy || restartRequired} aria-invalid={node.messages.length > 0} />
                   {node.messages.length > 0 ? <p className="text-sm text-destructive">Check this field.</p> : null}
@@ -146,6 +181,11 @@ export function AccountFlowForm({ kind, returnTo = "/apps" }: { kind: FlowKind; 
             })}
             {!hasSubmit ? <p role="alert">This form cannot continue. Restart or contact the host administrator.</p> : null}
           </form>
+        ) : null}
+        {flow && !complete && google ? (
+          <Button type="button" variant="outline" className="w-full" disabled={busy || restartRequired} onClick={continueWithGoogle}>
+            {kind === "settings" ? "Link Google account" : "Continue with Google"}
+          </Button>
         ) : null}
         {enabled ? <Button variant="outline" disabled={busy} onClick={() => setRevision(value => value + 1)}>Restart form</Button> : null}
         {kind === "login" && capabilities?.emailRecovery ? <Link className="block underline" to="/recovery" state={{ from: returnTo }}>Forgot password?</Link> : null}

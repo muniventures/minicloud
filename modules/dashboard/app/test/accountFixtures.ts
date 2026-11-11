@@ -37,3 +37,8 @@ export function browserFlow(kind: BrowserFlow["kind"] = "login"): BrowserFlow {
 }
 export const jsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+export function googleFlow(kind: "login" | "settings" = "login"): BrowserFlow {
+  const flow = browserFlow(kind);
+  return { ...flow, ui: { ...flow.ui, providers: [{ id: "google", action: `/api/account/flows/${kind}/oidc?flow=${flow.id}`, method: "POST" }] } };
+}
+export const googleUrl = "https://accounts.google.com/o/oauth2/v2/auth?client_id=synthetic&response_type=code&state=synthetic-state";

@@ -1,7 +1,7 @@
 # T31 — Dashboard sessions and ordinary account flows
 
 Status: ordinary password/session/settings and capability-gated recovery implementation authored locally; not merged.
-Optional Google flow completion and real-Kratos qualification remain in [issue #44](https://github.com/muniventures/minicloud/issues/44).
+Optional Google button/callback continuation follows the T30 frozen extension and stays disabled by default. Live Google and real-Kratos qualification remain in [issue #44](https://github.com/muniventures/minicloud/issues/44).
 Repository: public `muniventures/minicloud`.
 Depends on: T30's frozen account/session/CSRF contract and backend implementation.
 Can run in parallel with: T40/T41 packaging and non-overlapping SSH UI work. T42 setup UI follows both T31 and T41; no concurrent writer may change `AuthProvider`.

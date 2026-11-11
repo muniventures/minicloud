@@ -58,6 +58,8 @@ membership response for both browser users and authorized machine credentials.
 | `GET /api/account/flows/{kind}/browser` | Start `login`, `settings` or enabled `recovery`; `returnTo` must be a same-dashboard relative path. |
 | `GET /api/account/flows/{kind}?id={uuid}` | Read an existing matching form. |
 | `POST /api/account/flows/{kind}?flow={uuid}` | Submit the form once; return a sanitized form or rotated browser-session metadata, never a session-cookie secret. |
+| `POST /api/account/flows/{kind}/oidc?flow={uuid}&returnTo={path}` | Optional Google only (`login` or `settings` link). Body `{csrf_token, provider:"google"}`; returns `{provider, redirectUrl}` for explicit top-level navigation. |
+| `GET /api/account/oidc/self-service/methods/oidc/callback/google` | Fixed provider callback. Completes the pending flow and answers `303` to the dashboard's `/sign-in/continue`. |
 
 Settings and other cookie-authenticated mutations require exact dashboard Origin
 and `X-Minicloud-CSRF`. Initial login/recovery submissions instead require exact
@@ -71,9 +73,53 @@ remains 403/resource-hiding 404. Identity dependency failures are sanitized 503
 `auth_unavailable`, not a logout or a setup transition. Forms have explicit restart
 actions and mutations are never automatically replayed.
 
-Public registration is disabled. Google redirect/callback completion and
-real-Kratos HTTPS qualification remain tracked in
-[the authentication follow-up](https://github.com/muniventures/minicloud/issues/44).
-Keep `Kratos:GoogleEnabled=false` until that implementation is complete. Email
-recovery is optional and requires separate SMTP/integration qualification;
-password-only use does not depend on either provider.
+Public registration is disabled. Email recovery is optional and requires
+separate SMTP/integration qualification; password-only use does not depend on
+either optional method.
+
+### Optional Google sign-in
+
+Google is off by default (`Kratos:GoogleEnabled=false`) and the packaged bundle
+does not enable it. Live Google and separate-origin HTTPS qualification remain
+tracked in [the authentication follow-up](https://github.com/muniventures/minicloud/issues/44).
+
+- **Discovery.** `ui.providers` is present only when Google is enabled and the
+  Kratos flow offers it. Each entry is `{id:"google", action, method:"POST"}`;
+  `action` is exactly `/api/account/flows/{kind}/oidc?flow={id}`. Upstream OIDC
+  nodes are never forwarded, and the ordinary submit route rejects `provider`.
+- **Navigation.** The dashboard shows "Continue with Google" or "Link Google
+  account" only when both the capability and the provider entry are present.
+  A click posts the flow CSRF token to the provider action with the exact
+  dashboard Origin (`settings` also needs `X-Minicloud-CSRF`). The API submits
+  the Kratos `oidc` method and accepts only Kratos's 422
+  `browser_location_change_required` response. Its target must be
+  `https://accounts.google.com/o/oauth2/...` on the default port, with no user
+  info or fragment. It must have one `client_id`, one `state`,
+  `response_type=code`, and a `redirect_uri` equal to this API's fixed callback.
+  Anything else returns 503 `auth_unavailable`. The browser, not the API, then
+  opens the URL. The API never follows upstream redirects or contacts the
+  provider, and it forwards no Minicloud cookie or bearer.
+- **Callback.** The provider action sets a 10-minute `__Host-minicloud-oidc`
+  cookie. It records the kind, flow ID, a SHA-256 hash of the provider state
+  and the validated same-dashboard return path. The callback requires that
+  cookie and a matching `state`, then deletes the cookie. It forwards only
+  `state` with either `code` or `error` to the Kratos callback, with allowlisted
+  flow cookies, including `ory_kratos_continuity`. It then admits only the bound
+  identity, as for password login. Settings must match the current browser
+  user. The callback redirects to
+  `/sign-in/continue?result=success|failed|forbidden|unavailable&kind=...&returnTo=...`.
+  On failure, the redirect can include `flow` for the same pending flow. The
+  dashboard then re-reads it, or after success returns to the safe path, such
+  as explicit CLI consent.
+
+Enabling Google for a qualification run needs `Kratos__GoogleEnabled=true` on
+the API. Kratos also needs `SELFSERVICE_METHODS_OIDC_ENABLED=true`, and
+`SELFSERVICE_METHODS_OIDC_CONFIG_BASE_REDIRECT_URI=<API_URL>/api/account/oidc`
+in operator-owned configuration. The resulting Google redirect URI is
+`<API_URL>/api/account/oidc/self-service/methods/oidc/callback/google`. Put the
+Google client secret only in the protected `kratos.env`, as
+`SELFSERVICE_METHODS_OIDC_CONFIG_PROVIDERS` JSON for provider `google`, with
+an operator-supplied `base64://` Jsonnet mapper for `traits.email`. Minicloud
+ships no default client or secret. Google login admits only identities already
+bound to a Minicloud user. An operator first links Google from account
+settings; public registration stays disabled.
