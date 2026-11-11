@@ -553,7 +553,19 @@ class InstallerTests(unittest.TestCase):
         namespace = {"__name__": "installer_bootstrap_test"}
         exec(compile(code, "signed-installer-fixture", "exec"), namespace)
         namespace["path_chain"] = self.fixture_chain
+        root = mock.patch.object(os, "geteuid", return_value=0)
+        root.start()
+        self.addCleanup(root.stop)
         return namespace
+
+    def test_unprivileged_installer_refuses_before_verification_or_host_commands(self):
+        argv = self.signed_fixture()
+        bootstrap = self.bootstrap_namespace()
+        with mock.patch("sys.argv", argv), mock.patch.object(os, "geteuid", return_value=1000), \
+             mock.patch.object(subprocess, "run") as command:
+            with self.assertRaisesRegex(ValueError, "Run as root"):
+                bootstrap["main"]()
+            command.assert_not_called()
 
     def signed_fixture(self):
         for name in ("install-server.sh", "verify-server-release.py", "checksums.txt.sigstore.json"):
