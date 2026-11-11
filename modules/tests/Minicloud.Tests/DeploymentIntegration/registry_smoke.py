@@ -18,6 +18,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+sys.dont_write_bytecode = True
 import component_smoke as component
 
 REGISTRY_IMAGE = "registry:3.1.2@sha256:01cd312e67026f06f5d89c3e133a4a9adc7cb9eeb9b1194e0b2954dfd770efd2"
