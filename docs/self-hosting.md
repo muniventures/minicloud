@@ -58,6 +58,7 @@ references (`MINICLOUD_*_IMAGE`) come from the generated, digest-pinned
 | `MANAGE_DNS_RECORDS` | Optional. Defaults to `false`. |
 | `MINICLOUD_SOURCE_URL` | Optional. The public source link shown in the dashboard. |
 | `MINICLOUD_SECRETS_DIR` | Root-owned directory (`0700`) holding the files below. |
+| `MINICLOUD_INSTALLATION_ID` | Persistent non-secret installation identity from host metadata, shared by API and bootstrap inputs. Never regenerate it on restart. |
 | `OPENBAO_ROOT_TOKEN_FILE` | Used only by the `openbao-configure` maintenance service. Unset during normal operation. |
 
 The dashboard container receives only `MINICLOUD_API_URL`,
@@ -85,7 +86,8 @@ independent random values:
 ### Startup order
 
 1. `database-initialize` creates or verifies the `minicloud` and `kratos` roles
-   and databases. It refuses databases that exist with an unexpected owner.
+   and databases under a session advisory lock. It refuses unexpected database
+   owners and elevated/inherited service-role privileges before creating state.
 2. `kratos-migrate` and `api-migrate` run once, then exit. `api-migrate` holds a
    PostgreSQL advisory lock, so concurrent runs serialize. It refuses a
    populated database that has no Minicloud migration history, and a database
@@ -100,6 +102,50 @@ First-operator seeding uses the API executable's shared
 [`bootstrap` host entry point](bootstrap.md), after migrations. The packaged
 installer and browser setup transport are still separate follow-up work;
 this command does not make the source bundle a qualified installation.
+
+### Protected host bootstrap interface
+
+The opt-in `api-bootstrap` maintenance service uses the same API image and
+application database as the running API. It publishes no port and does not
+start the API, worker or OpenBao administration. The installer/manual caller
+must preserve one `installationId` and original stable `operationId` in host
+metadata. Set `MINICLOUD_INSTALLATION_ID` to that same installation identity;
+all mutating request files use both IDs. The API reads the operation identity
+from the shared durable bootstrap record, not another environment value.
+
+Before invoking it, prepare root-owned `0700` directories
+`$MINICLOUD_SECRETS_DIR/bootstrap/input` and `bootstrap/output`. Input
+`request.json` must be a regular, non-symlink root-owned `0600`/`0400` file;
+the input directory is mounted read-only. Output is mounted separately
+read-write; the producer creates each new token file exclusively as `0600`.
+Never put passwords/tokens in environment variables, arguments or query strings.
+Use the fields and replay rules in the [bootstrap contract](bootstrap.md).
+
+Source bundle interface examples (not a qualified installation procedure):
+
+```sh
+# Default command: bootstrap status --input-file <protected container path>
+docker compose --profile maintenance run --rm -T api-bootstrap
+
+# Override only the API arguments; preserve its dotnet entry point.
+docker compose --profile maintenance run --rm -T api-bootstrap \
+  bootstrap prepare --input-file /run/minicloud-bootstrap/input/request.json \
+  --output-file /run/minicloud-bootstrap/output/setup-token-1
+
+# Equivalent protected redirected stdin; never echo a token to construct it.
+docker compose --profile maintenance run --rm -T api-bootstrap \
+  bootstrap status --stdin < "$MINICLOUD_SECRETS_DIR/bootstrap/input/request.json"
+```
+
+`rotate-token` also requires a new `--output-file`. `complete` consumes protected
+setup fields; completed host replay accepts the original IDs alone and never
+resets credentials. No seed logic is implemented by Compose. The service gates
+on successful application migrations but deliberately not healthy Kratos:
+ready host replay must remain usable without contacting identity services.
+Start/wait for healthy Kratos before operations that require it; otherwise the
+shared command returns sanitized nonzero failures. Do not equate service exit
+or `/health` alone with onboarding completion: inspect shared bootstrap status
+and preserve awaiting-DNS/TLS, awaiting-operator, ready and failed distinctions.
 
 ### OpenBao lifecycle
 
@@ -127,6 +173,8 @@ credentials. Delete the temporary root-token copy afterwards.
 `openbao-agent` exchanges the AppRole credentials for a periodic token and
 renews it. It writes the token to a memory-backed volume, which the API and
 worker read on each request.
+The Agent healthcheck verifies the current sink credential against OpenBao
+over TLS; a retained nonempty token file alone cannot advertise readiness.
 
 OpenBao starts sealed after every host or container restart. Until an operator
 unseals it, the agent cannot authenticate and secret operations fail as

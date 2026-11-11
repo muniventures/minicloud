@@ -23,3 +23,24 @@ worker mount it read-only. The OpenBao server and Agent run as root
 `OpenBao__CaCertificateFile` rather than replacing the system trust store; do
 not configure a root-token fallback. Preserve the
 external role/secret ID files and recovery keys during backup and recovery.
+
+The Agent healthcheck runs `openbao-ready.sh`, which reads the sink through a
+protected file and checks the current token against OpenBao over verified TLS.
+A nonempty sink alone is not readiness: consumers can keep the memory-backed
+volume mounted while the Agent restarts. A sealed/unreachable server or revoked
+token makes this check fail without printing the token or lookup response.
+Compose startup gates consumers on this check; sealing a running server does
+not stop existing containers, and secret operations must report unavailable.
+Unseal the existing server using the separately protected recovery material;
+do not initialize it again or replace its persistent volume.
+
+Focused source checks use `python3 -B -m unittest discover -s
+scripts/self-hosting -p 'test_*.py'`. The optional isolated dependency checks
+require already-cached `postgres:16-alpine` / `openbao/openbao:2.2.1` images;
+enable them with `MINICLOUD_TEST_CACHED_POSTGRES=1` and
+`MINICLOUD_TEST_CACHED_OPENBAO=1`. They never pull images, publish ports or use
+provider credentials, and remove only their uniquely named containers/volumes.
+Set `MINICLOUD_TEST_COMPOSE_BINARY` to an installed Compose executable to check
+the rendered source/bundle startup and exposure model without starting a stack.
+These checks do not qualify Kratos, public routing/TLS or the full packaged
+stack.
