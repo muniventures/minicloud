@@ -227,7 +227,8 @@ class InstallerTests(unittest.TestCase):
         argv = ["install", "--tag", self.args.tag, "--assets-dir", str(self.assets),
                 "--root", str(self.args.root), "--config", str(self.config),
                 "--recovery-dir", str(self.recovery), "--public-address", "8.8.8.8"]
-        with mock.patch.object(installer, "Installer", return_value=subject):
+        with mock.patch.object(installer, "Installer", return_value=subject), \
+             mock.patch.object(os, "geteuid", return_value=0):
             with self.assertRaisesRegex(installer.InstallError, "Unknown installation metadata"):
                 installer.main(argv)
         self.assertEqual(original, path.read_bytes())

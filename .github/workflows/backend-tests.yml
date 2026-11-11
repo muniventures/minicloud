@@ -36,6 +36,8 @@ jobs:
           python3 -B -m unittest discover -s scripts/database-platform -p 'test_*.py' -q
           python3 -B -m unittest discover -s modules/backup-repository -p 'test_*.py' -q
           python3 scripts/database-platform/test-postgres-integration.py
+      - name: Install authenticated recovery test dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends age
       - name: Verify self-hosting initialization scripts
         run: python3 -B -m unittest discover -s scripts/self-hosting -p 'test_*.py' -q
       - name: Run backend, worker, CLI and deployment integration tests
