@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { apiRequest, setCsrfToken } from "../../api/apiClient";
@@ -28,6 +28,30 @@ beforeEach(() => setCsrfToken(null));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("AuthProvider", () => {
+  it("selects only loaded organization memberships", async () => {
+    const organizations = [...accountProfile.organizations, { id: "org-2", name: "Second", slug: "second", role: "member" }];
+    const fetcher = installAccount();
+    fetcher.mockImplementation(async (input: string) => {
+      if (input.endsWith("/capabilities")) return jsonResponse(accountCapabilities);
+      if (input.endsWith("/session")) return jsonResponse(accountSession);
+      return jsonResponse({ ...accountProfile, organizations });
+    });
+    let auth!: ReturnType<typeof useAuth>;
+    function Selection() {
+      auth = useAuth();
+      return <p>{auth.selectedOrganization?.id ?? "none"}</p>;
+    }
+    render(<AuthProvider><Selection /></AuthProvider>);
+    expect(await screen.findByText("org-1")).toBeInTheDocument();
+    let accepted: boolean | undefined;
+    act(() => { accepted = auth.selectOrganization("org-unknown"); });
+    expect(accepted).toBe(false);
+    expect(screen.getByText("org-1")).toBeInTheDocument();
+    act(() => { accepted = auth.selectOrganization("org-2"); });
+    expect(accepted).toBe(true);
+    expect(screen.getByText("org-2")).toBeInTheDocument();
+  });
+
   it("loads the seeded operator without creating a workspace and clears identity on logout", async () => {
     const fetcher = installAccount();
     render(<AuthProvider><Probe /></AuthProvider>);

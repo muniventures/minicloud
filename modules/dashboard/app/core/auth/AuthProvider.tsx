@@ -10,6 +10,7 @@ type AuthContextValue = {
   profile: MeResponse | null;
   capabilities: AccountCapabilities | null;
   selectedOrganization: MeResponse["organizations"][number] | null;
+  selectOrganization: (organizationId: string) => boolean;
   profileError: string | null;
   refreshSession: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -17,7 +18,7 @@ type AuthContextValue = {
 };
 
 export const AuthContext = createContext<AuthContextValue>({
-  status: "initializing", profile: null, capabilities: null, selectedOrganization: null,
+  status: "initializing", profile: null, capabilities: null, selectedOrganization: null, selectOrganization: () => false,
   profileError: null, refreshSession: async () => {}, refreshProfile: async () => {}, logout: async () => {}
 });
 
@@ -26,6 +27,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [profile, setProfile] = useState<MeResponse | null>(null);
   const [capabilities, setCapabilities] = useState<AccountCapabilities | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState<string | null>(null);
   const generation = useRef(0);
 
   const refreshSession = useCallback(async () => {
@@ -98,10 +100,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
   }, []);
 
+  // Only loaded memberships can be selected; an unknown or revoked selection falls back to the first membership.
+  const organizations = profile?.organizations;
+  const selectOrganization = useCallback((organizationId: string) => {
+    if (!organizations?.some(organization => organization.id === organizationId)) return false;
+    setSelectedOrganizationId(organizationId);
+    return true;
+  }, [organizations]);
+  const selectedOrganization = organizations?.find(organization => organization.id === selectedOrganizationId)
+    ?? organizations?.[0] ?? null;
+
   const value = useMemo(() => ({
-    status, profile, capabilities, selectedOrganization: profile?.organizations[0] ?? null,
+    status, profile, capabilities, selectedOrganization, selectOrganization,
     profileError, refreshSession, refreshProfile: refreshSession, logout
-  }), [status, profile, capabilities, profileError, refreshSession, logout]);
+  }), [status, profile, capabilities, selectedOrganization, selectOrganization, profileError, refreshSession, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

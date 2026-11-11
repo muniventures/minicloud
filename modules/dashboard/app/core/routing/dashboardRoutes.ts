@@ -41,7 +41,7 @@ export const dashboardRoutes = {
     layout: "main",
     nav: { label: "Deployments", icon: Rocket, group: "main" }
   }),
-  deploymentDetail: defineRoute({ key: "deploymentDetail", name: "Deployment detail", path: "/deployments/:deploymentId", layout: "main" }),
+  deploymentDetail: defineRoute({ key: "deploymentDetail", name: "Deployment detail", path: "/deployments/:deploymentNumber", layout: "main" }),
   apiKeys: defineRoute({
     key: "apiKeys",
     name: "API Keys",

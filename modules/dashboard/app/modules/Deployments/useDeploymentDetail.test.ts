@@ -21,8 +21,10 @@ vi.mock("@/api/deploymentsApi", () => ({
   dispatchDeployment: vi.fn(),
   cancelDeployment: vi.fn(),
 }));
+const ref = { organizationId: "org-1", number: "20261110.1" };
 const deployment = {
   id: "dep",
+  number: "20261110.1",
   appId: "app",
   status: "deploying",
 } as DeploymentResponse;
@@ -42,7 +44,7 @@ it.each(["deploying", "waiting_for_build"] as const)("polls %s deployments, seri
   const activeDeployment = { ...deployment, status };
   vi.mocked(getDeployment).mockResolvedValue(activeDeployment);
   vi.useFakeTimers();
-  const { result } = renderHook(() => useDeploymentDetail("dep"));
+  const { result } = renderHook(() => useDeploymentDetail(ref));
   await act(async () => {});
   expect(result.current.snapshot?.deployment.id).toBe("dep");
   let resolveRead!: (value: DeploymentResponse) => void;
@@ -97,12 +99,12 @@ it("aborts old reads and ignores stale responses after route changes", async () 
       }),
   );
   const { result, rerender, unmount } = renderHook(
-    ({ id }) => useDeploymentDetail(id),
-    { initialProps: { id: "old" } },
+    ({ number }) => useDeploymentDetail({ organizationId: "org-1", number }),
+    { initialProps: { number: "20261110.1" } },
   );
   const signal = vi.mocked(getDeployment).mock.calls[0][1]!;
   vi.mocked(getDeployment).mockResolvedValue({ ...deployment, id: "new" });
-  rerender({ id: "new" });
+  rerender({ number: "20261110.2" });
   await waitFor(() =>
     expect(result.current.snapshot?.deployment.id).toBe("new"),
   );
@@ -116,11 +118,11 @@ it("aborts old reads and ignores stale responses after route changes", async () 
 
 it("requests cancellation, keeps polling while stopping, and stops after cancellation completes", async () => {
   vi.useFakeTimers();
-  const { result } = renderHook(() => useDeploymentDetail("dep"));
+  const { result } = renderHook(() => useDeploymentDetail(ref));
   await act(async () => {});
   vi.mocked(getDeployment).mockResolvedValue({ ...deployment, cancellationRequestedAt: "2026-10-27T12:00:00Z" });
   await act(async () => { await result.current.cancel(); });
-  expect(cancelDeployment).toHaveBeenCalledWith("dep");
+  expect(cancelDeployment).toHaveBeenCalledWith(ref);
   expect(result.current.snapshot?.deployment.cancellationRequestedAt).toBeTruthy();
   const count = vi.mocked(getDeployment).mock.calls.length;
   await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
@@ -130,4 +132,61 @@ it("requests cancellation, keeps polling while stopping, and stops after cancell
   const terminalCount = vi.mocked(getDeployment).mock.calls.length;
   await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
   expect(getDeployment).toHaveBeenCalledTimes(terminalCount);
+});
+
+it("never shows or targets a stale organization when both organizations contain the same number", async () => {
+  let resolveOrgOne!: (value: DeploymentResponse) => void;
+  vi.mocked(getDeployment).mockImplementationOnce(
+    () => new Promise((resolve) => { resolveOrgOne = resolve; }),
+  );
+  const { result, rerender } = renderHook(
+    ({ organizationId }) => useDeploymentDetail({ organizationId, number: "20261110.1" }),
+    { initialProps: { organizationId: "org-1" } },
+  );
+  const orgOneSignal = vi.mocked(getDeployment).mock.calls[0][1]!;
+  expect(vi.mocked(getDeployment).mock.calls[0][0]).toEqual({ organizationId: "org-1", number: "20261110.1" });
+  vi.mocked(getDeployment).mockResolvedValue({ ...deployment, id: "org-2-dep", organizationId: "org-2" });
+  rerender({ organizationId: "org-2" });
+  expect(result.current.snapshot).toBeNull();
+  await waitFor(() => expect(result.current.snapshot?.deployment.id).toBe("org-2-dep"));
+  expect(orgOneSignal.aborted).toBe(true);
+  await act(async () => resolveOrgOne({ ...deployment, id: "org-1-dep", organizationId: "org-1" }));
+  expect(result.current.snapshot?.deployment.id).toBe("org-2-dep");
+  for (const call of [listDeploymentEvents, listDeploymentActivities, listDeploymentLogs]) {
+    expect(vi.mocked(call).mock.calls.at(-1)![0]).toEqual({ organizationId: "org-2", number: "20261110.1" });
+  }
+  await act(async () => { await result.current.cancel(); });
+  expect(cancelDeployment).toHaveBeenCalledTimes(1);
+  expect(cancelDeployment).toHaveBeenCalledWith({ organizationId: "org-2", number: "20261110.1" });
+});
+
+it("discards a pending action response after the organization changes", async () => {
+  vi.mocked(getDeployment).mockResolvedValue({ ...deployment, id: "org-1-dep" });
+  let finishDispatch!: () => void;
+  vi.mocked(dispatchDeployment).mockImplementationOnce(
+    () => new Promise((resolve) => { finishDispatch = () => resolve(deployment); }),
+  );
+  const { result, rerender } = renderHook(
+    ({ organizationId }) => useDeploymentDetail({ organizationId, number: "20261110.1" }),
+    { initialProps: { organizationId: "org-1" } },
+  );
+  await waitFor(() => expect(result.current.snapshot?.deployment.id).toBe("org-1-dep"));
+  let pending!: Promise<unknown>;
+  act(() => { pending = result.current.dispatch(); });
+  expect(dispatchDeployment).toHaveBeenCalledWith({ organizationId: "org-1", number: "20261110.1" });
+  vi.mocked(getDeployment).mockResolvedValue({ ...deployment, id: "org-2-dep" });
+  rerender({ organizationId: "org-2" });
+  expect(result.current.dispatching).toBe(false);
+  await waitFor(() => expect(result.current.snapshot?.deployment.id).toBe("org-2-dep"));
+  const reads = vi.mocked(getDeployment).mock.calls.length;
+  await act(async () => { finishDispatch(); await pending; });
+  expect(getDeployment).toHaveBeenCalledTimes(reads);
+  expect(result.current.snapshot?.deployment.id).toBe("org-2-dep");
+  expect(dispatchDeployment).toHaveBeenCalledTimes(1);
+});
+
+it("does not request anything without an organization-scoped number", () => {
+  const { result } = renderHook(() => useDeploymentDetail(undefined));
+  expect(result.current.snapshot).toBeNull();
+  expect(getDeployment).not.toHaveBeenCalled();
 });

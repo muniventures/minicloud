@@ -23,6 +23,7 @@ export type OrganizationResponse = {
 
 export type LatestDeployment = {
   id: string;
+  number: string;
   status: DeploymentStatus;
   websiteUrl?: string | null;
   completedAt?: string | null;
@@ -141,6 +142,7 @@ export type DeploymentServiceResponse = {
 export type DeploymentResponse = {
   cancellationRequestedAt?: string | null;
   id: string;
+  number: string;
   appId: string;
   organizationId: string;
   database: DatabaseMode;
@@ -154,6 +156,12 @@ export type DeploymentResponse = {
   requeuedAt?: string | null;
   startedAt?: string | null;
   completedAt?: string | null;
+};
+
+export type DeploymentCancellationResponse = {
+  id: string;
+  number: string;
+  cancellationRequested: boolean;
 };
 
 export type DeploymentEventResponse = {

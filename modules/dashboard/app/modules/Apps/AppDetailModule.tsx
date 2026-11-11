@@ -42,6 +42,7 @@ import {
   renameAppServiceSecretService,
 } from "../../api/environmentsApi";
 import { useDeploymentFeed } from "../Deployments/useDeploymentFeed";
+import { deploymentDetailPath } from "../Deployments/deploymentRoutes";
 import { useAuth } from "../../core/auth/AuthProvider";
 import { CopyButton } from "../../core/components/CopyButton";
 import { EmptyState } from "../../core/components/EmptyState";
@@ -437,7 +438,7 @@ function ScopedAppDetail() {
     {
       createdAt: (item) => item.createdAt,
       status: (item) => item.status,
-      id: (item) => item.id,
+      number: (item) => item.number,
     },
     (item) => item.id,
     "createdAt",
@@ -1277,7 +1278,7 @@ function ScopedAppDetail() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>ID</TableHead>
+                      <TableHead>Number</TableHead>
                       <TableHead>Deployment status</TableHead>
                       <TableHead>Created</TableHead>
                       <TableHead>Completed</TableHead>
@@ -1286,9 +1287,9 @@ function ScopedAppDetail() {
                   </TableHeader>
                   <TableBody>
                     {deploymentCollection.records.map((deployment) => (
-                      <NavigableTableRow key={deployment.id} href={`/apps/${app.id}/deployments/${deployment.id}`}>
-                        <TableCell data-label="ID" className="font-mono text-xs">
-                          {deployment.id}
+                      <NavigableTableRow key={deployment.id} href={deploymentDetailPath(deployment.organizationId, deployment.number)}>
+                        <TableCell data-label="Number" className="font-mono text-xs">
+                          {deployment.number}
                         </TableCell>
                         <TableCell data-label="Deployment status">
                           <StatusBadge status={deployment.status} />
@@ -1304,7 +1305,8 @@ function ScopedAppDetail() {
                         <TableCell data-label="Actions" className="text-right">
                           <Button asChild size="sm" variant="outline">
                             <Link
-                              to={`/apps/${app.id}/deployments/${deployment.id}`}
+                              aria-label={`Open deployment ${deployment.number}`}
+                              to={deploymentDetailPath(deployment.organizationId, deployment.number)}
                             >
                               Open
                             </Link>
