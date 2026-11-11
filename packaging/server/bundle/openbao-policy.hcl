@@ -17,3 +17,7 @@ path "minicloud-apps/metadata/env/+/orgs/+/providers/+/credentials/+" {
 path "auth/token/renew-self" {
   capabilities = ["update"]
 }
+
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}

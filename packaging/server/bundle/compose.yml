@@ -143,12 +143,13 @@ services:
       - openbao-ca.crt
     volumes:
       - ./openbao-agent.hcl:/etc/openbao/agent.hcl:ro
+      - ./openbao-ready.sh:/opt/minicloud/openbao-ready.sh:ro
       - openbao-agent-token:/run/minicloud-openbao
     depends_on:
       openbao:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "test -s /run/minicloud-openbao/token"]
+      test: ["CMD", "/bin/sh", "/opt/minicloud/openbao-ready.sh"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -331,8 +332,8 @@ secrets:
 volumes:
   postgres:
   openbao:
-  # Memory-backed so the renewable token never reaches disk and no stale token
-  # satisfies the agent healthcheck after a restart.
+  # Memory-backed so the renewable token never reaches disk. The agent checks
+  # it against OpenBao: consumers can retain this volume across agent restarts.
   openbao-agent-token:
     driver: local
     driver_opts:
