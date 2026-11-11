@@ -12,7 +12,7 @@
     "apiHostname": { "$ref": "#/$defs/hostname" },
     "consoleHostname": { "$ref": "#/$defs/hostname" },
     "manageDnsRecords": { "type": "boolean", "default": false },
-    "sourceUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "sourceUrl": { "type": "string", "format": "uri", "pattern": "^https://[^/@\\s]+(?:/[^\\s]*)?$" },
     "recovery": {
       "type": "object",
       "additionalProperties": false,
@@ -26,13 +26,13 @@
     "httpsOrigin": {
       "type": "string",
       "format": "uri",
-      "pattern": "^https://[^/]+$"
+      "pattern": "^https://[a-z0-9.-]+$"
     },
     "hostname": {
       "type": "string",
       "minLength": 1,
       "maxLength": 253,
-      "pattern": "^(?=.{1,253}$)(?!-)[A-Za-z0-9.-]+(?<!-)$"
+      "pattern": "^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
     }
   }
 }
