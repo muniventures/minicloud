@@ -50,6 +50,7 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
 
     public DbSet<AppStorageVolume> AppStorageVolumes => Set<AppStorageVolume>();
     public DbSet<ProviderAccount> ProviderAccounts => Set<ProviderAccount>();
+    public DbSet<ProviderSshKey> ProviderSshKeys => Set<ProviderSshKey>();
     public DbSet<ProviderPlan> ProviderPlans => Set<ProviderPlan>();
     public DbSet<ProviderPlanName> ProviderPlanNames => Set<ProviderPlanName>();
     public DbSet<ProviderCredentialCleanup> ProviderCredentialCleanups => Set<ProviderCredentialCleanup>();
@@ -165,9 +166,26 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
             entity.ToTable("provider_credential_cleanups");
             entity.HasKey(x => x.Id);
         });
+        modelBuilder.Entity<ProviderSshKey>(entity =>
+        {
+            entity.ToTable("provider_ssh_keys");
+            entity.HasKey(x => x.Id);
+            entity.HasAlternateKey(x => new { x.OrganizationId, x.ProviderAccountId, x.Id });
+            entity.HasIndex(x => new { x.OrganizationId, x.ProviderAccountId, x.ProviderKeyId }).IsUnique();
+            entity.HasIndex(x => new { x.OrganizationId, x.ProviderAccountId, x.Fingerprint }).IsUnique();
+            entity.HasOne<ProviderAccount>().WithMany()
+                .HasForeignKey(x => new { x.OrganizationId, x.ProviderAccountId })
+                .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<MinicloudApp>().HasOne(x => x.SelectedPlan).WithMany()
             .HasForeignKey(x => new { x.OrganizationId, x.PlanId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<MinicloudApp>().HasOne<ProviderAccount>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, x.SshProviderAccountId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<MinicloudApp>().HasOne<ProviderSshKey>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, x.SshProviderAccountId, x.SshKeyId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.ProviderAccountId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<Deployment>().HasOne<ProviderAccount>().WithMany()
             .HasForeignKey(x => new { x.OrganizationId, x.ProviderAccountId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
@@ -300,6 +318,8 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
         modelBuilder.Entity<MinicloudApp>(entity =>
         {
             entity.ToTable("apps");
+            entity.Property(x => x.SshAccessMode).HasDefaultValue("none");
+            entity.Property(x => x.SshRegistrationState).HasDefaultValue("not_registered");
             entity.HasIndex(x => new { x.OrganizationId, x.Slug }).IsUnique();
             entity.HasIndex(x => new { x.ParentAppId, x.BranchName }).IsUnique();
             entity.HasIndex(x => new { x.ApplicationId, x.NormalizedEnvironmentName }).IsUnique();

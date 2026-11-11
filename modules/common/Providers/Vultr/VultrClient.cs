@@ -13,7 +13,7 @@ using System.Globalization;
 
 namespace Minicloud.Common.Providers.Vultr;
 
-public sealed class VultrClient : IVpsProviderClient
+public sealed class VultrClient : IVpsProviderClient, IVpsProviderSshKeyClient
 {
     private readonly HttpClient _httpClient;
     private readonly VultrOptions _options;
@@ -45,6 +45,36 @@ public sealed class VultrClient : IVpsProviderClient
         {
             _httpClient.BaseAddress = new Uri(_options.BaseUrl.TrimEnd('/') + "/");
         }
+    }
+
+    public async Task<IReadOnlyList<ProviderSshKeyInfo>> ListSshKeysAsync(CancellationToken cancellationToken = default)
+    {
+        const int pageSize = 500;
+        var keys = new List<ProviderSshKeyInfo>();
+        for (var page = 1; ; page++)
+        {
+            using var request = CreateRequest(HttpMethod.Get, $"ssh-keys?per_page={pageSize}&page={page}");
+            using var response = await SendAsync(request, cancellationToken);
+            await EnsureSuccessAsync(response, cancellationToken);
+            var result = await response.Content.ReadFromJsonAsync<VultrSshKeyListResponse>(cancellationToken: cancellationToken);
+            var pageKeys = result?.SshKeys ?? [];
+            keys.AddRange(pageKeys.Where(x => !string.IsNullOrWhiteSpace(x.Id))
+                .Select(x => new ProviderSshKeyInfo(x.Id!, x.Name ?? string.Empty, x.PublicKey)));
+            if (pageKeys.Count < pageSize || result?.Meta?.Links?.Next is null)
+                return keys;
+        }
+    }
+
+    public async Task<ProviderSshKeyInfo> RegisterSshKeyAsync(string name, string publicKey, CancellationToken cancellationToken = default)
+    {
+        using var request = CreateRequest(HttpMethod.Post, "ssh-keys");
+        request.Content = JsonContent.Create(new VultrCreateSshKeyPayload { Name = name, PublicKey = publicKey });
+        using var response = await SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        var result = await response.Content.ReadFromJsonAsync<VultrSshKeyResponse>(cancellationToken: cancellationToken);
+        if (result?.SshKey is not { Id: { Length: > 0 } } key)
+            throw new ProviderApiException("Vultr API returned an empty SSH key in the registration response.", response.StatusCode, Provider);
+        return new ProviderSshKeyInfo(key.Id!, key.Name ?? name, key.PublicKey);
     }
 
     public async Task<ProviderServerInfo?> FindServerAsync(string serverName, CancellationToken cancellationToken = default)
@@ -109,9 +139,9 @@ public sealed class VultrClient : IVpsProviderClient
             Tags = tags.Distinct().ToList()
         };
 
-        if (!string.IsNullOrWhiteSpace(request.SshKeyIdOrPublicKey))
+        if (request.SshKeyReferences.Count > 0)
         {
-            payload.SshKeyId = [request.SshKeyIdOrPublicKey];
+            payload.SshKeyId = request.SshKeyReferences.ToArray();
         }
 
         using var httpRequest = CreateRequest(HttpMethod.Post, "instances");
@@ -284,6 +314,54 @@ public sealed class VultrClient : IVpsProviderClient
 
         [JsonPropertyName("sshkey_id")]
         public string[]? SshKeyId { get; set; }
+    }
+
+    private sealed class VultrCreateSshKeyPayload
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("ssh_key")]
+        public string PublicKey { get; set; } = string.Empty;
+    }
+
+    private sealed class VultrSshKeyListResponse
+    {
+        [JsonPropertyName("ssh_keys")]
+        public List<VultrSshKeyDto>? SshKeys { get; set; }
+
+        [JsonPropertyName("meta")]
+        public VultrMetaDto? Meta { get; set; }
+    }
+
+    private sealed class VultrSshKeyResponse
+    {
+        [JsonPropertyName("ssh_key")]
+        public VultrSshKeyDto? SshKey { get; set; }
+    }
+
+    private sealed class VultrSshKeyDto
+    {
+        [JsonPropertyName("id")]
+        public string? Id { get; set; }
+
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("ssh_key")]
+        public string? PublicKey { get; set; }
+    }
+
+    private sealed class VultrMetaDto
+    {
+        [JsonPropertyName("links")]
+        public VultrLinksDto? Links { get; set; }
+    }
+
+    private sealed class VultrLinksDto
+    {
+        [JsonPropertyName("next")]
+        public string? Next { get; set; }
     }
 
     private sealed class VultrInstanceResponse

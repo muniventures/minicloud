@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using System.Globalization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -11,7 +12,7 @@ using System.Net.Http;
 
 namespace Minicloud.Common.Providers.Hetzner;
 
-public sealed partial class HetznerClient : IVpsProviderClient
+public sealed partial class HetznerClient : IVpsProviderClient, IVpsProviderSshKeyClient
 {
     private readonly HttpClient _httpClient;
     private readonly HetznerOptions _options;
@@ -41,6 +42,35 @@ public sealed partial class HetznerClient : IVpsProviderClient
         {
             _httpClient.BaseAddress = new Uri(_options.BaseUrl.TrimEnd('/') + "/");
         }
+    }
+
+    public async Task<IReadOnlyList<ProviderSshKeyInfo>> ListSshKeysAsync(CancellationToken cancellationToken = default)
+    {
+        var keys = new List<ProviderSshKeyInfo>();
+        for (var page = 1; ; page++)
+        {
+            using var request = CreateRequest(HttpMethod.Get, $"ssh_keys?per_page=50&page={page}");
+            using var response = await SendAsync(request, cancellationToken);
+            await EnsureSuccessAsync(response, cancellationToken);
+            var result = await response.Content.ReadFromJsonAsync<HetznerSshKeyListResponse>(cancellationToken: cancellationToken);
+            keys.AddRange((result?.SshKeys ?? []).Where(x => x.Id > 0)
+                .Select(x => new ProviderSshKeyInfo(x.Id.ToString(), x.Name ?? string.Empty, x.PublicKey)));
+            if (result?.Meta?.Pagination?.NextPage is null)
+                return keys;
+        }
+    }
+
+    public async Task<ProviderSshKeyInfo> RegisterSshKeyAsync(string name, string publicKey, CancellationToken cancellationToken = default)
+    {
+        var payload = new HetznerCreateSshKeyPayload { Name = name, PublicKey = publicKey };
+        using var request = CreateRequest(HttpMethod.Post, "ssh_keys");
+        request.Content = JsonContent.Create(payload);
+        using var response = await SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        var result = await response.Content.ReadFromJsonAsync<HetznerSshKeyResponse>(cancellationToken: cancellationToken);
+        if (result?.SshKey is not { Id: > 0 } key)
+            throw new ProviderApiException("Hetzner API returned an empty SSH key in the registration response.", response.StatusCode, Provider);
+        return new ProviderSshKeyInfo(key.Id.ToString(), key.Name ?? name, key.PublicKey);
     }
 
     public async Task<ProviderServerInfo?> FindServerAsync(string serverName, CancellationToken cancellationToken = default)
@@ -85,9 +115,12 @@ public sealed partial class HetznerClient : IVpsProviderClient
             Labels = request.Labels != null ? new Dictionary<string, string>(request.Labels) : new Dictionary<string, string>()
         };
 
-        if (!string.IsNullOrWhiteSpace(request.SshKeyIdOrPublicKey))
+        if (request.SshKeyReferences.Count > 0)
         {
-            payload.SshKeys = [request.SshKeyIdOrPublicKey];
+            payload.SshKeys = request.SshKeyReferences.Select(reference =>
+                long.TryParse(reference, NumberStyles.None, CultureInfo.InvariantCulture, out var id) && id > 0
+                    ? id
+                    : throw new ArgumentException("Hetzner SSH key references must be numeric IDs.", nameof(request))).ToArray();
         }
 
         using var httpRequest = CreateRequest(HttpMethod.Post, "servers");
@@ -225,7 +258,55 @@ public sealed partial class HetznerClient : IVpsProviderClient
 
         [JsonPropertyName("ssh_keys")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public string[]? SshKeys { get; set; }
+        public long[]? SshKeys { get; set; }
+    }
+
+    private sealed class HetznerCreateSshKeyPayload
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("public_key")]
+        public string PublicKey { get; set; } = string.Empty;
+    }
+
+    private sealed class HetznerSshKeyListResponse
+    {
+        [JsonPropertyName("ssh_keys")]
+        public List<HetznerSshKeyDto>? SshKeys { get; set; }
+
+        [JsonPropertyName("meta")]
+        public HetznerMetaDto? Meta { get; set; }
+    }
+
+    private sealed class HetznerSshKeyResponse
+    {
+        [JsonPropertyName("ssh_key")]
+        public HetznerSshKeyDto? SshKey { get; set; }
+    }
+
+    private sealed class HetznerSshKeyDto
+    {
+        [JsonPropertyName("id")]
+        public long Id { get; set; }
+
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("public_key")]
+        public string? PublicKey { get; set; }
+    }
+
+    private sealed class HetznerMetaDto
+    {
+        [JsonPropertyName("pagination")]
+        public HetznerPaginationDto? Pagination { get; set; }
+    }
+
+    private sealed class HetznerPaginationDto
+    {
+        [JsonPropertyName("next_page")]
+        public int? NextPage { get; set; }
     }
 
     private sealed class HetznerCreateServerResponse

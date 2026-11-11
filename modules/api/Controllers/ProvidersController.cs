@@ -1,11 +1,13 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Minicloud.Api.Services;
 using Minicloud.Api.Auth;
 using Minicloud.Common.Contracts;
 using Minicloud.Common.Data;
 using Minicloud.Common.Models;
 using Minicloud.Common.Providers;
+using Minicloud.Common.Providers.Common;
 using Minicloud.Common.Services;
 
 namespace Minicloud.Api.Controllers;
@@ -28,6 +30,37 @@ public sealed class ProvidersController(MinicloudDbContext db, ControlPlaneAutho
         if (!await CanAsync(organizationId, OrganizationAction.ReadProviders, ct)) return EndpointResults.Forbidden();
         return Results.Ok((await db.ProviderAccounts.AsNoTracking().Include(x => x.Plans)
             .Where(x => x.OrganizationId == organizationId).OrderBy(x => x.Name).ToListAsync(ct)).Select(ToResponse));
+    }
+
+    [HttpGet("{providerAccountId}/ssh-keys")]
+    public async Task<IResult> SshKeys(
+        [FromRoute] string providerAccountId,
+        [FromQuery] string organizationId,
+        [FromServices] EnvironmentSshAccessService sshAccess,
+        CancellationToken ct)
+    {
+        try
+        {
+            var keys = await sshAccess.ListKeysAsync(organizationId, providerAccountId,
+                EndpointResults.RequirePrincipal(HttpContext).ToActorIdentity(), ct);
+            return Results.Ok(keys);
+        }
+        catch (SshAccessException ex)
+        {
+            return EndpointResults.Problem(ex.Code, ex.Message, ex.StatusCode);
+        }
+        catch (SecretStoreUnavailableException)
+        {
+            return EndpointResults.Problem("ssh_inventory_unavailable", "The provider SSH key inventory is temporarily unavailable.", 503);
+        }
+        catch (HttpRequestException)
+        {
+            return EndpointResults.Problem("ssh_inventory_unavailable", "The provider SSH key inventory is temporarily unavailable.", 503);
+        }
+        catch (OperationCanceledException ex) when (!ex.CancellationToken.IsCancellationRequested)
+        {
+            return EndpointResults.Problem("ssh_inventory_unavailable", "The provider SSH key inventory is temporarily unavailable.", 503);
+        }
     }
 
     [HttpGet("{id}")]

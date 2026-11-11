@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Minicloud.Common.Contracts;
+using Minicloud.Common.Auth;
 using Minicloud.Common.Data;
 using Minicloud.Common.Models;
 using Minicloud.Common.Services;
@@ -8,16 +9,32 @@ using Minicloud.Common.Validation;
 namespace Minicloud.Api.Services;
 
 // Each environment owns a runtime app record so all runtime resources remain isolated.
-public sealed class AppEnvironmentService(MinicloudDbContext db, IIdGenerator ids, TimeProvider clock, ProviderCatalogService? catalog = null)
+public sealed class AppEnvironmentService(
+    MinicloudDbContext db,
+    IIdGenerator ids,
+    TimeProvider clock,
+    ProviderCatalogService? catalog = null,
+    EnvironmentSshAccessService? sshAccess = null)
 {
     public static bool IsValidName(string? name) => name is { Length: >= 1 and <= 63 }
         && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_')
         && char.IsAsciiLetterOrDigit(name[0]);
 
     public Task<MinicloudApp> CreateForApplicationAsync(MinicloudApplication application, CreateEnvironmentRequest request, CancellationToken ct) =>
-        WithApplicationLockAsync(application.Id, () => CreateForApplicationCoreAsync(application, request, ct), ct);
+        CreateForApplicationAsync(application, request, null, ct);
 
-    private async Task<MinicloudApp> CreateForApplicationCoreAsync(MinicloudApplication application, CreateEnvironmentRequest request, CancellationToken ct)
+    public Task<MinicloudApp> CreateForApplicationAsync(
+        MinicloudApplication application,
+        CreateEnvironmentRequest request,
+        ActorIdentity? actor,
+        CancellationToken ct) =>
+        WithApplicationLockAsync(application.Id, () => CreateForApplicationCoreAsync(application, request, actor, ct), ct);
+
+    private async Task<MinicloudApp> CreateForApplicationCoreAsync(
+        MinicloudApplication application,
+        CreateEnvironmentRequest request,
+        ActorIdentity? actor,
+        CancellationToken ct)
     {
         if (application.DeletionStatus is not null)
             throw new AppEnvironmentException("app_deleting", "The application is being deleted.");
@@ -95,6 +112,13 @@ public sealed class AppEnvironmentService(MinicloudDbContext db, IIdGenerator id
         {
             application.DefaultEnvironmentId = environment.Id;
             application.UpdatedAt = now;
+        }
+
+        if (request.SshAccess is not null)
+        {
+            if (sshAccess is null || actor is null)
+                throw new AppEnvironmentException("ssh_key_invalid", "SSH access cannot be configured in this context.");
+            await sshAccess.ApplySelectionAsync(environment, selectedPlan?.ProviderAccountId, request.SshAccess, actor, false, ct);
         }
 
         try
