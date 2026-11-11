@@ -719,3 +719,39 @@ An application without a registered server can be deleted regardless of deployme
 history or provisioning attempts. Deletion removes its system records without requiring
 provider credentials or server discovery. Registered servers are deleted through their
 registered provider account before the application records are removed.
+
+### Personal SSH keys
+
+Environments can install one personal SSH key on the VPS Minicloud provisions
+for them, in addition to Minicloud's own deployment access. Select a key when
+creating an environment, or when `minicloud init` creates a new app:
+
+```sh
+minicloud providers ssh-keys --plan small
+minicloud environments create staging --plan small --ssh-key <key-id>
+minicloud environments create staging --plan small --ssh-public-key-file ~/.ssh/id_ed25519.pub --ssh-key-name "Work laptop"
+minicloud environments update staging --ssh-key <key-id>
+```
+
+- `--ssh-key` selects an existing key by the Minicloud key ID listed by
+  `providers ssh-keys` for the plan's provider account (`--organization <id>`
+  selects among multiple organizations; a provider account ID can be given
+  instead of `--plan`). It requires an API key with `providers:read`.
+- `--ssh-public-key-file` reads one Ed25519 or RSA (at least 3072-bit) OpenSSH
+  public key line, at most 16 KiB. Private keys, multiple keys and
+  `authorized_keys` options are rejected before any request; only the key type
+  and data are sent. `--ssh-key-name` names the key (default: the key comment,
+  then the file name) and is only valid with a file. Adding a new key requires
+  `providers:write` (organization owner or admin).
+- The two options are mutually exclusive. Omitting them creates an environment
+  with Minicloud-only access; `environments update` without them is rejected,
+  and `rename` never changes the saved selection. Updates send the current
+  selection revision and fail if it changed concurrently.
+- Nothing is registered with the provider when you save. The key is registered
+  and installed when Minicloud first provisions the environment's VPS. The
+  selection is immutable once server allocation starts and never changes keys
+  on a running server. `apps inspect` shows the selection, its registration
+  state and, once known, the verified `ssh <user>@<address>` target.
+
+Keep SSH selection out of `minicloud.yml`; it is environment provisioning
+configuration. The CLI does not generate keys or open SSH sessions.

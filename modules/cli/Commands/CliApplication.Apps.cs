@@ -56,6 +56,7 @@ public sealed partial class CliApplication
         _console.WriteLine($"App: {app.Name}");
         _console.WriteLine($"Slug: {app.Slug}");
         _console.WriteLine($"Database: {app.Database}");
+        WriteSshAccessDetails(app.SshAccess, app.SshConnection);
         if (app.LatestDeployment is not null)
         {
             _console.WriteLine($"Latest deployment: {app.LatestDeployment.Id} ({app.LatestDeployment.Status})");
@@ -97,7 +98,7 @@ public sealed partial class CliApplication
         return CliExitCodes.Success;
     }
 
-    private async Task<ApplicationResponse> PromptAppSelectionAsync(OrganizationSummaryDto organization, string? requestedApp, CancellationToken cancellationToken)
+    private async Task<ApplicationResponse> PromptAppSelectionAsync(OrganizationSummaryDto organization, string? requestedApp, CancellationToken cancellationToken, SshAccessRequest? sshAccess = null)
     {
         var apps = await GetApplicationChoicesAsync(organization.Id, cancellationToken);
         if (!string.IsNullOrWhiteSpace(requestedApp))
@@ -105,6 +106,7 @@ public sealed partial class CliApplication
             var app = FindApp(apps, requestedApp);
             if (app is not null)
             {
+                RejectSshOptionsForExistingApp(sshAccess, app);
                 return app;
             }
 
@@ -120,12 +122,21 @@ public sealed partial class CliApplication
         var selected = PromptSingleSelect("App", choices, choices[0].Value);
         if (selected != "__create__")
         {
-            return apps.Single(app => app.Id == selected);
+            var existing = apps.Single(app => app.Id == selected);
+            RejectSshOptionsForExistingApp(sshAccess, existing);
+            return existing;
         }
 
         var appSlug = PromptAppName();
         var database = PromptSingleSelect("Database", DatabaseChoices(), "sqlite");
-        return await CreateAppAsync(organization, appSlug, database, cancellationToken);
+        return await CreateAppAsync(organization, appSlug, database, cancellationToken, sshAccess);
+    }
+
+    private static void RejectSshOptionsForExistingApp(SshAccessRequest? sshAccess, ApplicationResponse app)
+    {
+        if (sshAccess is not null)
+            throw new CliCommandException(CliExitCodes.ValidationError,
+                $"SSH options apply only when creating a new app. To change SSH access for '{app.Slug}', run 'minicloud environments update <name> {SshOptionsUsage}'.");
     }
 
     private async Task<ApplicationResponse> PromptExistingAppSelectionAsync(OrganizationSummaryDto organization, string? requestedApp, CancellationToken cancellationToken)
@@ -160,22 +171,27 @@ public sealed partial class CliApplication
         OrganizationSummaryDto organization,
         string appSlug,
         string database,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SshAccessRequest? sshAccess = null)
     {
         var createSlug = appSlug.ToLowerInvariant();
         var plans = (await _apiClient.GetPlansAsync(organization.Id, cancellationToken)).Where(x => x.Enabled && x.AccountEnabled).ToArray();
         if (plans.Length == 0)
             throw new CliCommandException(CliExitCodes.ValidationError, "No enabled plans are available. Add a provider account and plan in the portal first.");
         var selectedPlan = PromptSingleSelect("Plan", plans.Select(x => (Value: x.Name, Label: $"{x.Name} ({x.Region}, {x.Sku})")).ToArray(), plans[0].Name);
-        var request = new CreateApplicationRequest(
-            organization.Id,
-            DisplayNameFromSlug(createSlug),
-            createSlug,
-            new CreateInitialEnvironmentRequest("production", selectedPlan, database));
+        var request = BuildCreateApplicationRequest(organization.Id, createSlug, selectedPlan, database, sshAccess);
 
         _console.WriteLine($"Creating app '{createSlug}' in organization '{organization.Name}'...");
-        return await _apiClient.CreateAppAsync(request, cancellationToken);
+        var created = await WithSshErrorsAsync(sshAccess, () => _apiClient.CreateAppAsync(request, cancellationToken));
+        if (sshAccess is not null)
+            WriteSshSelectionNote(sshAccess, created.Environments.FirstOrDefault()?.SshAccess);
+        return created;
     }
+
+    internal static CreateApplicationRequest BuildCreateApplicationRequest(
+        string organizationId, string slug, string plan, string database, SshAccessRequest? sshAccess) =>
+        new(organizationId, DisplayNameFromSlug(slug), slug,
+            new CreateInitialEnvironmentRequest("production", plan, database, sshAccess));
 
     private static ApplicationResponse? FindApp(IEnumerable<ApplicationResponse> apps, string appIdOrSlug) =>
         apps.FirstOrDefault(x =>

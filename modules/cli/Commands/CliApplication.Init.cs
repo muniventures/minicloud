@@ -14,6 +14,7 @@ public sealed partial class CliApplication
         _console.WriteLine();
 
         var outputPath = GetOption(args, "--config") ?? SuggestedInitConfigPath();
+        ParseSshAccessOptions(args);
         if (File.Exists(outputPath) && !args.Contains("--force", StringComparer.Ordinal))
         {
             var existingResult = MinicloudConfigLoader.Load(outputPath);
@@ -36,6 +37,9 @@ public sealed partial class CliApplication
             }
             else
             {
+                if (HasSshAccessOptions(args))
+                    throw new CliCommandException(CliExitCodes.ValidationError,
+                        $"'{outputPath}' already links an app; SSH options apply only when init creates a new app. Use 'minicloud environments update <name> {SshOptionsUsage}'.");
                 var existingConfig = existingResult.Config!;
                 try
                 {
@@ -123,6 +127,9 @@ public sealed partial class CliApplication
         var configuredOutputPath = GetOption(args, "--config");
         var advanced = args.Contains("--advanced", StringComparer.Ordinal);
         var requestedApp = GetOption(args, "--app") ?? FirstPositionalArg(args);
+        var sshAccess = allowCreateApp ? ParseSshAccessOptions(args) : null;
+        if (!allowCreateApp && HasSshAccessOptions(args))
+            throw new CliCommandException(CliExitCodes.ValidationError, $"SSH options apply only when 'minicloud init' creates a new app, or to 'minicloud environments create|update'.");
 
         var me = await _apiClient.GetMeAsync(cancellationToken);
         var organization = me.Organizations.FirstOrDefault();
@@ -133,7 +140,7 @@ public sealed partial class CliApplication
         }
 
         var app = allowCreateApp
-            ? await PromptAppSelectionAsync(organization, requestedApp, cancellationToken)
+            ? await PromptAppSelectionAsync(organization, requestedApp, cancellationToken, sshAccess)
             : await PromptExistingAppSelectionAsync(organization, requestedApp, cancellationToken);
         var database = app.Environments.Count == 1 ? app.Environments[0].Database : null;
 
@@ -190,7 +197,10 @@ public sealed partial class CliApplication
             "--config",
             "--environment",
             "--plan",
-            "--database"
+            "--database",
+            SshKeyOption,
+            SshPublicKeyFileOption,
+            SshKeyNameOption
         };
 
         for (var i = 0; i < args.Count; i++)
