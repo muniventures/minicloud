@@ -1,6 +1,9 @@
 # T30 — Identity, browser sessions and shared bootstrap
 
-Status: not started. Repository: public `muniventures/minicloud`.
+Status: session/bootstrap baseline merged in PR #43 (`a40cd8c521760ac75572ad3ba19565e7260acbf8`);
+missing browser-flow proxy and session integration fixes authored locally with T31, not merged.
+Optional Google completion and real-Kratos qualification remain in [issue #44](https://github.com/muniventures/minicloud/issues/44).
+Repository: public `muniventures/minicloud`.
 Depends on: T00 contracts and ownership map.
 Can run in parallel with: T10 DB work, T20 CLI distribution and T40 images; T41 packaging after the identity/schema/bootstrap contract is frozen. Shared backend model writers are serialized **T30 → T50 → T60**.
 

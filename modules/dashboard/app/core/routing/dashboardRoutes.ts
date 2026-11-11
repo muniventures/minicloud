@@ -21,7 +21,7 @@ function defineRoute(route: DashboardRouteDefinition) {
 
 export const dashboardRoutes = {
   signIn: defineRoute({ key: "signIn", name: "Sign in", path: "/sign-in", layout: "guest" }),
-  signUp: defineRoute({ key: "signUp", name: "Sign up", path: "/sign-up", layout: "guest" }),
+  recovery: defineRoute({ key: "recovery", name: "Recover account", path: "/recovery", layout: "guest" }),
   onboarding: defineRoute({ key: "onboarding", name: "Onboarding", path: "/onboarding", layout: "standalone" }),
   apps: defineRoute({ key: "apps", name: "Apps", path: "/apps", layout: "main", nav: { label: "Apps", icon: AppWindow, group: "main" } }),
   databases: defineRoute({ key: "databases", name: "Databases", path: "/databases", layout: "main", nav: { label: "Databases", icon: Database, group: "main" } }),
@@ -57,7 +57,7 @@ export const dashboardRoutes = {
   settings: defineRoute({
     key: "settings",
     name: "Settings",
-    path: "/settings/team",
+    path: "/settings/account",
     layout: "main"
   })
 } as const;

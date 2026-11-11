@@ -14,7 +14,6 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    env: { VITE_FIREBASE_API_KEY: "firebase-test-placeholder" },
     setupFiles: "./app/test/setup.ts"
   }
 });

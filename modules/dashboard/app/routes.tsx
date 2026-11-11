@@ -14,7 +14,7 @@ import { DeploymentDetailModule } from "./modules/Deployments/DeploymentDetailMo
 import { DeploymentsModule } from "./modules/Deployments/DeploymentsModule";
 import { OnboardingModule } from "./modules/Onboarding/OnboardingModule";
 import { SignInModule } from "./modules/Auth/SignInModule";
-import { SignUpModule } from "./modules/Auth/SignUpModule";
+import { AccountFlowForm } from "./modules/Auth/AccountFlowForm";
 import { TeamSettingsModule } from "./modules/Settings/TeamSettingsModule";
 import { CliLoginModule } from "./modules/CliLogin/CliLoginModule";
 
@@ -25,7 +25,7 @@ export const routes: RouteObject[] = [
     element: <AuthLayout />,
     children: [
       { path: "/sign-in", element: <SignInModule /> },
-      { path: "/sign-up", element: <SignUpModule /> }
+      { path: "/recovery", element: <AccountFlowForm kind="recovery" /> }
     ]
   },
   { path: "/onboarding", element: <OnboardingModule /> },
@@ -47,6 +47,7 @@ export const routes: RouteObject[] = [
       { path: "/deployments", element: <DeploymentsModule /> },
       { path: "/deployments/:deploymentId", element: <DeploymentDetailModule /> },
       { path: "/settings/api-keys", element: <ApiKeysModule /> },
+      { path: "/settings/account", element: <AccountFlowForm kind="settings" returnTo="/settings/account" /> },
       { path: "/settings/team", element: <TeamSettingsModule /> }
     ]
   },

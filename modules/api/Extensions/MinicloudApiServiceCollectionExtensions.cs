@@ -146,6 +146,13 @@ public static class MinicloudApiServiceCollectionExtensions
                 UseCookies = false
             });
         services.AddScoped<BrowserSessionService>();
+        services.AddHttpClient<KratosBrowserFlowClient>(client =>
+            client.Timeout = TimeSpan.FromSeconds(10))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                AllowAutoRedirect = false,
+                UseCookies = false
+            });
         services.AddScoped<DeploymentLifecycleService>();
         services.AddScoped<DeploymentCancellationService>();
         services.AddScoped<DeploymentPreparationService>();

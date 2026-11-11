@@ -1,9 +1,8 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { createAppCustomDomain } from "./environmentsApi";
+import { setCsrfToken } from "./apiClient";
 
-vi.mock("../core/auth/firebase", () => ({
-  getCurrentIdToken: vi.fn().mockResolvedValue("firebase-token")
-}));
+setCsrfToken("synthetic-csrf");
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -18,7 +17,8 @@ it.each(["staging.api.example.test", "example.com"])("sends %s as a JSON object 
   expect(await createAppCustomDomain("app_1", "backend", hostname)).toEqual(domain);
   expect(request).toHaveBeenCalledWith(expect.stringContaining("/api/domains?appId=app_1"), expect.objectContaining({
     method: "POST",
-    headers: expect.objectContaining({ "Content-Type": "application/json", Authorization: "Bearer firebase-token" })
+    credentials: "include",
+    headers: expect.objectContaining({ "Content-Type": "application/json", "X-Minicloud-CSRF": "synthetic-csrf" })
   }));
   const [, options] = request.mock.calls[0];
   expect(JSON.parse(options.body)).toEqual({ serviceName: "backend", hostname });

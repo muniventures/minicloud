@@ -17,9 +17,12 @@ public sealed class KratosSessionValidator(HttpClient client, IOptions<KratosOpt
             throw new KratosUnavailableException();
         }
 
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        var upstreamToken = timeout.Token;
         try
         {
-            using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, upstreamToken);
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
                 return false;
@@ -30,12 +33,12 @@ public sealed class KratosSessionValidator(HttpClient client, IOptions<KratosOpt
                 throw new KratosUnavailableException();
             }
 
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var stream = await response.Content.ReadAsStreamAsync(upstreamToken);
             using var buffer = new MemoryStream();
             var chunk = new byte[4096];
             while (true)
             {
-                var read = await stream.ReadAsync(chunk, cancellationToken);
+                var read = await stream.ReadAsync(chunk, upstreamToken);
                 if (read == 0)
                 {
                     break;
@@ -45,7 +48,7 @@ public sealed class KratosSessionValidator(HttpClient client, IOptions<KratosOpt
                 {
                     throw new KratosUnavailableException();
                 }
-                await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken);
+                await buffer.WriteAsync(chunk.AsMemory(0, read), upstreamToken);
             }
 
             using var document = JsonDocument.Parse(buffer.ToArray());
@@ -69,7 +72,7 @@ public sealed class KratosSessionValidator(HttpClient client, IOptions<KratosOpt
         {
             throw;
         }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException or JsonException or InvalidOperationException)
         {
             throw new KratosUnavailableException();
         }
@@ -99,7 +102,7 @@ public sealed class KratosSessionValidator(HttpClient client, IOptions<KratosOpt
         {
             throw;
         }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
         {
             throw new KratosUnavailableException();
         }

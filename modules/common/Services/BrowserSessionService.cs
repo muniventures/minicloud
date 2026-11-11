@@ -80,6 +80,37 @@ public sealed class BrowserSessionService(
         return session;
     }
 
+    public async Task<CreatedBrowserSession> CreateOrRotateAsync(
+        string userId,
+        string kratosIdentityId,
+        string kratosSessionId,
+        CancellationToken cancellationToken)
+    {
+        var existing = await db.BrowserSessions.SingleOrDefaultAsync(
+            x => x.KratosSessionId == kratosSessionId, cancellationToken);
+        if (existing is null)
+            return await CreateAsync(userId, kratosIdentityId, kratosSessionId, cancellationToken);
+
+        if (existing.UserId != userId || existing.KratosIdentityId != kratosIdentityId ||
+            !await db.Users.AnyAsync(x => x.Id == userId && x.KratosIdentityId == kratosIdentityId, cancellationToken))
+            throw new InvalidOperationException("The identity is not bound to this Minicloud user.");
+
+        // Kratos settings can retain its session ID; rotate the local secret, not the unique upstream binding.
+        var now = timeProvider.GetUtcNow();
+        var cookie = CreateSecret();
+        var csrfToken = CreateCsrfToken(cookie, existing.Id);
+        existing.TokenHash = HashSecret(cookie);
+        existing.CsrfTokenHash = HashSecret(csrfToken);
+        existing.CreatedAt = now;
+        existing.LastSeenAt = now;
+        existing.ExpiresAt = now.Add(AbsoluteLifetime);
+        existing.IdleExpiresAt = now.Add(IdleLifetime);
+        existing.RevokedAt = null;
+        db.Entry(existing).Property(x => x.RevokedAt).IsModified = true;
+        await db.SaveChangesAsync(cancellationToken);
+        return new CreatedBrowserSession(cookie, csrfToken, existing);
+    }
+
     public async Task RevokeAsync(string cookie, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(cookie))

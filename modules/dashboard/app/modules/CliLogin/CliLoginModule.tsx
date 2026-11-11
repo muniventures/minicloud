@@ -39,7 +39,7 @@ function CliLoginContent() {
   }
 
   async function approve() {
-    if (!sessionId || !selectedOrganization) {
+    if (!sessionId || !selectedOrganization || !["owner", "admin"].includes(selectedOrganization.role)) {
       return;
     }
 
@@ -56,6 +56,7 @@ function CliLoginContent() {
 
   const isApproved = session?.status === "approved" || session?.status === "exchanged";
   const isExpired = session?.status === "expired";
+  const canApprove = selectedOrganization?.role === "owner" || selectedOrganization?.role === "admin";
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
@@ -81,10 +82,11 @@ function CliLoginContent() {
             </div>
           )}
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {!canApprove ? <p role="alert">You do not have permission to approve CLI access.</p> : null}
           {isApproved ? <p className="text-sm text-muted-foreground">You can return to your terminal.</p> : null}
           {isExpired ? <p className="text-sm text-destructive">This CLI login session expired. Run `minicloud login` again.</p> : null}
           {!isApproved && !isExpired ? (
-            <Button className="w-full" disabled={!session || !selectedOrganization || isApproving} onClick={approve}>
+            <Button className="w-full" disabled={!session || !canApprove || isApproving} onClick={approve}>
               {isApproving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Terminal className="h-4 w-4" />}
               Approve CLI login
             </Button>

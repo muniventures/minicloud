@@ -1,6 +1,8 @@
 # T31 — Dashboard sessions and ordinary account flows
 
-Status: not started. Repository: public `muniventures/minicloud`.
+Status: ordinary password/session/settings and capability-gated recovery implementation authored locally; not merged.
+Optional Google flow completion and real-Kratos qualification remain in [issue #44](https://github.com/muniventures/minicloud/issues/44).
+Repository: public `muniventures/minicloud`.
 Depends on: T30's frozen account/session/CSRF contract and backend implementation.
 Can run in parallel with: T40/T41 packaging and non-overlapping SSH UI work. T42 setup UI follows both T31 and T41; no concurrent writer may change `AuthProvider`.
 
@@ -44,6 +46,44 @@ Write and run dashboard tests for:
 Run affected dashboard tests, typecheck and production build using documented repository commands. Replace obsolete Firebase mocks rather than preserve compatibility code. Report exact results and explicit environment gaps.
 
 Codex owns final real-browser, separate-origin HTTPS cookie/CORS/CSRF and cross-feature integration tests after all required PRs merge. No deployment, paid resources or real operator conversion belongs to this task.
+
+## Local implementation handoff (2026-11-10)
+
+The dashboard now exports the frozen auth states, profile/capabilities and explicit
+refresh/logout operations. CSRF is held only in the API transport's memory.
+Confirmed 401 clears the profile; temporary dependency failure blocks protected
+content while retaining the profile and intended route. Empty membership lists
+and profile errors never trigger automatic organization creation.
+
+Ordinary routes are `/sign-in`, `/recovery` and `/settings/account`; public signup
+has been removed. Login preserves safe dashboard paths/query strings, including
+CLI approval. Recovery verification leads to password settings. CLI approval
+remains an explicit owner/admin action. T42 receives the setup-state interface,
+not a second provider/bootstrap implementation.
+
+With explicit user authorization, this session also fills the missing T30
+start/read/submit proxy routes. It verifies successful authentication with Kratos
+`/sessions/whoami`, admits only immutable bound identities, bounds bodies and
+upstream requests, rewrites allowlisted cookies/actions and rotates local secrets.
+It fixes browser-session claim reconstruction, camel-case middleware errors and
+rotation when Kratos retains its unique upstream session ID.
+
+T41 retains exclusive runtime-config/startup/image ownership; its remaining
+Firebase configuration fields are unused by this dashboard and must be removed
+there. The Firebase SDK, consumers and mocks owned by T31 are removed.
+
+Focused evidence: dashboard typecheck and production build pass; the full
+dashboard suite passes 241 tests. The selected .NET
+browser-flow/session/authorization/migration/telemetry regressions pass 64 tests,
+including the 64 KiB chunked-body limit and 10-second post-header deadline.
+Raw output/build assets stay under ignored `.local/artifacts/`.
+
+This is not full task or release qualification. [Issue #44](https://github.com/muniventures/minicloud/issues/44)
+tracks missing optional Google provider navigation/callback handling and actual
+Kratos/cookie/recovery response-shape qualification. Keep Google disabled until
+that work is complete. No real operator, external provider, SMTP service, hosted
+deployment or separate-origin browser acceptance was exercised. T90/T91 remain
+the final combined/hosted gates. No changes were pushed.
 
 ## Copilot assignment and handoff
 
