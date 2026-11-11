@@ -19,8 +19,12 @@ import {
 } from "../../api/applicationsApi";
 import { appsFixtureApplications, appsFixturesEnabled } from "../../api/applicationsFixtures";
 import { useAuth } from "../../core/auth/AuthProvider";
-import type { ApplicationEnvironment, Application } from "../../models/application";
+import type { ProviderPlan } from "../../api/providersApi";
+import type { ApplicationEnvironment, Application, SshAccessRequest } from "../../models/application";
 import { planDescription, usePlanCatalog } from "../Providers/usePlanCatalog";
+import { EnvironmentSshAccessPanel } from "./components/EnvironmentSshAccessPanel";
+import { SshAccessFields } from "./components/SshAccessFields";
+import { buildSshAccessRequest, defaultSshAccessDraft, sshErrorMessage, type SshAccessDraft } from "./sshAccess";
 import { formatAge } from "./AppsModule";
 
 // Application settings: app metadata, environment management, app deletion.
@@ -121,7 +125,7 @@ function ScopedAppSettings() {
       else await load();
       return true;
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : "Operation failed.");
+      setActionError(sshErrorMessage(e));
       return false;
     } finally {
       setBusy(false);
@@ -172,6 +176,7 @@ function ScopedAppSettings() {
                     <TableHead>Kind</TableHead>
                     <TableHead>Plan</TableHead>
                     <TableHead>Database</TableHead>
+                    <TableHead>SSH access</TableHead>
                     <TableHead>Latest deployment</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -188,6 +193,11 @@ function ScopedAppSettings() {
                       catalog={catalog}
                       onRename={(name) => act(() => updateEnvironment(app.id, env.id, { name }))}
                       onSetPlan={(plan) => act(() => updateEnvironment(app.id, env.id, { plan }))}
+                      onSaveSsh={async (sshAccess) => {
+                        await updateEnvironment(app.id, env.id, { sshAccess });
+                        if (!abortRef.current?.signal.aborted) await load();
+                      }}
+                      onReload={() => void load()}
                       onSetDefault={() => act(() => updateApplication(app.id, { defaultEnvironmentId: env.id }))}
                       onDelete={(confirmation) => act(() => deleteEnvironment(app.id, env.id, confirmation))}
                     />
@@ -270,6 +280,8 @@ function EnvironmentRow({
   catalog,
   onRename,
   onSetPlan,
+  onSaveSsh,
+  onReload,
   onSetDefault,
   onDelete,
 }: {
@@ -278,9 +290,11 @@ function EnvironmentRow({
   busy: boolean;
   canManage: boolean;
   mutationsBlocked: boolean;
-  catalog: { plans: { id: string; name: string }[]; loading: boolean; error: string | null };
+  catalog: { plans: ProviderPlan[]; loading: boolean; error: string | null };
   onRename: (name: string) => Promise<boolean>;
   onSetPlan: (plan: string) => Promise<boolean>;
+  onSaveSsh: (sshAccess: SshAccessRequest & { expectedRevision: number }) => Promise<void>;
+  onReload: () => void;
   onSetDefault: () => Promise<boolean>;
   onDelete: (confirmation: string) => Promise<boolean>;
 }) {
@@ -380,6 +394,9 @@ function EnvironmentRow({
         </div>
       </TableCell>
       <TableCell data-label="Database">{env.database}</TableCell>
+      <TableCell data-label="SSH access">
+        <EnvironmentSshAccessPanel env={env} plans={catalog.plans} canEdit={canEdit} onSave={onSaveSsh} onReload={onReload} />
+      </TableCell>
       <TableCell data-label="Latest deployment">
         {env.latestDeployment ? (
           <span className="inline-flex flex-wrap items-center gap-2">
@@ -452,13 +469,16 @@ function AddEnvironmentForm({
   busy: boolean;
   startOpen: boolean;
   onAdded: () => void;
-  onCreate: (body: { name: string; plan: string; database: string }) => Promise<boolean>;
+  onCreate: (body: { name: string; plan: string; database: string; sshAccess: SshAccessRequest }) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(startOpen);
   const [name, setName] = useState("");
   const [plan, setPlan] = useState("");
   const [database, setDatabase] = useState("sqlite");
+  const [sshDraft, setSshDraft] = useState<SshAccessDraft>(defaultSshAccessDraft);
+  const [sshError, setSshError] = useState<string | null>(null);
   const catalog = usePlanCatalog(open ? app.organizationId : undefined);
+  const selectedPlan = catalog.plans.find(item => item.name === plan);
   if (!open) {
     return (
       <Button variant="outline" onClick={() => setOpen(true)}>
@@ -471,9 +491,12 @@ function AddEnvironmentForm({
       className="grid min-w-0 gap-3 rounded-md border p-3"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!name.trim() || catalog.loading || catalog.error || !catalog.plans.some(item => item.name === plan)) return;
-        void onCreate({ name: name.trim(), plan: plan.trim(), database }).then(ok => {
-          if (ok) { setOpen(false); setName(""); setPlan(""); onAdded(); }
+        if (!name.trim() || catalog.loading || catalog.error || !selectedPlan) return;
+        const ssh = buildSshAccessRequest(sshDraft, selectedPlan.providerAccountId);
+        if (!ssh.request) { setSshError(ssh.error); return; }
+        setSshError(null);
+        void onCreate({ name: name.trim(), plan: plan.trim(), database, sshAccess: ssh.request }).then(ok => {
+          if (ok) { setOpen(false); setName(""); setPlan(""); setSshDraft(defaultSshAccessDraft); onAdded(); }
         });
       }}
     >
@@ -532,6 +555,17 @@ function AddEnvironmentForm({
           </Select>
         </div>
       </div>
+      {selectedPlan ? (
+        <SshAccessFields
+          idPrefix="new-env"
+          organizationId={app.organizationId}
+          account={{ id: selectedPlan.providerAccountId, name: selectedPlan.providerName, providerType: selectedPlan.providerType }}
+          draft={sshDraft}
+          onChange={setSshDraft}
+          disabled={busy}
+        />
+      ) : null}
+      {sshError ? <p role="alert" className="text-xs text-destructive">{sshError}</p> : null}
       <div className="flex gap-2">
         <Button type="submit" size="sm" disabled={busy || !name.trim() || catalog.loading || !!catalog.error || !catalog.plans.some(item => item.name === plan)}>Create environment</Button>
         <Button type="button" size="sm" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
