@@ -1,6 +1,6 @@
 # T40–T44 — Packaged self-hosting
 
-Repository: `muniventures/minicloud`. Status: T40 in progress locally; T41–T44 not started.
+Repository: `muniventures/minicloud`. Status: T40 merged (#45); T41 in review on `feat/t41-self-hosting-stack`; T42–T44 not started.
 Authority: [packaged self-hosting specification](../../v1.0-self-hosted-installation.md). Its original T00–T90 IDs are local to that document; the IDs below are the umbrella assignments. Implement the stated scope without adding installation modes or rewriting deployment behavior.
 
 | Task | Deliverable | Hard dependencies | Parallel work |

@@ -34,7 +34,7 @@ class OpenBaoConfigurationTests(unittest.TestCase):
         self.assertIn("tls_skip_verify = false", config)
 
     def test_initializer_is_idempotent_and_keeps_bootstrap_secrets_off_cli(self):
-        script = (ROOT / "scripts" / "self-hosting" / "openbao-init.sh").read_text()
+        script = (BUNDLE / "openbao-init.sh").read_text()
         policy = (BUNDLE / "openbao-policy.hcl").read_text()
         self.assertNotIn("|| true", script)
         self.assertIn("OPENBAO_ROOT_TOKEN_FILE", script)
@@ -106,7 +106,7 @@ else:
                 "OPENBAO_POLICY_FILE": str(BUNDLE / "openbao-policy.hcl"),
                 "BAO_ADDR": "https://bao.synthetic",
             }
-            initializer = ROOT / "scripts" / "self-hosting" / "openbao-init.sh"
+            initializer = BUNDLE / "openbao-init.sh"
 
             for _ in range(2):
                 result = subprocess.run(

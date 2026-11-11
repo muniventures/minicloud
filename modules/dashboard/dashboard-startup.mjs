@@ -90,7 +90,8 @@ function createConfig() {
 
 function startNginx() {
   const config = createConfig();
-  const output = "/usr/share/nginx/html/runtime-config.json";
+  const root = process.env.MINICLOUD_DASHBOARD_HTML_ROOT || "/usr/share/nginx/html";
+  const output = `${root}/runtime-config.json`;
   const temporary = `${output}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(config)}\n`, { mode: 0o644 });
   renameSync(temporary, output);

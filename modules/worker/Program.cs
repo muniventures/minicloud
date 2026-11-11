@@ -158,7 +158,9 @@ builder.Services.AddScoped<ControlPlaneAuthorization>();
 builder.Services.AddMinicloudSecrets(
     configureEncryption: options => builder.Configuration.GetSection(SecretEncryptionOptions.SectionName).Bind(options),
     configureStore: options => builder.Configuration.GetSection(OpenBaoSecretStoreOptions.SectionName).Bind(options));
-builder.Services.AddHttpClient<ISecretStore, OpenBaoSecretStore>();
+builder.Services.AddHttpClient<ISecretStore, OpenBaoSecretStore>()
+    .ConfigurePrimaryHttpMessageHandler(provider =>
+        OpenBaoHttpHandler.Create(provider.GetRequiredService<IOptions<OpenBaoSecretStoreOptions>>().Value));
 builder.Services.AddScoped<IAppServiceSecretResolver, AppServiceSecretService>();
 
 // Storage and Artifact Retrieval

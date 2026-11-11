@@ -12,7 +12,7 @@ x-shared-environment: &shared-environment
   OpenBao__MountPath: minicloud-apps
   OpenBao__EnvironmentPrefix: production
   OpenBao__TokenFile: /run/minicloud-openbao/token
-  SSL_CERT_FILE: /run/secrets/openbao-ca.crt
+  OpenBao__CaCertificateFile: /run/secrets/openbao-ca.crt
   Secrets__EncryptionKeyFile: /run/secrets/secret-encryption-key
   DeploymentArtifacts__RootPath: /var/lib/minicloud/artifacts
 
@@ -75,6 +75,10 @@ services:
     image: ${MINICLOUD_OPENBAO_IMAGE:?set MINICLOUD_OPENBAO_IMAGE}
     restart: unless-stopped
     command: ["server", "-config=/etc/openbao/server.hcl"]
+    environment: &openbao-runtime
+      # Secret files and fresh volumes are root-owned; do not drop to the image user.
+      BAO_SKIP_DROP_ROOT: "true"
+      SKIP_CHOWN: "true"
     secrets:
       - openbao-server.crt
       - openbao-server.key
@@ -95,10 +99,44 @@ services:
       start_period: 10s
     networks: [private]
 
+  # Operator-run, opt-in: docker compose --profile maintenance run --rm openbao-configure
+  openbao-configure:
+    profiles: ["maintenance"]
+    image: ${MINICLOUD_OPENBAO_IMAGE:?set MINICLOUD_OPENBAO_IMAGE}
+    restart: "no"
+    entrypoint: ["/bin/sh", "/opt/minicloud/openbao-init.sh"]
+    environment:
+      BAO_ADDR: https://openbao:8200
+      BAO_CACERT: /run/secrets/openbao-ca.crt
+      OPENBAO_POLICY_FILE: /etc/openbao/minicloud-policy.hcl
+      OPENBAO_ROOT_TOKEN_FILE: /run/openbao-root/token
+      OPENBAO_ROLE_ID_FILE: /run/openbao-approle/role-id
+      OPENBAO_SECRET_ID_FILE: /run/openbao-approle/secret-id
+    secrets:
+      - openbao-ca.crt
+    volumes:
+      - ./openbao-init.sh:/opt/minicloud/openbao-init.sh:ro
+      - ./openbao-policy.hcl:/etc/openbao/minicloud-policy.hcl:ro
+      # The root token stays off-host between runs; point this at a temporary protected copy.
+      - type: bind
+        source: ${OPENBAO_ROOT_TOKEN_FILE:-/dev/null}
+        target: /run/openbao-root/token
+        read_only: true
+      - type: bind
+        source: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/openbao-approle
+        target: /run/openbao-approle
+        bind:
+          create_host_path: false
+    depends_on:
+      openbao:
+        condition: service_healthy
+    networks: [private]
+
   openbao-agent:
     image: ${MINICLOUD_OPENBAO_IMAGE:?set MINICLOUD_OPENBAO_IMAGE}
     restart: unless-stopped
     command: ["agent", "-config=/etc/openbao/agent.hcl"]
+    environment: *openbao-runtime
     secrets:
       - openbao-role-id
       - openbao-secret-id
@@ -121,6 +159,13 @@ services:
     image: ${MINICLOUD_KRATOS_IMAGE:?set MINICLOUD_KRATOS_IMAGE}
     restart: "no"
     command: ["migrate", "sql", "-e", "--yes", "--config", "/etc/config/kratos.yml"]
+    environment: &kratos-environment
+      SELFSERVICE_DEFAULT_BROWSER_RETURN_URL: ${CONSOLE_URL:?set CONSOLE_URL}/
+      SELFSERVICE_ALLOWED_RETURN_URLS: ${CONSOLE_URL:?set CONSOLE_URL}
+      SELFSERVICE_FLOWS_ERROR_UI_URL: ${CONSOLE_URL:?set CONSOLE_URL}/sign-in
+      SELFSERVICE_FLOWS_LOGIN_UI_URL: ${CONSOLE_URL:?set CONSOLE_URL}/sign-in
+      SELFSERVICE_FLOWS_SETTINGS_UI_URL: ${CONSOLE_URL:?set CONSOLE_URL}/settings/account
+      SELFSERVICE_FLOWS_RECOVERY_UI_URL: ${CONSOLE_URL:?set CONSOLE_URL}/recovery
     env_file:
       - ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/kratos.env
     volumes:
@@ -135,6 +180,7 @@ services:
     image: ${MINICLOUD_KRATOS_IMAGE:?set MINICLOUD_KRATOS_IMAGE}
     restart: unless-stopped
     command: ["serve", "--config", "/etc/config/kratos.yml"]
+    environment: *kratos-environment
     env_file:
       - ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/kratos.env
     volumes:
@@ -144,7 +190,8 @@ services:
       kratos-migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "kratos", "healthcheck", "--config", "/etc/config/kratos.yml"]
+      # Requires the Alpine Kratos image variant, which ships busybox wget.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:4434/health/ready"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -155,12 +202,12 @@ services:
     image: ${MINICLOUD_API_IMAGE:?set MINICLOUD_API_IMAGE}
     restart: "no"
     command: ["migrate"]
-    environment: *api-environment
+    environment:
+      Database__Provider: Postgres
+      Database__PasswordFile: /run/secrets/app-db-password
+      ConnectionStrings__Minicloud: Host=postgres;Port=5432;Database=minicloud;Username=minicloud
     secrets:
       - app-db-password
-      - secret-encryption-key
-    volumes:
-      - ./server-release.json:/etc/minicloud/server-release.json:ro
     depends_on:
       database-initialize:
         condition: service_completed_successfully
@@ -269,9 +316,9 @@ secrets:
   secret-encryption-key:
     file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/secret-encryption-key
   openbao-role-id:
-    file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/openbao-role-id
+    file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/openbao-approle/role-id
   openbao-secret-id:
-    file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/openbao-secret-id
+    file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/openbao-approle/secret-id
   openbao-server.crt:
     file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/openbao-server.crt
   openbao-server.key:
@@ -284,7 +331,14 @@ secrets:
 volumes:
   postgres:
   openbao:
+  # Memory-backed so the renewable token never reaches disk and no stale token
+  # satisfies the agent healthcheck after a restart.
   openbao-agent-token:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=1m,mode=0750
   artifacts:
   caddy-data:
   caddy-config:
