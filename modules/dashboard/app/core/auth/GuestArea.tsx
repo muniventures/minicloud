@@ -1,18 +1,19 @@
 import type { ReactNode } from "react";
 import { runtimeConfig } from "@/core/config/runtimeConfig";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
+import { safeReturnPath } from "../../api/accountApi";
+import { AccountStatus } from "./AccountStatus";
 
 export function GuestArea({ children }: { children: ReactNode }) {
-  const { firebaseUser, isInitializing } = useAuth();
+  const { status } = useAuth();
+  const location = useLocation();
 
-  if (isInitializing) {
-    return null;
+  if (status === "authenticated") {
+    return <Navigate replace to={location.pathname === "/recovery" ? "/settings/account" :
+      safeReturnPath((location.state as { from?: unknown } | null)?.from)} />;
   }
-
-  if (firebaseUser) {
-    return <Navigate replace to="/apps" />;
-  }
+  if (status !== "unauthenticated") return <AccountStatus />;
 
   return (
     <>

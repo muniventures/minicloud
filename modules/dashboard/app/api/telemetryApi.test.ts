@@ -10,10 +10,7 @@ import {
   revokeTelemetryCredential,
   updateTelemetrySettings
 } from "./telemetryApi";
-
-vi.mock("../core/auth/firebase", () => ({
-  getCurrentIdToken: vi.fn().mockResolvedValue("firebase-token")
-}));
+import { setCsrfToken } from "./apiClient";
 
 function jsonResponse(payload: unknown, status = 200) {
   return {
@@ -26,16 +23,17 @@ function jsonResponse(payload: unknown, status = 200) {
 
 describe("telemetryApi", () => {
   beforeEach(() => {
+    setCsrfToken("synthetic-csrf");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({})));
   });
 
-  it("fetches settings and credentials with Firebase auth", async () => {
+  it("fetches settings and credentials with browser cookies", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ appId: "app_1", enabled: true }));
     await getTelemetrySettings("app_1");
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining("/api/environments/app_1/telemetry"),
       expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: "Bearer firebase-token" })
+        credentials: "include"
       })
     );
 

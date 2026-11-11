@@ -32,6 +32,7 @@ public sealed class BrowserRequestSecurityMiddleware(RequestDelegate next)
                 await JsonSerializer.SerializeAsync(
                     context.Response.Body,
                     new ErrorResponse(new ErrorBody("csrf_invalid", "Request origin or CSRF token is invalid.", [])),
+                    new JsonSerializerOptions(JsonSerializerDefaults.Web),
                     cancellationToken: context.RequestAborted);
                 return;
             }

@@ -2,12 +2,9 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { AuthContext } from "../auth/AuthProvider";
-import { signOutOfFirebase } from "../auth/firebase";
 import { SidebarNavigation } from "./SidebarNavigation";
 
-vi.mock("../auth/firebase", () => ({
-  signOutOfFirebase: vi.fn(),
-}));
+const logout = vi.fn();
 
 afterEach(() => {
   cleanup();
@@ -19,11 +16,10 @@ describe("SidebarNavigation", () => {
     render(
       <AuthContext.Provider
         value={{
-          user: { email: "muni@example.test", displayName: null } as never,
-          firebaseUser: { email: "muni@example.test", displayName: null } as never,
-          loading: false,
-          isInitializing: false,
-          isProfileLoading: false,
+          status: "authenticated",
+          capabilities: { password: true, google: false, emailRecovery: false, bootstrapState: "ready" },
+          logout,
+          refreshSession: async () => {},
           profile: {
             id: "user-1",
             email: "muni@example.test",
@@ -50,10 +46,10 @@ describe("SidebarNavigation", () => {
     });
     expect(await screen.findByRole("menuitem", { name: "Settings" })).toHaveAttribute(
       "href",
-      "/settings/team",
+      "/settings/account",
     );
     fireEvent.click(screen.getByRole("menuitem", { name: "Log out" }));
 
-    expect(signOutOfFirebase).toHaveBeenCalledOnce();
+    expect(logout).toHaveBeenCalledOnce();
   });
 });

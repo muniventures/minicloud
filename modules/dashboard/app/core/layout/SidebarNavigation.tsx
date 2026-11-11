@@ -10,7 +10,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "../auth/AuthProvider";
-import { signOutOfFirebase } from "../auth/firebase";
 import { dashboardRoutes, navigationRoutes, settingsRoutes } from "../routing/dashboardRoutes";
 
 function getFallbackName(email?: string | null) {
@@ -36,10 +35,9 @@ function getInitials(name: string) {
 }
 
 export function SidebarNavigation({ onNavigate }: { onNavigate: () => void }) {
-  const { selectedOrganization, firebaseUser, profile } = useAuth();
-  const email = profile?.email || firebaseUser?.email;
-  const userName = profile?.displayName || firebaseUser?.displayName || getFallbackName(email);
-  const avatarUrl = firebaseUser?.photoURL;
+  const { selectedOrganization, profile, logout } = useAuth();
+  const email = profile?.email;
+  const userName = profile?.displayName || getFallbackName(email);
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
@@ -117,11 +115,7 @@ export function SidebarNavigation({ onNavigate }: { onNavigate: () => void }) {
               className="flex min-h-12 w-full items-center gap-2 rounded-md px-2 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
               <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground">
-                {avatarUrl ? (
-                  <img src={avatarUrl} alt="" className="size-full object-cover" />
-                ) : (
-                  <span aria-hidden="true">{getInitials(userName)}</span>
-                )}
+                <span aria-hidden="true">{getInitials(userName)}</span>
               </span>
               <span className="grid min-w-0 flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-semibold">{userName}</span>
@@ -138,11 +132,7 @@ export function SidebarNavigation({ onNavigate }: { onNavigate: () => void }) {
           >
             <DropdownMenuLabel className="flex items-center gap-2 p-1.5 font-normal">
               <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-primary text-xs font-semibold text-primary-foreground">
-                {avatarUrl ? (
-                  <img src={avatarUrl} alt="" className="size-full object-cover" />
-                ) : (
-                  <span aria-hidden="true">{getInitials(userName)}</span>
-                )}
+                <span aria-hidden="true">{getInitials(userName)}</span>
               </span>
               <span className="grid min-w-0 flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-semibold">{userName}</span>
@@ -163,7 +153,7 @@ export function SidebarNavigation({ onNavigate }: { onNavigate: () => void }) {
               </a>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => void signOutOfFirebase()}>
+            <DropdownMenuItem onSelect={() => void logout()}>
               <LogOut aria-hidden="true" />
               Log out
             </DropdownMenuItem>

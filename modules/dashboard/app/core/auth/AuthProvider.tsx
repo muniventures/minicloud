@@ -1,97 +1,107 @@
-import { onAuthStateChanged, type User } from "firebase/auth";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from "react";
+import { getAccountCapabilities, getAccountSession, logoutAccount, type AccountCapabilities } from "../../api/accountApi";
+import { setCsrfToken, subscribeAuthFailures } from "../../api/apiClient";
 import { getMe } from "../../api/identityApi";
-import type { MeResponse } from "../../models/controlPlane";
-import { auth } from "./firebase";
+import { ApiError, type MeResponse } from "../../models/controlPlane";
 
+export type AuthStatus = "initializing" | "authenticated" | "unauthenticated" | "unavailable" | "setup_required" | "setup_blocked";
 type AuthContextValue = {
-  user: User | null;
-  firebaseUser: User | null;
-  loading: boolean;
-  isInitializing: boolean;
-  isProfileLoading: boolean;
+  status: AuthStatus;
   profile: MeResponse | null;
+  capabilities: AccountCapabilities | null;
   selectedOrganization: MeResponse["organizations"][number] | null;
   profileError: string | null;
+  refreshSession: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  logout: () => Promise<void>;
 };
 
 export const AuthContext = createContext<AuthContextValue>({
-  user: null,
-  firebaseUser: null,
-  loading: true,
-  isInitializing: true,
-  isProfileLoading: false,
-  profile: null,
-  selectedOrganization: null,
-  profileError: null,
-  refreshProfile: async () => {}
+  status: "initializing", profile: null, capabilities: null, selectedOrganization: null,
+  profileError: null, refreshSession: async () => {}, refreshProfile: async () => {}, logout: async () => {}
 });
 
 export function AuthProvider({ children }: PropsWithChildren) {
-  const [user, setUser] = useState<User | null>(auth.currentUser);
-  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<AuthStatus>("initializing");
   const [profile, setProfile] = useState<MeResponse | null>(null);
-  const [isProfileLoading, setIsProfileLoading] = useState(false);
+  const [capabilities, setCapabilities] = useState<AccountCapabilities | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const generation = useRef(0);
 
-  useEffect(() => {
-    return onAuthStateChanged(auth, nextUser => {
-      setUser(nextUser);
-      setLoading(false);
-    });
-  }, []);
-
-  const refreshProfile = useCallback(async () => {
-    if (!user) {
-      setProfile(null);
-      setProfileError(null);
-      setIsProfileLoading(false);
-      return;
-    }
-
-    setIsProfileLoading(true);
+  const refreshSession = useCallback(async () => {
+    const current = ++generation.current;
     setProfileError(null);
     try {
-      setProfile(await getMe());
+      const nextCapabilities = await getAccountCapabilities();
+      if (current !== generation.current) return;
+      setCapabilities(nextCapabilities);
+      if (nextCapabilities.bootstrapState !== "ready") {
+        setCsrfToken(null);
+        setProfile(null);
+        setStatus(nextCapabilities.bootstrapState === "required" ? "setup_required" : "setup_blocked");
+        return;
+      }
+      const session = await getAccountSession();
+      if (current !== generation.current) return;
+      setCsrfToken(session.csrfToken);
+      const nextProfile = await getMe();
+      if (current !== generation.current) return;
+      setProfile(nextProfile);
+      setStatus("authenticated");
     } catch (error) {
-      setProfileError(error instanceof Error ? error.message : "Unable to load workspace.");
-    } finally {
-      setIsProfileLoading(false);
+      if (current !== generation.current) return;
+      if (error instanceof ApiError && error.status === 401) {
+        setCsrfToken(null);
+        setProfile(null);
+        setStatus("unauthenticated");
+      } else {
+        setStatus("unavailable");
+        setProfileError("Unable to load your account. Retry when the service is available.");
+      }
     }
-  }, [user]);
+  }, []);
 
   useEffect(() => {
-    if (!user) {
+    const unsubscribe = subscribeAuthFailures(code => {
+      ++generation.current;
+      if (code === 401) {
+        setCsrfToken(null);
+        setProfile(null);
+        setProfileError(null);
+        setStatus("unauthenticated");
+      } else {
+        setStatus("unavailable");
+        setProfileError("Account service is temporarily unavailable.");
+      }
+    });
+    void refreshSession();
+    return () => { ++generation.current; unsubscribe(); };
+  }, [refreshSession]);
+
+  const logout = useCallback(async () => {
+    ++generation.current;
+    try {
+      await logoutAccount();
+      setCsrfToken(null);
       setProfile(null);
+      setStatus("unauthenticated");
       setProfileError(null);
-      setIsProfileLoading(false);
-      return;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setCsrfToken(null);
+        setProfile(null);
+        setStatus("unauthenticated");
+      } else {
+        setStatus("unavailable");
+        setProfileError("Sign out could not be confirmed. Retry account access.");
+      }
     }
+  }, []);
 
-    setIsProfileLoading(true);
-    setProfileError(null);
-
-    getMe()
-      .then(setProfile)
-      .catch(error => setProfileError(error instanceof Error ? error.message : "Unable to load workspace."))
-      .finally(() => setIsProfileLoading(false));
-  }, [user]);
-
-  const value = useMemo(
-    () => ({
-      user,
-      firebaseUser: user,
-      loading,
-      isInitializing: loading,
-      isProfileLoading,
-      profile,
-      selectedOrganization: profile?.organizations[0] ?? null,
-      profileError,
-      refreshProfile
-    }),
-    [isProfileLoading, loading, profile, profileError, refreshProfile, user]
-  );
+  const value = useMemo(() => ({
+    status, profile, capabilities, selectedOrganization: profile?.organizations[0] ?? null,
+    profileError, refreshSession, refreshProfile: refreshSession, logout
+  }), [status, profile, capabilities, profileError, refreshSession, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

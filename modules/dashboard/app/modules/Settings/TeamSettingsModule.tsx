@@ -21,7 +21,7 @@ export function TeamSettingsModule() {
     profile,
     selectedOrganization,
     refreshProfile,
-    isProfileLoading,
+    status,
     profileError,
   } = useAuth();
 
@@ -78,7 +78,7 @@ export function TeamSettingsModule() {
             query={query}
             onChange={setQuery}
             onRefresh={() => refreshProfile()}
-            loading={isProfileLoading}
+            loading={status === "initializing"}
             count={memberships.length}
             filters={[
               {

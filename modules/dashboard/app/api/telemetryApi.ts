@@ -1,4 +1,4 @@
-import { apiRequest } from "./apiClient";
+import { apiRequest, apiUrl } from "./apiClient";
 import { runtimeConfig } from "../core/config/runtimeConfig";
 import type {
   GrafanaExchangeResponse,
@@ -127,6 +127,13 @@ export async function exchangeGrafanaLaunch(
   exchangeUrl?: string | null
 ): Promise<GrafanaExchangeResponse> {
   const targetUrl = exchangeUrl || `${runtimeConfig.apiBaseUrl}/api/grafana/exchange`;
+  const target = new URL(targetUrl);
+  if (target.origin === new URL(apiUrl("/api/grafana/exchange")).origin) {
+    if (target.href !== apiUrl("/api/grafana/exchange")) throw new Error("Invalid Grafana exchange destination.");
+    return apiRequest<GrafanaExchangeResponse>("/api/grafana/exchange", { method: "POST", body: { launchCode } });
+  }
+  if (target.protocol !== "https:" || target.username || target.password || target.search || target.hash ||
+      target.pathname !== "/api/grafana/exchange") throw new Error("Invalid Grafana exchange destination.");
   const response = await fetch(targetUrl, {
     method: "POST",
     credentials: "include",

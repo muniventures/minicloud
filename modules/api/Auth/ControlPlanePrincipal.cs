@@ -39,7 +39,8 @@ public static class ControlPlanePrincipalExtensions
             user.FindFirstValue(ClaimTypes.NameIdentifier),
             user.FindFirstValue("api_key_id"),
             user.FindFirstValue("organization_id"),
-            scopes);
+            scopes,
+            user.FindFirstValue("browser_session_id"));
     }
 }
 

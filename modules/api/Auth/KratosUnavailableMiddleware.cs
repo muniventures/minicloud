@@ -7,6 +7,11 @@ public sealed class KratosUnavailableMiddleware(RequestDelegate next)
 {
     public async Task InvokeAsync(HttpContext context)
     {
+        if (context.Request.Path.StartsWithSegments("/api/account"))
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            context.Response.Headers.Pragma = "no-cache";
+        }
         try
         {
             await next(context);
@@ -19,6 +24,7 @@ public sealed class KratosUnavailableMiddleware(RequestDelegate next)
             await JsonSerializer.SerializeAsync(
                 context.Response.Body,
                 new ErrorResponse(new ErrorBody("auth_unavailable", "Identity service is temporarily unavailable.", [])),
+                new JsonSerializerOptions(JsonSerializerDefaults.Web),
                 cancellationToken: context.RequestAborted);
         }
     }

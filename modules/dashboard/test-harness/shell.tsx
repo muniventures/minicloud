@@ -5,7 +5,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import "../app/styles.css";
-import { auth } from "../app/core/auth/firebase";
+import { setCsrfToken } from "../app/api/apiClient";
 import { AuthContext } from "../app/core/auth/AuthProvider";
 import { routes } from "../app/routes";
 import { installMockTransport } from "./mockTransport";
@@ -17,19 +17,11 @@ const themeParam = params.get("theme");
 if (themeParam === "dark") document.documentElement.classList.add("dark");
 if (themeParam === "light") document.documentElement.classList.remove("dark");
 
-const fakeUser = { getIdToken: async () => "fake-token", uid: "shot" };
-try {
-  (auth as unknown as { currentUser: unknown }).currentUser = fakeUser;
-} catch {
-  Object.defineProperty(auth, "currentUser", { value: fakeUser, configurable: true });
-}
+setCsrfToken("synthetic-csrf");
 
 const authValue = {
-  user: fakeUser,
-  firebaseUser: fakeUser,
-  loading: false,
-  isInitializing: false,
-  isProfileLoading: false,
+  status: "authenticated",
+  capabilities: { password: true, google: false, emailRecovery: false, bootstrapState: "ready" },
   profile: {
     id: "user_shot",
     email: "shot@example.test",
@@ -39,6 +31,8 @@ const authValue = {
   selectedOrganization: { id: "org_fixture_01", name: "Fixture Org", slug: "fixture", role: "owner" },
   profileError: null,
   refreshProfile: async () => {},
+  refreshSession: async () => {},
+  logout: async () => {},
 };
 
 const initialRoute = params.get("route") ?? "/apps";
