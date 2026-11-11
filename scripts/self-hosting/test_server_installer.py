@@ -151,6 +151,52 @@ class InstallerTests(unittest.TestCase):
     def subject(self):
         return FixtureInstaller(self.args, self.host)
 
+    def test_maintenance_dispatch_requires_and_verifies_signed_helper_before_execution(self):
+        helper = BUNDLE / "server_maintenance.py"
+        self.payload[helper.name] = helper.read_bytes()
+        archive = self.assets / self.manifest["bundle"]["name"]
+        with tarfile.open(archive, "w:gz") as target:
+            for name, data in self.payload.items():
+                member = tarfile.TarInfo(name)
+                member.size = len(data)
+                target.addfile(member, io.BytesIO(data))
+        self.manifest["files"][helper.name] = hashlib.sha256(helper.read_bytes()).hexdigest()
+        self.manifest["bundle"]["sha256"] = hashlib.sha256(archive.read_bytes()).hexdigest()
+        (self.assets / "server-manifest.json").write_text(json.dumps(self.manifest))
+        self.subject().execute()
+        self.args.command = "maintenance"
+        self.args.maintenance_operation = "status"
+        subject = self.subject()
+        with mock.patch.object(self.host, "tools", side_effect=AssertionError("No Docker call")):
+            result = subject.execute()
+        self.assertEqual("coordinated_maintenance_blocked", result["state"])
+        self.assertEqual([], subject.events)
+        installed_helper = self.args.root / "bundle/server_maintenance.py"
+        installed_helper.write_text("raise AssertionError('untrusted helper executed')")
+        with self.assertRaisesRegex(installer.InstallError, "differs from the signed release"):
+            self.subject().execute()
+        self.assertFalse(any(path.name == "__pycache__"
+                             for path in (self.args.root / "bundle").rglob("*")))
+
+    def test_old_release_without_signed_maintenance_helper_is_not_silently_adopted(self):
+        self.subject().execute()
+        self.args.command = "maintenance"
+        self.args.maintenance_operation = "status"
+        with self.assertRaisesRegex(installer.InstallError, "signed maintenance tooling"):
+            self.subject().execute()
+
+    def test_maintenance_main_refuses_non_root_before_lock_or_commands(self):
+        with mock.patch.object(installer.os, "geteuid", return_value=1000):
+            with self.assertRaisesRegex(installer.InstallError, "Run as root"):
+                installer.main([
+                    "maintenance", "status", "--tag", self.args.tag,
+                    "--assets-dir", str(self.assets), "--root", str(self.args.root),
+                    "--config", str(self.config), "--recovery-dir", str(self.recovery),
+                    "--public-address", "192.0.2.1",
+                ])
+        self.assertFalse(self.args.root.exists())
+        self.assertFalse(self.args.root.with_name(self.args.root.name + ".installation.lock").exists())
+
     def test_preflight_refuses_foreign_state_and_conflicts_before_creation_or_download(self):
         subject = self.subject()
         self.host.conflict = True

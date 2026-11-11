@@ -9,6 +9,9 @@ from a checkout or substitute floating image tags.
 
 The public control-plane installer and setup flow now have source implementations;
 upgrade/recovery and installation qualification remain open. The
+[maintenance guide](server-maintenance.md) documents the concrete lifecycle
+interface blocker and independently encrypted recovery-dependency tooling;
+those archives are not full coordinated backups. The
 [versioned installer/manual guide](server-installer.md) documents exact-release
 verification, protected inputs, shared staged Compose operations and resumable
 readiness. It is not a claim that a server release exists.

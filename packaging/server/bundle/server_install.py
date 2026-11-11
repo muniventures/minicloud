@@ -721,6 +721,17 @@ class Installer:
                 "action": "Sign in; provider/plan configuration is explicit. Future version changes require upgrade."}
 
     def execute(self):
+        if self.args.command == "maintenance":
+            self.load_state()
+            require(self.state is not None and self.state["credentialsComplete"],
+                    "Maintenance requires the original complete installation and verified exact installed release.")
+            helper = self.root / "bundle/server_maintenance.py"
+            require("server_maintenance.py" in self.manifest["files"],
+                    "Selected release does not provide signed maintenance tooling.")
+            self.verify_installed_bundle()
+            namespace = {"__name__": "minicloud_verified_maintenance"}
+            exec(compile(helper.read_bytes(), "verified-release/server_maintenance.py", "exec"), namespace)
+            return namespace["execute"](self, globals())
         result = self.preflight()
         if self.args.command == "preflight":
             return result
@@ -769,7 +780,11 @@ class Installer:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("preflight", "install", "prepare", "initialize", "activate", "status", "rotate-token"))
+    parser.add_argument("command", choices=("preflight", "install", "prepare", "initialize", "activate", "status", "rotate-token", "maintenance"))
+    parser.add_argument("maintenance_operation", nargs="?", choices=(
+        "status", "backup", "upgrade", "restore", "transfer", "stop", "remove",
+        "backup-recovery", "verify-recovery", "rehearse-recovery",
+        "retention-plan", "remove-recovery", "schedule-recovery"))
     parser.add_argument("--tag", required=True)
     parser.add_argument("--assets-dir", type=Path, required=True)
     parser.add_argument("--root", type=Path, default=Path("/opt/minicloud"))
@@ -777,8 +792,19 @@ def main(argv=None):
     parser.add_argument("--recovery-dir", type=Path, required=True)
     parser.add_argument("--public-address", action="append", required=True)
     parser.add_argument("--token-output-name")
+    parser.add_argument("--backup-dir", type=Path)
+    parser.add_argument("--archive", type=Path)
+    parser.add_argument("--recipients-file", type=Path)
+    parser.add_argument("--identity-file", type=Path)
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--keep", type=int)
+    parser.add_argument("--confirm-backup-id")
+    parser.add_argument("--at")
     args = parser.parse_args(argv)
     os.umask(0o077)
+    require(os.geteuid() == 0, "Run as root after independent signature verification.")
+    require((args.command == "maintenance") == (args.maintenance_operation is not None),
+            "Specify a maintenance operation only with the maintenance command.")
     require(all(path.is_absolute() for path in (args.assets_dir, args.root, args.config, args.recovery_dir)),
             "All paths must be absolute.")
     require(all(path == path.resolve() for path in (args.assets_dir, args.root, args.config, args.recovery_dir)),
@@ -787,13 +813,17 @@ def main(argv=None):
         installer = Installer(args)
         try:
             result = installer.execute()
-        except (InstallError, OSError, ValueError, KeyError, subprocess.TimeoutExpired) as error:
+        except (InstallError, OSError, ValueError, KeyError, TypeError, tarfile.TarError, subprocess.TimeoutExpired) as error:
             if installer.state:
                 installer.save(lastFailure="Installation/readiness failed; preserve state and inspect protected diagnostics.")
             detail = str(error) if isinstance(error, InstallError) else "Invalid/incomplete protected input or unavailable host dependency."
             raise InstallError(f"Failed: {detail} Original operation, volumes and credentials retained; resume after reconciliation.") from error
     print(json.dumps(result, sort_keys=True))
-    return 0 if result["state"] in ("ready", "preflight_passed", "prepared", "initialized") else 2
+    return 0 if result["state"] in (
+        "ready", "preflight_passed", "prepared", "initialized",
+        "recovery_dependencies_saved", "recovery_dependencies_verified",
+        "recovery_dependencies_rehearsed", "retention_plan", "recovery_archive_removed",
+        "schedule_authored_not_installed") else 2
 
 
 if __name__ == "__main__":

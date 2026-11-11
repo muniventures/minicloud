@@ -4,7 +4,9 @@ The implementation exists, but **no server release is published or qualified**.
 The commands below describe a future exact signed release, not permission to
 publish, install a public host, or replace missing release assets with source
 builds. Native amd64/arm64, full-image, real Kratos, Caddy/ACME and hosted
-acceptance remain release gates. Upgrade/full recovery tooling belongs to T44.
+acceptance remain release gates. [Maintenance](server-maintenance.md) includes
+independently encrypted recovery dependencies, but upgrade/full recovery remain
+blocked on production admission/drain/transfer-fencing interfaces.
 
 ## Trust and prerequisites
 
