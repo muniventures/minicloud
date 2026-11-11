@@ -18,6 +18,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+sys.dont_write_bytecode = True
 import component_smoke as component
 
 REGISTRY_IMAGE = "registry:3.1.2@sha256:01cd312e67026f06f5d89c3e133a4a9adc7cb9eeb9b1194e0b2954dfd770efd2"
@@ -25,7 +26,7 @@ REGISTRY_IMAGE = "registry:3.1.2@sha256:01cd312e67026f06f5d89c3e133a4a9adc7cb9ee
 
 def main():
     fixture_user = f"{os.getuid()}:{os.getgid()}"
-    with tempfile.TemporaryDirectory(prefix="minicloud-registry-smoke-") as temp:
+    with tempfile.TemporaryDirectory(prefix="minicloud-registry-smoke-", dir=component.ARTIFACTS) as temp:
         directory = Path(temp)
         (directory / "auth").mkdir()
         (directory / "data").mkdir()
@@ -206,7 +207,10 @@ networks:
             # Keep the real build visible long enough to observe waiting before queue admission.
             with (source / "Dockerfile").open("a") as build_file:
                 build_file.write("RUN sleep 3\n")
-            component.run("dotnet", "build", "modules/cli/Minicloud.Cli.csproj", "--no-restore", "-v", "quiet", "-m:1", "-nr:false", timeout=180)
+            cli_artifacts = directory / "cli-build"
+            component.run("dotnet", "build", "modules/cli/Minicloud.Cli.csproj",
+                          "--artifacts-path", str(cli_artifacts), "-v", "quiet",
+                          "-m:1", "-nr:false", timeout=180)
             customer_config = directory / "minicloud.yml"
             customer_config.write_text(f"""app: {app}
 appId: application_{app}
@@ -224,7 +228,7 @@ services:
             cli_env = component.ENV.copy()
             cli_env["MINICLOUD_API_URL"] = base
             cli_env["MINICLOUD_TOKEN"] = token
-            cli = subprocess.Popen(["dotnet", "modules/cli/bin/Debug/net10.0/Minicloud.Cli.dll", "deploy", "all", "--config", str(customer_config)],
+            cli = subprocess.Popen(["dotnet", str(cli_artifacts / "bin/Minicloud.Cli/debug/Minicloud.Cli.dll"), "deploy", "all", "--config", str(customer_config)],
                                    cwd=component.ROOT, env=cli_env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             try:
                 deadline = time.monotonic() + 120

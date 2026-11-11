@@ -120,6 +120,7 @@ public sealed class DeploymentIntegrationTests
         }
         startInfo.Environment["TEST_POSTGRES_PASSWORD"] = "cleanup-only";
         startInfo.Environment["TEST_BAO_TOKEN"] = "cleanup-only";
+        startInfo.Environment["TEST_SECRET_ENCRYPTION_KEY"] = "cleanup-only";
         using var cleanup = Process.Start(startInfo);
         if (cleanup is null)
         {

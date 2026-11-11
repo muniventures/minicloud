@@ -569,6 +569,7 @@ public sealed class ApplicationEnvironmentIntegrationTests : IAsyncLifetime
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["Database:Provider"] = "Sqlite",
+                    ["Secrets:EncryptionKey"] = "synthetic-application-environment-test-key",
                     ["Providers:AllowLegacyConfiguration"] = "true",
                     ["ManagedDomains:Suffix"] = "app.muni.dev",
                     ["Firebase:ProjectId"] = "minicloud-test",

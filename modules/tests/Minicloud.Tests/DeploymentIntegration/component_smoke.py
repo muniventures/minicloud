@@ -18,9 +18,14 @@ RUN_ID = os.environ.get("MINICLOUD_TEST_RUN_ID") or secrets.token_hex(6)
 if not re.fullmatch(r"[0-9a-f]{12}", RUN_ID):
     raise ValueError("MINICLOUD_TEST_RUN_ID must be twelve lowercase hexadecimal characters")
 PROJECT = f"mcint{RUN_ID}"
+ARTIFACTS = ROOT / ".local/artifacts/deployment-integration" / RUN_ID
+ARTIFACTS.mkdir(parents=True, exist_ok=True)
 ENV = os.environ.copy()
+ENV["GIT_CEILING_DIRECTORIES"] = os.pathsep.join(filter(None, (
+    ENV.get("GIT_CEILING_DIRECTORIES"), str(ARTIFACTS))))
 ENV.setdefault("TEST_POSTGRES_PASSWORD", secrets.token_urlsafe(24))
 ENV.setdefault("TEST_BAO_TOKEN", secrets.token_urlsafe(24))
+ENV.setdefault("TEST_SECRET_ENCRYPTION_KEY", secrets.token_urlsafe(32))
 
 
 def run(*args, timeout=120, check=True):
@@ -77,7 +82,7 @@ def main():
         compose("pull", "postgres", "openbao", timeout=600)
         compose("build", "api", "worker", timeout=1200)
         broken_image = f"{PROJECT}-broken-worker:local"
-        with tempfile.TemporaryDirectory(prefix="mc-broken-worker-") as directory:
+        with tempfile.TemporaryDirectory(prefix="mc-broken-worker-", dir=ARTIFACTS) as directory:
             dockerfile = Path(directory) / "Dockerfile"
             # Common removes the ASP.NET dependency; use a missing .NET major instead.
             dockerfile.write_text(
