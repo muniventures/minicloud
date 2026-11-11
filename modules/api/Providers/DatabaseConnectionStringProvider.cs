@@ -7,8 +7,13 @@ public sealed class DatabaseConnectionStringProvider(IConfiguration configuratio
     public string GetProviderName() =>
         configuration.GetValue("Database:Provider", environment.IsDevelopment() ? "Sqlite" : "Postgres");
 
-    public string? GetConnectionString() =>
-        configuration.GetConnectionString("Minicloud")
+    public string? GetConnectionString()
+    {
+        var connectionString = configuration.GetConnectionString("Minicloud")
         ?? configuration.GetConnectionString("DefaultConnection")
         ?? MinicloudDatabase.NormalizeDatabaseUrl(Environment.GetEnvironmentVariable("DATABASE_URL"));
+        return connectionString is null
+            ? null
+            : MinicloudDatabase.ApplyPasswordFile(connectionString, configuration["Database:PasswordFile"]);
+    }
 }

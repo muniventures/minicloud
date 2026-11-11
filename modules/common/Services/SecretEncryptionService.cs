@@ -4,11 +4,25 @@ using Microsoft.Extensions.Options;
 
 namespace Minicloud.Common.Services;
 
-public sealed class SecretEncryptionService(IOptions<SecretEncryptionOptions> options)
+public sealed class SecretEncryptionService
 {
     private const int NonceSize = 12;
     private const int TagSize = 16;
-    private readonly byte[] _key = SHA256.HashData(Encoding.UTF8.GetBytes(options.Value.EncryptionKey));
+    private readonly byte[] _key;
+
+    public SecretEncryptionService(IOptions<SecretEncryptionOptions> options)
+    {
+        var value = options.Value;
+        var key = string.IsNullOrWhiteSpace(value.EncryptionKeyFile)
+            ? value.EncryptionKey
+            : File.ReadAllText(value.EncryptionKeyFile).TrimEnd('\r', '\n');
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            throw new InvalidOperationException("The secret encryption key is empty.");
+        }
+
+        _key = SHA256.HashData(Encoding.UTF8.GetBytes(key));
+    }
 
     public string Encrypt(string value)
     {

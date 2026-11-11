@@ -1,9 +1,10 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS runtime-agent
 WORKDIR /src
+ARG MINICLOUD_AGENT_RID=linux-x64
 COPY modules/contracts modules/contracts
 COPY modules/common modules/common
 COPY modules/runtime-agent modules/runtime-agent
-RUN dotnet publish modules/runtime-agent/Minicloud.RuntimeAgent.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false -o /agent
+RUN dotnet publish modules/runtime-agent/Minicloud.RuntimeAgent.csproj -c Release -r "$MINICLOUD_AGENT_RID" --self-contained true -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false -o /agent
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 
 namespace Minicloud.Common.Data;
 
@@ -28,6 +29,8 @@ public sealed class MinicloudDatabaseOptions
 
     public string? DatabaseUrl { get; set; }
 
+    public string? PasswordFile { get; set; }
+
     public string FallbackConnectionString { get; set; } =
         "Host=localhost;Database=minicloud;Username=minicloud;Password=minicloud";
 }
@@ -35,11 +38,33 @@ public sealed class MinicloudDatabaseOptions
 public static class MinicloudDatabase
 {
     public static string ResolveConnectionString(MinicloudDatabaseOptions options) =>
-        options.MinicloudConnectionString
-        ?? options.DefaultConnectionString
-        ?? options.DatabaseConnectionString
-        ?? NormalizeDatabaseUrl(options.DatabaseUrl)
-        ?? options.FallbackConnectionString;
+        ApplyPasswordFile(
+            options.MinicloudConnectionString
+            ?? options.DefaultConnectionString
+            ?? options.DatabaseConnectionString
+            ?? NormalizeDatabaseUrl(options.DatabaseUrl)
+            ?? options.FallbackConnectionString,
+            options.PasswordFile);
+
+    public static string ApplyPasswordFile(string connectionString, string? passwordFile)
+    {
+        if (string.IsNullOrWhiteSpace(passwordFile))
+        {
+            return connectionString;
+        }
+
+        var password = File.ReadAllText(passwordFile).TrimEnd('\r', '\n');
+        if (password.Length == 0)
+        {
+            throw new InvalidOperationException("The database password file is empty.");
+        }
+
+        var builder = new NpgsqlConnectionStringBuilder(connectionString)
+        {
+            Password = password
+        };
+        return builder.ConnectionString;
+    }
 
     public static string? NormalizeDatabaseUrl(string? databaseUrl)
     {

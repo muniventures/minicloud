@@ -1,0 +1,294 @@
+name: minicloud
+
+x-shared-environment: &shared-environment
+  Database__Provider: Postgres
+  Database__PasswordFile: /run/secrets/app-db-password
+  ConnectionStrings__Minicloud: Host=postgres;Port=5432;Database=minicloud;Username=minicloud
+  ManagedDomains__Suffix: ${APP_DOMAIN:?set APP_DOMAIN}
+  ManagedDomains__ReservedHostnames__0: ${API_HOSTNAME:?set API_HOSTNAME}
+  ManagedDomains__ReservedHostnames__1: ${CONSOLE_HOSTNAME:?set CONSOLE_HOSTNAME}
+  ManagedDomains__ManageDnsRecords: ${MANAGE_DNS_RECORDS:-false}
+  OpenBao__Address: https://openbao:8200
+  OpenBao__MountPath: minicloud-apps
+  OpenBao__EnvironmentPrefix: production
+  OpenBao__TokenFile: /run/minicloud-openbao/token
+  SSL_CERT_FILE: /run/secrets/openbao-ca.crt
+  Secrets__EncryptionKeyFile: /run/secrets/secret-encryption-key
+  DeploymentArtifacts__RootPath: /var/lib/minicloud/artifacts
+
+x-api-environment: &api-environment
+  <<: *shared-environment
+  ASPNETCORE_URLS: http://+:8080
+  ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+  Database__RunMigrationsOnStartup: "false"
+  ServerRelease__ManifestPath: /etc/minicloud/server-release.json
+  Cors__AllowedOrigins__0: ${CONSOLE_URL:?set CONSOLE_URL}
+  Console__BaseUrl: ${CONSOLE_URL:?set CONSOLE_URL}
+  Kratos__PublicBaseUrl: http://kratos:4433/
+  Kratos__AdminBaseUrl: http://kratos:4434/
+  Kratos__DashboardOrigin: ${CONSOLE_URL:?set CONSOLE_URL}
+
+services:
+  postgres:
+    image: ${MINICLOUD_POSTGRES_IMAGE:?set MINICLOUD_POSTGRES_IMAGE}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-admin-password
+    secrets:
+      - postgres-admin-password
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks: [private]
+
+  database-initialize:
+    image: ${MINICLOUD_POSTGRES_IMAGE:?set MINICLOUD_POSTGRES_IMAGE}
+    restart: "no"
+    entrypoint: ["/bin/sh", "/opt/minicloud/init-databases.sh"]
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGDATABASE: postgres
+      MINICLOUD_POSTGRES_ADMIN_PASSWORD_FILE: /run/secrets/postgres-admin-password
+      MINICLOUD_APP_DB_PASSWORD_FILE: /run/secrets/app-db-password
+      MINICLOUD_KRATOS_DB_PASSWORD_FILE: /run/secrets/kratos-db-password
+    secrets:
+      - postgres-admin-password
+      - app-db-password
+      - kratos-db-password
+    volumes:
+      - ./init-databases.sh:/opt/minicloud/init-databases.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [private]
+
+  openbao:
+    image: ${MINICLOUD_OPENBAO_IMAGE:?set MINICLOUD_OPENBAO_IMAGE}
+    restart: unless-stopped
+    command: ["server", "-config=/etc/openbao/server.hcl"]
+    secrets:
+      - openbao-server.crt
+      - openbao-server.key
+      - openbao-ca.crt
+    volumes:
+      - openbao:/openbao/data
+      - ./openbao.hcl:/etc/openbao/server.hcl:ro
+    healthcheck:
+      test:
+        - CMD
+        - bao
+        - status
+        - -address=https://openbao:8200
+        - -ca-cert=/run/secrets/openbao-ca.crt
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks: [private]
+
+  openbao-agent:
+    image: ${MINICLOUD_OPENBAO_IMAGE:?set MINICLOUD_OPENBAO_IMAGE}
+    restart: unless-stopped
+    command: ["agent", "-config=/etc/openbao/agent.hcl"]
+    secrets:
+      - openbao-role-id
+      - openbao-secret-id
+      - openbao-ca.crt
+    volumes:
+      - ./openbao-agent.hcl:/etc/openbao/agent.hcl:ro
+      - openbao-agent-token:/run/minicloud-openbao
+    depends_on:
+      openbao:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /run/minicloud-openbao/token"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    networks: [private]
+
+  kratos-migrate:
+    image: ${MINICLOUD_KRATOS_IMAGE:?set MINICLOUD_KRATOS_IMAGE}
+    restart: "no"
+    command: ["migrate", "sql", "-e", "--yes", "--config", "/etc/config/kratos.yml"]
+    env_file:
+      - ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/kratos.env
+    volumes:
+      - ./kratos.yml:/etc/config/kratos.yml:ro
+      - ./identity.schema.json:/etc/config/identity.schema.json:ro
+    depends_on:
+      database-initialize:
+        condition: service_completed_successfully
+    networks: [private]
+
+  kratos:
+    image: ${MINICLOUD_KRATOS_IMAGE:?set MINICLOUD_KRATOS_IMAGE}
+    restart: unless-stopped
+    command: ["serve", "--config", "/etc/config/kratos.yml"]
+    env_file:
+      - ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/kratos.env
+    volumes:
+      - ./kratos.yml:/etc/config/kratos.yml:ro
+      - ./identity.schema.json:/etc/config/identity.schema.json:ro
+    depends_on:
+      kratos-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "kratos", "healthcheck", "--config", "/etc/config/kratos.yml"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks: [private]
+
+  api-migrate:
+    image: ${MINICLOUD_API_IMAGE:?set MINICLOUD_API_IMAGE}
+    restart: "no"
+    command: ["migrate"]
+    environment: *api-environment
+    secrets:
+      - app-db-password
+      - secret-encryption-key
+    volumes:
+      - ./server-release.json:/etc/minicloud/server-release.json:ro
+    depends_on:
+      database-initialize:
+        condition: service_completed_successfully
+    networks: [private]
+
+  api:
+    image: ${MINICLOUD_API_IMAGE:?set MINICLOUD_API_IMAGE}
+    restart: unless-stopped
+    environment: *api-environment
+    secrets:
+      - app-db-password
+      - secret-encryption-key
+      - openbao-ca.crt
+    volumes:
+      - ./server-release.json:/etc/minicloud/server-release.json:ro
+      - openbao-agent-token:/run/minicloud-openbao:ro
+      - artifacts:/var/lib/minicloud/artifacts
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
+      openbao-agent:
+        condition: service_healthy
+      kratos:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [private]
+
+  dashboard:
+    image: ${MINICLOUD_DASHBOARD_IMAGE:?set MINICLOUD_DASHBOARD_IMAGE}
+    restart: unless-stopped
+    environment:
+      MINICLOUD_API_URL: ${API_URL:?set API_URL}
+      MINICLOUD_APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN}
+      MINICLOUD_SOURCE_URL: ${MINICLOUD_SOURCE_URL:-https://github.com/muniventures/minicloud}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    networks: [private]
+
+  worker:
+    image: ${MINICLOUD_WORKER_IMAGE:?set MINICLOUD_WORKER_IMAGE}
+    restart: unless-stopped
+    environment:
+      <<: *shared-environment
+      Worker__Ssh__PrivateKeyPath: /run/minicloud-ssh/deploy-key
+      Worker__Ssh__HostKeyPinsFile: /run/minicloud-ssh/host-pins
+      Worker__RuntimeAgent__ApiBaseUrl: ${API_URL:?set API_URL}
+      Worker__Pipeline__SshPublicKeyFile: /run/secrets/deploy-ssh-public-key
+    secrets:
+      - app-db-password
+      - secret-encryption-key
+      - deploy-ssh-public-key
+      - openbao-ca.crt
+    volumes:
+      - openbao-agent-token:/run/minicloud-openbao:ro
+      - artifacts:/var/lib/minicloud/artifacts
+      - type: bind
+        source: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/ssh
+        target: /run/minicloud-ssh
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      api:
+        condition: service_healthy
+      openbao-agent:
+        condition: service_healthy
+    networks: [private]
+
+  caddy:
+    image: ${MINICLOUD_CADDY_IMAGE:?set MINICLOUD_CADDY_IMAGE}
+    restart: unless-stopped
+    environment:
+      API_HOSTNAME: ${API_HOSTNAME:?set API_HOSTNAME}
+      CONSOLE_HOSTNAME: ${CONSOLE_HOSTNAME:?set CONSOLE_HOSTNAME}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      dashboard:
+        condition: service_healthy
+    networks: [private]
+
+secrets:
+  postgres-admin-password:
+    file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/postgres-admin-password
+  app-db-password:
+    file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/app-db-password
+  kratos-db-password:
+    file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/kratos-db-password
+  secret-encryption-key:
+    file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/secret-encryption-key
+  openbao-role-id:
+    file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/openbao-role-id
+  openbao-secret-id:
+    file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/openbao-secret-id
+  openbao-server.crt:
+    file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/openbao-server.crt
+  openbao-server.key:
+    file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/openbao-server.key
+  openbao-ca.crt:
+    file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/openbao-ca.crt
+  deploy-ssh-public-key:
+    file: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/deploy-ssh-public-key
+
+volumes:
+  postgres:
+  openbao:
+  openbao-agent-token:
+  artifacts:
+  caddy-data:
+  caddy-config:
+
+networks:
+  private:
+    driver: bridge
