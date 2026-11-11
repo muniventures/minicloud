@@ -1,37 +1,36 @@
 # Upgrade and full-recovery prerequisites
 
-**No upgrade or full-recovery path is enabled by this source bundle.** Missing
-production ownership interfaces are a release blocker, not operator workarounds.
+Coordinated maintenance uses the durable maintenance authority
+(`dotnet Minicloud.Api.dll maintenance ...`, migration
+`20261111134441_MaintenanceAuthority`). Every API write and scheduler pass is
+admitted through its fence. It reports drain status for queued, running,
+retrying and uncertain work, and it revokes processes registered at a
+superseded epoch. The tooling waits for accepted work to finish. It never kills
+work.
 
-Before enabling coordinated maintenance, the lifecycle owner must provide:
+Before upgrading, the operator must have:
 
-1. A durable installation-bound fence checked atomically by every management
-   write admission path, including API, scheduled work and worker successors.
-2. A callable complete drain that accounts for queued, running, retrying,
-   uncertain and externally accepted provisioning/deployment/database/deletion/
-   DNS work. A lost worker heartbeat or an empty deployment queue is not proof.
-   Existing accepted work must finish or yield a retryable refusal, not be killed.
-3. Persistent worker startup/restart and production-transfer fencing. A restored
-   credential, receipt or host-local file alone cannot prove the previous worker
-   lost authority. Recovery without the old host requires independently enforced
-   authority transfer; it must not rely on cooperative shutdown of a lost host.
+- The **installed** release's verified assets directory, passed as
+  `--previous-assets-dir`. Its bundle digest must equal the installed
+  `bundleSha256`.
+- The independently verified **target** release assets. The target must be
+  newer, with application, identity and configuration schema versions no lower
+  than the installed release.
+- A protected age recipients file and identity file. The upgrade takes a full
+  pre-upgrade backup and authenticates it before stopping any service.
+- At least 2 GiB free at the backup destination, plus space for the new images.
+- A maintenance window. Writes stay fenced from drain until the new release
+  reports healthy.
 
-The maintenance implementation must then integrate these interfaces with:
+The upgrade never downgrades images. If it fails after migrations start,
+writes stay fenced. Either re-run the same upgrade to resume, or restore the
+pre-upgrade backup with the previous release's installer.
 
-- independently verified exact target assets, declared/tested source-to-target
-  application/identity/configuration and CLI compatibility, capacity and downtime;
-- a complete encrypted coordinated capture of both databases, OpenBao persisted
-  state, independent recovery dependencies, artifacts, installation metadata,
-  configuration/credentials/deployment SSH keys and TLS state;
-- a successful authenticated backup/recovery rehearsal before migrations,
-  retained source release assets and a persistent failure fence across all
-  migration/activation failures, including installer/manual entry points;
-- isolated full-restore verification before volume mutation; independently
-  fenced old-worker authority before any production writes;
-- readiness beyond container health, including sessions, inventory, secret
-  decryption and worker connectivity, without managing customer VPSs.
+Restore needs the exact release that created the backup, the original root
+path and the original configuration file. After a restore or transfer, an old
+host is revoked only when it next reaches this database. Shut down any old
+host that runs its own database copy or holds live provider, DNS or SSH
+credentials, or rotate those credentials.
 
-Independent recovery-dependency archives are useful but satisfy none of these
-full-backup gates. Never use them as a pre-upgrade backup. Do not downgrade
-images unless actual schema/data compatibility has been proven. Otherwise keep
-writes fenced and use a qualified coordinated recovery path.
+Independent recovery-dependency archives (`*-recovery`) are not full backups.
+Never use them as a pre-upgrade backup.

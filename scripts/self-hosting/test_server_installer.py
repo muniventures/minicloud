@@ -63,6 +63,11 @@ class FixtureInstaller(installer.Installer):
         self.events.append(arguments)
         if "api-migrate" in arguments and self.fail_migration:
             raise installer.InstallError("Synthetic incomplete migration.")
+        if "api-bootstrap" in arguments and "maintenance" in arguments:
+            operation = arguments[arguments.index("maintenance") + 1]
+            self.maintenance_input = json.loads(kwargs["input"])
+            return json.dumps({"operation": operation, "result": "ok", "authority": {
+                "state": "open", "epoch": 1, "localHostAuthorized": True}}).encode()
         if "api-bootstrap" in arguments:
             operation = arguments[arguments.index("bootstrap") + 1]
             if operation in ("prepare", "rotate-token"):
@@ -169,11 +174,17 @@ class InstallerTests(unittest.TestCase):
         subject = self.subject()
         with mock.patch.object(self.host, "tools", side_effect=AssertionError("No Docker call")):
             result = subject.execute()
-        self.assertEqual("coordinated_maintenance_blocked", result["state"])
-        self.assertEqual([], subject.events)
+        self.assertEqual(("maintenance_idle", "open"), (result["state"], result["authority"]["state"]))
+        self.assertEqual([("run", "--rm", "-T", "--no-deps", "api-bootstrap", "maintenance", "status", "--stdin")],
+                         subject.events)
+        self.assertEqual({"installationId": subject.state["installationId"]}, subject.maintenance_input)
         installed_helper = self.args.root / "bundle/server_maintenance.py"
         installed_helper.write_text("raise AssertionError('untrusted helper executed')")
         with self.assertRaisesRegex(installer.InstallError, "differs from the signed release"):
+            self.subject().execute()
+        # Upgrade/restore run the selected release's signed helper, never the installed copy.
+        self.args.maintenance_operation = "upgrade"
+        with self.assertRaisesRegex(installer.InstallError, "already installed"):
             self.subject().execute()
         self.assertFalse(any(path.name == "__pycache__"
                              for path in (self.args.root / "bundle").rglob("*")))

@@ -1,7 +1,8 @@
 # Server maintenance authority
 
 Minicloud keeps one maintenance authority per installation in the application
-PostgreSQL database. Upgrade, restore and host-transfer tooling (T44) uses it
+PostgreSQL database. The packaged [maintenance operations](server-maintenance.md)
+(backup, upgrade, restore and host transfer) use it
 to stop new management work, wait for accepted work to drain, and revoke an old
 host after a transfer. It runs in the existing API/worker processes and needs
 no hosted service.

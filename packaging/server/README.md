@@ -4,11 +4,11 @@ This is the **server** channel, independent of source-built CLI delivery. No
 server assets have been published or qualified by this change. Existing CLI
 installers and the reusable customer deployment workflow retain their meaning.
 
-The [maintenance implementation](../../docs/server-maintenance.md) currently
-protects independent OpenBao recovery dependencies only. Its signed entry point
-does **not** make coordinated backup, upgrade or full restore available:
-production admission/drain/transfer-fencing interfaces remain a concrete T44
-release blocker. Asset presence is not acceptance of those missing interfaces.
+The [maintenance implementation](../../docs/server-maintenance.md) provides
+coordinated backup, upgrade, restore and transfer through the durable
+maintenance authority, plus independent OpenBao recovery-dependency archives.
+These flows have not been qualified on a real host. Asset presence does not
+qualify them.
 
 The tag-only publication job in `.github/workflows/server-release.yml` accepts
 `server-vMAJOR.MINOR.PATCH[-prerelease]` from canonical `main`. Pull requests run

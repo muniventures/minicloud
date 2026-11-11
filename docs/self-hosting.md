@@ -7,11 +7,19 @@ host based on these source assets. Once a versioned release is available, use
 its signed installer and release documentation; never build a production host
 from a checkout or substitute floating image tags.
 
-The public control-plane installer and setup flow now have source implementations;
-upgrade/recovery and installation qualification remain open. The
-[maintenance guide](server-maintenance.md) documents the concrete lifecycle
-interface blocker and independently encrypted recovery-dependency tooling;
-those archives are not full coordinated backups. The
+The public control-plane installer, setup flow and coordinated maintenance
+now have source implementations. Installation and maintenance have not been
+qualified on a real host. The [maintenance guide](server-maintenance.md)
+documents `backup`, `upgrade`, `restore`, `restore-confirm` and `transfer`.
+These operations fence and drain through the maintenance authority and never
+stop accepted work.
+
+`transfer`, and the transfer inside `restore`, revoke an old host only when it
+next reaches this database. An old host running on its own restored database
+copy, or an unreachable host that still holds live provider credentials, is
+**not** stopped. You must shut it down or rotate those credentials yourself.
+The independently encrypted recovery-dependency archives (`*-recovery`) are not
+full backups. The
 [versioned installer/manual guide](server-installer.md) documents exact-release
 verification, protected inputs, shared staged Compose operations and resumable
 readiness. It is not a claim that a server release exists.
@@ -157,7 +165,9 @@ and preserve awaiting-DNS/TLS, awaiting-operator, ready and failed distinctions.
 
 The same entry point exposes `maintenance <status|fence|drain-status|release|transfer>`
 for upgrade, restore and host-transfer fencing. See
-[server maintenance authority](server-maintenance-authority.md).
+[server maintenance authority](server-maintenance-authority.md). Operators
+normally run these through the installer's `maintenance` operations described
+in the [maintenance guide](server-maintenance.md) rather than directly.
 
 ### OpenBao lifecycle
 

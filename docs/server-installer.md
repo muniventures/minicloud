@@ -4,9 +4,9 @@ The implementation exists, but **no server release is published or qualified**.
 The commands below describe a future exact signed release, not permission to
 publish, install a public host, or replace missing release assets with source
 builds. Native amd64/arm64, full-image, real Kratos, Caddy/ACME and hosted
-acceptance remain release gates. [Maintenance](server-maintenance.md) includes
-independently encrypted recovery dependencies, but upgrade/full recovery remain
-blocked on production admission/drain/transfer-fencing interfaces.
+acceptance remain release gates. [Maintenance](server-maintenance.md) provides
+coordinated backup, upgrade, restore and transfer through the maintenance
+authority. Those flows are not yet qualified on a real host.
 
 ## Trust and prerequisites
 
@@ -210,4 +210,6 @@ qualify a release, authorize deployment or prove backup/restore.
 The root sibling `<root>.installation.lock` is persistent and never removed.
 `installation.json` schema 1 stores exact release/schema/digest identities,
 original IDs, paths/configuration, phase and last successful operation;
-it contains no credentials. Preserve both for T44's maintenance handoff.
+it contains no credentials. Preserve both; maintenance depends on them.
+Keep each installed release's verified assets directory: `upgrade` requires it
+as `--previous-assets-dir`.
