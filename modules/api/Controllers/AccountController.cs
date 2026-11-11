@@ -1,13 +1,10 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Minicloud.Api.Auth;
 using Minicloud.Api.Services;
 using Minicloud.Common.Contracts;
-using Minicloud.Common.Data;
-using Minicloud.Common.Models;
 using Minicloud.Common.Services;
 using static Minicloud.Api.Controllers.EndpointResults;
 
@@ -16,7 +13,7 @@ namespace Minicloud.Api.Controllers;
 [ApiController]
 [Route("api/account")]
 public sealed class AccountController(
-    MinicloudDbContext db,
+    BootstrapService bootstrap,
     BrowserSessionService sessions,
     GrafanaSessionService grafanaSessions,
     IKratosSessionValidator kratosSessions,
@@ -29,7 +26,15 @@ public sealed class AccountController(
     {
         NoStore();
         var installationId = configuration["Bootstrap:InstallationId"];
-        var state = await GetBootstrapStateAsync(installationId, cancellationToken);
+        string state;
+        try
+        {
+            state = await GetBootstrapStateAsync(installationId, cancellationToken);
+        }
+        catch (BootstrapException exception) when (exception.Code == "auth_unavailable")
+        {
+            return EndpointResults.Problem("auth_unavailable", "Identity service is temporarily unavailable.", StatusCodes.Status503ServiceUnavailable);
+        }
         return Results.Ok(new AccountCapabilitiesResponse(
             Password: true,
             Google: kratosOptions.Value.GoogleEnabled,
@@ -106,35 +111,20 @@ public sealed class AccountController(
             return "blocked";
         }
 
-        var record = await db.BootstrapRecords.AsNoTracking()
-            .SingleOrDefaultAsync(x => x.InstallationId == installationId, cancellationToken);
-        if (record is null)
+        try
         {
-            var populated = await db.Users.AnyAsync(cancellationToken) ||
-                await db.Organizations.AnyAsync(cancellationToken) ||
-                await db.OrganizationMembers.AnyAsync(cancellationToken);
-            return populated ? "blocked" : "required";
+            var status = await bootstrap.StatusAsync(installationId, cancellationToken);
+            return status.State switch
+            {
+                "required" or "in_progress" => "required",
+                "ready" => "ready",
+                _ => "blocked"
+            };
         }
-
-        if (record.State is "required" or "in_progress")
-        {
-            return "required";
-        }
-
-        if (record.State != "ready" ||
-            record.UserId is null || record.OrganizationId is null ||
-            record.KratosIdentityId is null || record.CompletedAt is null)
+        catch (BootstrapException exception) when (exception.Code == "setup_state_conflict")
         {
             return "blocked";
         }
-
-        var bound = await db.Users.AnyAsync(
-            x => x.Id == record.UserId && x.KratosIdentityId == record.KratosIdentityId,
-            cancellationToken) &&
-            await db.OrganizationMembers.AnyAsync(
-                x => x.UserId == record.UserId && x.OrganizationId == record.OrganizationId && x.Role == OrganizationRole.Owner,
-                cancellationToken);
-        return bound ? "ready" : "blocked";
     }
 
     private void NoStore()
