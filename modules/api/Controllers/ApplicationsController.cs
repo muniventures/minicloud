@@ -606,15 +606,22 @@ public sealed class ApplicationsController : ControllerBase
                 if (request.Plan is not null)
                     await catalog.BindAsync(env, request.Plan, cancellationToken);
                 var destinationAccountId = env.SelectedPlan?.ProviderAccountId;
+                // LockedAsync saves tracked changes, so rejected updates must discard the plan binding above.
                 if (request.SshAccess is null && env.SshAccessMode != "none" &&
                     !string.Equals(previousPlanAccountId, destinationAccountId, StringComparison.Ordinal))
+                {
+                    db.ChangeTracker.Clear();
                     return EndpointResults.Conflict("ssh_selection_account_mismatch",
                         "Changing provider accounts requires an explicit SSH access selection for the destination account.");
+                }
                 if (request.SshAccess is not null)
                 {
                     if (await HasSshAllocationLockAsync(db, env.Id, cancellationToken))
+                    {
+                        db.ChangeTracker.Clear();
                         return EndpointResults.Conflict("ssh_selection_locked",
                             "SSH access cannot be changed during or after server allocation.");
+                    }
                     await sshAccess.ApplySelectionAsync(env, destinationAccountId, request.SshAccess,
                         principal.ToActorIdentity(), isPatch: true, cancellationToken);
                 }

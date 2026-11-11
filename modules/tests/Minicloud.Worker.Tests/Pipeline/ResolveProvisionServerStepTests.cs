@@ -12,6 +12,7 @@ using Minicloud.Common.Providers.Common;
 using System.Net;
 using Minicloud.Common.Providers.DigitalOcean;
 using Minicloud.Worker.Tests.Providers;
+using Minicloud.Worker.Tests.Services;
 
 namespace Minicloud.Worker.Tests.Pipeline;
 
@@ -550,6 +551,88 @@ public sealed class ResolveProvisionServerStepTests : IClassFixture<WorkerSqlite
         var saved = await verify.ServerInstances.SingleAsync(x => x.AppId == context.AppId);
         Assert.Equal(context.ProviderAccountId, saved.ProviderAccountId);
         Assert.Equal("discovered-id", saved.ProviderServerId);
+    }
+
+    [Fact]
+    public async Task AmbiguousCreateWithSshKeyIsReconciledWithoutReallocationOrReregistration()
+    {
+        var context = await SeedCatalogSshAsync("ssh-ambiguous");
+        var provider = new ProviderSshKeyAllocationTests.SyntheticSshProvider();
+        var requests = new List<CreateServerRequest>();
+        provider.CreateServer = request =>
+        {
+            requests.Add(request);
+            throw new HttpRequestException("Response lost.");
+        };
+        var step = CatalogStep(new AccountFactory(provider));
+
+        await Assert.ThrowsAsync<PipelineStepException>(() => step.ExecuteAsync(context, default));
+        var retry = await Assert.ThrowsAsync<PipelineStepException>(() => step.ExecuteAsync(context, default));
+
+        Assert.Contains("unresolved", retry.Message);
+        var request = Assert.Single(requests);
+        Assert.Equal(["500"], request.SshKeyReferences);
+        Assert.Equal(1, provider.RegisterCalls);
+
+        // Reconciliation discovers the server the lost response created; no second allocation occurs.
+        provider.FindServer = name => Task.FromResult<ProviderServerInfo?>(
+            new ProviderServerInfo("srv-reconciled", name, "192.0.2.81", "running", null, request.Labels));
+        await step.ExecuteAsync(context, default);
+
+        Assert.Single(requests);
+        Assert.Equal(1, provider.RegisterCalls);
+        Assert.Equal("192.0.2.81", context.ServerIp);
+        await using var db = _harness.CreateDbContext();
+        Assert.Equal("srv-reconciled", (await db.ServerInstances.SingleAsync(x => x.AppId == context.AppId)).ProviderServerId);
+        var key = await db.ProviderSshKeys.SingleAsync(x => x.ProviderAccountId == context.ProviderAccountId);
+        Assert.Equal("500", key.ProviderKeyId);
+        Assert.Equal("ready", key.RegistrationState);
+    }
+
+    [Fact]
+    public async Task UnknownSshKeyRegistrationBlocksServerAllocation()
+    {
+        var context = await SeedCatalogSshAsync("ssh-unknown");
+        var provider = new ProviderSshKeyAllocationTests.SyntheticSshProvider
+        {
+            RegisterFailure = new HttpRequestException("Response lost."),
+            HideRegisteredKeys = true
+        };
+        var step = CatalogStep(new AccountFactory(provider));
+
+        var error = await Assert.ThrowsAsync<PipelineStepException>(() => step.ExecuteAsync(context, default));
+
+        Assert.Equal("ssh_registration_unknown", error.FailureCode);
+        await using var db = _harness.CreateDbContext();
+        var deployment = await db.Deployments.SingleAsync(x => x.Id == context.DeploymentId);
+        Assert.False(deployment.ProviderCreationAttempted);
+        Assert.Equal("unknown", deployment.SshRegistrationState);
+        Assert.False(await db.ServerInstances.AnyAsync(x => x.AppId == context.AppId));
+    }
+
+    private async Task<PipelineStepContext> SeedCatalogSshAsync(string name)
+    {
+        var context = await SeedCatalogAsync(name);
+        var (publicKey, fingerprint) = ProviderSshKeyAllocationTests.Key(7);
+        var now = DateTimeOffset.UtcNow;
+        await using var db = _harness.CreateDbContext();
+        db.Users.Add(new User { Id = "user_" + name, Email = name + "@example.test", CreatedAt = now, UpdatedAt = now });
+        db.OrganizationMembers.Add(new OrganizationMember { Id = "member_" + name, OrganizationId = context.OrganizationId,
+            UserId = "user_" + name, Role = OrganizationRole.Owner, CreatedAt = now, UpdatedAt = now });
+        var deployment = await db.Deployments.SingleAsync(x => x.Id == context.DeploymentId);
+        deployment.SshSelectionMode = "new";
+        deployment.SshSelectionRevision = 1;
+        deployment.SshProviderAccountId = context.ProviderAccountId;
+        deployment.SshCredentialGeneration = "test";
+        deployment.SshSelectingActor = "user_" + name;
+        deployment.SshKeyName = "Workstation";
+        deployment.SshPublicKey = publicKey;
+        deployment.SshFingerprint = fingerprint;
+        deployment.SshKeyType = "ed25519";
+        deployment.SshRegistrationState = "not_registered";
+        deployment.SshSnapshotTakenAt = now;
+        await db.SaveChangesAsync();
+        return context;
     }
 
     private ResolveProvisionServerStep CatalogStep(AccountFactory factory) => new(

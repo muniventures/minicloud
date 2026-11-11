@@ -117,7 +117,16 @@ public sealed class EnvironmentsController : ControllerBase
                 var app = await db.Apps.Include(x => x.SelectedPlan).Include(x => x.Organization).SingleAsync(x => x.Id == appId, ct);
                 if (app.DeletionStatus is not null || await db.Applications.AnyAsync(x => x.Id == app.ApplicationId && x.DeletionStatus != null, ct))
                     return EndpointResults.Conflict("app_deleting", "The application or environment is being deleted.");
+                var previousAccountId = app.SelectedPlan?.ProviderAccountId;
                 await catalog.BindAsync(app, request.Plan, ct);
+                if (app.SshAccessMode != "none" &&
+                    !string.Equals(previousAccountId, app.SelectedPlan?.ProviderAccountId, StringComparison.Ordinal))
+                {
+                    // LockedAsync saves tracked changes; discard the binding when the SSH selection would be orphaned.
+                    db.ChangeTracker.Clear();
+                    return EndpointResults.Conflict("ssh_selection_account_mismatch",
+                        "Changing provider accounts requires an explicit SSH access selection for the destination account.");
+                }
                 return Results.Ok(app.ToResponse());
             }, ct);
         }
