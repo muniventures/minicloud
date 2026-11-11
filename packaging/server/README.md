@@ -23,11 +23,14 @@ creating a release tag, publishing images or deploying anything.
 The workflow deliberately fails **before registry login or image publication**
 until all of these are present in the selected source revision:
 
-- T41's worker Dockerfile declares `ARG MINICLOUD_AGENT_RID` and uses it for the
-  embedded agent publish. T40 passes `linux-x64` for `linux/amd64` and
-  `linux-arm64` for `linux/arm64`, then copies the executable out of each worker
-  image and checks the actual ELF machine type. This does not qualify managing
-  customer VPSs of another architecture.
+- Every worker image contains both `runtime-agent/linux-x64/minicloud-agent`
+  and `runtime-agent/linux-arm64/minicloud-agent`, published self-contained
+  with native runtime libraries included in each single-file executable.
+  The existing `MINICLOUD_AGENT_RID` build argument remains accepted (`linux-x64` or
+  `linux-arm64`); it chooses the first publish, not the available target set.
+  Release builds no longer derive an agent RID from the worker image platform.
+  Before assembling each worker index, T40 extracts **both** agents from each
+  platform image and checks their actual ELF machine types.
 - T41's dashboard accepts validated public configuration at startup, with no
   `VITE_*` build arguments. Root build contexts, API/dashboard port 8080 and the
   existing .NET entry points remain the frozen image interface. T40 does not
@@ -144,6 +147,33 @@ Only then may T43's installer perform installation/preflight. Its reserved URL i
 The verifier does not install, extract, start services or mutate customer VPSs.
 Image verification/pulls use the local Docker cache but perform no deployments.
 
+### Application VPS agent architecture
+
+The worker probes the deployment target's actual `uname -m` over the existing
+SSH connection before choosing an agent or creating runtime credentials.
+`x86_64`/`amd64` selects `linux-x64`; `aarch64`/`arm64` selects `linux-arm64`.
+This is independent of the control-plane worker's architecture and provider
+image defaults. Unsupported targets, failed/missing probes, absent target
+executables and mismatched ELF headers fail with `runtime_agent_install_failed`;
+the worker does not upload or run a different-architecture agent.
+
+Uploads keep the existing remote `runtime-agent/minicloud-agent` name and
+`/opt/minicloud/agent/minicloud-agent` installation path. Both pre-install and
+final verification hash the selected executable, including reuse/repair paths.
+No provider/model schema or remote installer change is required.
+
+Source/development `Worker:RuntimeAgent:BundlePath` still accepts the original
+flat `minicloud-agent` alongside the three shared installer assets. A flat
+binary is used only when the target RID path is absent, and its ELF architecture
+must match the probed target; there is no control-plane-architecture fallback.
+Use the RID subdirectories to support both target types from a source worker.
+The deployment overload without a remote probe fails closed rather than
+assuming the worker and target have the same architecture.
+
+These are source contracts, not native-host qualification. Both worker
+platforms managing both VPS architectures still require authorized native
+image/host acceptance; no release or deployment is qualified by this repair.
+
 Server GitHub releases use `make_latest=false` (`gh --latest=false`), with
 prereleases marked accordingly. Optional `server-channel/stable.json` discovery
 is not published by this workflow; exact release selection needs no channel.
@@ -162,8 +192,9 @@ dotnet test modules/tests/Minicloud.Tests/Minicloud.Tests.csproj \
 ```
 
 Synthetic tests cover tampering, mixed releases, provenance/source disagreement,
-architecture definitions, worker RID/ELF checks, compatibility shape, Compose
-pins, anonymous-pull configuration and missing handoffs. They do **not** prove
+architecture definitions, both target-agent ELF payloads per worker platform,
+compatibility shape, Compose pins, anonymous-pull configuration and missing
+handoffs. They do **not** prove
 real multi-architecture image builds, OIDC signing, live transparency inclusion,
 registry visibility/anonymous pulls, universal dashboard operation, successful
 installation, or final compatibility/hosted qualification. Those checks require
