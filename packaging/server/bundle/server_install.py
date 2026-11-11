@@ -3,6 +3,7 @@
 import argparse
 import base64
 import contextlib
+import errno
 import fcntl
 import hashlib
 import ipaddress
@@ -247,13 +248,20 @@ class Host:
             if (port, "tcp" if kind == socket.SOCK_STREAM else "udp") in owned:
                 continue
             for family, address in ((socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")):
-                with socket.socket(family, kind) as connection:
-                    if family == socket.AF_INET6:
-                        connection.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-                    try:
+                try:
+                    with socket.socket(family, kind) as connection:
+                        if family == socket.AF_INET6:
+                            connection.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
                         connection.bind((address, port))
-                    except OSError as error:
-                        raise InstallError(f"Port {port} is unavailable; preserve existing firewall/SSH/service policy.") from error
+                except OSError as error:
+                    if family == socket.AF_INET6:
+                        if error.errno in (errno.EAFNOSUPPORT, errno.EPROTONOSUPPORT):
+                            continue
+                        disabled = Path("/proc/sys/net/ipv6/conf/all/disable_ipv6")
+                        if (error.errno == errno.EADDRNOTAVAIL and disabled.exists()
+                                and disabled.read_text().strip() == "1"):
+                            continue
+                    raise InstallError(f"Port {port} is unavailable; preserve existing firewall/SSH/service policy.") from error
 
     def dns(self, config, addresses):
         expected = {str(ipaddress.ip_address(item)) for item in addresses}
@@ -330,6 +338,8 @@ class Installer:
             for key in ("installationId", "operationId"):
                 require(isinstance(state[key], str) and str(uuid.UUID(state[key])) == state[key],
                         "Invalid persistent operation identity.")
+            self.verify_installed_bundle(
+                state, allow_incomplete=state["phase"] == "initializing" and self.args.command in ("install", "prepare"))
             for path in self.root.rglob("*"):
                 protected(path, path.is_dir())
             recovery = self.args.recovery_dir / state["installationId"]
@@ -350,6 +360,34 @@ class Installer:
                 require(request == {key: state[key] for key in ("installationId", "operationId")},
                         "Protected bootstrap input differs from the original operation.")
             self.state = state
+
+    def verify_installed_bundle(self, state=None, *, allow_incomplete=False):
+        state = self.state if state is None else state
+        bundle = self.root / "bundle"
+        require(state is not None and state["bundlePath"] == str(bundle) and bundle.resolve() == bundle,
+                "Installed bundle path must equal the canonical installation root/bundle.")
+        if not bundle.exists():
+            require(allow_incomplete, "Installed bundle is missing; resume initial extraction with install/prepare.")
+            return
+        protected(bundle, True)
+        expected = self.manifest["files"]
+        directories = {parent.as_posix() for name in expected for parent in Path(name).parents
+                       if parent != Path(".")}
+        installed = {}
+        for path in bundle.rglob("*"):
+            name = path.relative_to(bundle).as_posix()
+            protected(path, path.is_dir())
+            if path.is_dir():
+                require(name in directories, "Installed bundle contains an unlisted directory; reconcile without overwriting.")
+            else:
+                require(name in expected, "Installed bundle contains an unlisted file; reconcile without overwriting.")
+                installed[name] = path
+        require(allow_incomplete or installed.keys() == expected.keys(),
+                "Installed bundle inventory is incomplete; no runtime operation is allowed.")
+        for name, path in installed.items():
+            with path.open("rb") as source:
+                require(hashlib.file_digest(source, "sha256").hexdigest() == expected[name],
+                        "Installed bundle content differs from the signed release; reconcile without overwriting.")
 
     def preflight(self):
         self.load_state()
@@ -414,6 +452,7 @@ class Installer:
                     require(path.read_bytes() == data, "Existing bundle file changed; explicit reconciliation required.")
                 else:
                     exclusive(path, data)
+        self.verify_installed_bundle()
 
     def pull_verified_images(self):
         run(["python3", "-B", str(self.args.assets_dir / "verify-server-release.py"), "verify",
@@ -530,6 +569,7 @@ class Installer:
         return env
 
     def compose(self, *arguments, input=None, allowed=(0,), root_token=None):
+        self.verify_installed_bundle()
         bundle = self.root / "bundle"
         env = self.environment()
         if root_token:

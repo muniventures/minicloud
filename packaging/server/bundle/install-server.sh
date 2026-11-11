@@ -68,7 +68,16 @@ def main():
                     target.write(data)
                 target.flush()
                 os.fsync(target.fileno())
-            os.rename(partial, path)
+            # Atomic no-replace promotion: another invocation may have supplied
+            # the destination while this download was in flight.
+            os.link(partial, path, follow_symlinks=False)
+            directory = os.open(assets, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+                partial.unlink()
+                os.fsync(directory)
+            finally:
+                os.close(directory)
         protected(path)
     identity = f"https://github.com/muniventures/minicloud/.github/workflows/server-release.yml@refs/tags/{args.tag}"
     subprocess.run(["cosign", "verify-blob", "--new-bundle-format", "--bundle",

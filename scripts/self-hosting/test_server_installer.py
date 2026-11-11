@@ -1,4 +1,5 @@
 import argparse
+import errno
 import hashlib
 import importlib.util
 import io
@@ -239,6 +240,128 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(installer.InstallError, "Port 443"):
                 installer.Host().ports({(80, "tcp"), (443, "tcp")})
 
+    def test_ipv4_only_preflight_accepts_only_confirmed_unsupported_or_disabled_ipv6(self):
+        for unsupported in (errno.EAFNOSUPPORT, errno.EPROTONOSUPPORT, None):
+            with self.subTest(unsupported=unsupported):
+                ipv4 = mock.MagicMock()
+                ipv6 = mock.MagicMock()
+                ipv6.__enter__.return_value.bind.side_effect = OSError(errno.EADDRNOTAVAIL, "disabled")
+
+                def socket(family, kind):
+                    if family == installer.socket.AF_INET6:
+                        if unsupported is not None:
+                            raise OSError(unsupported, "IPv6 unavailable")
+                        return ipv6
+                    return ipv4
+
+                with mock.patch.object(installer.socket, "socket", side_effect=socket), \
+                     mock.patch.object(installer.Path, "exists", return_value=True), \
+                     mock.patch.object(installer.Path, "read_text", return_value="1\n"):
+                    installer.Host().ports(set())
+                self.assertEqual(3, ipv4.__enter__.return_value.bind.call_count)
+
+    def test_ipv6_listener_conflicts_and_unconfirmed_address_errors_are_never_skipped(self):
+        for kind in (installer.socket.SOCK_STREAM, installer.socket.SOCK_DGRAM):
+            for error_number, disabled in ((errno.EADDRINUSE, "1\n"), (errno.EACCES, "1\n"),
+                                           (errno.EADDRNOTAVAIL, "0\n")):
+                with self.subTest(kind=kind, error_number=error_number):
+                    ipv4 = mock.MagicMock()
+                    ipv6 = mock.MagicMock()
+                    ipv6.__enter__.return_value.bind.side_effect = OSError(error_number, "refuse")
+
+                    def socket(family, actual_kind):
+                        return ipv6 if family == installer.socket.AF_INET6 else ipv4
+
+                    owned = {(80, "tcp"), (443, "udp" if kind == installer.socket.SOCK_STREAM else "tcp")}
+                    with mock.patch.object(installer.socket, "socket", side_effect=socket), \
+                         mock.patch.object(installer.Path, "exists", return_value=True), \
+                         mock.patch.object(installer.Path, "read_text", return_value=disabled):
+                        with self.assertRaisesRegex(installer.InstallError, "Port 443"):
+                            installer.Host().ports(owned)
+
+    def test_manual_operations_reject_modified_missing_or_extra_installed_bundle_files(self):
+        subject = self.subject()
+        subject.initialize_state()
+        subject.extract()
+        subject.credentials()
+        subject.save(phase="initialized")
+        for command in ("initialize", "activate", "status", "rotate-token"):
+            self.args.command = command
+            self.args.token_output_name = "new-token"
+            for name in ("compose.yml", "server_install.py"):
+                with self.subTest(command=command, name=name):
+                    path = self.args.root / "bundle" / name
+                    path.write_bytes(b"modified but protected")
+                    resumed = self.subject()
+                    with self.assertRaisesRegex(installer.InstallError, "Installed bundle"):
+                        resumed.execute()
+                    self.assertEqual([], resumed.events)
+                    self.assertEqual(b"modified but protected", path.read_bytes())
+                    path.write_bytes(self.payload[name])
+        self.args.command = "initialize"
+        for missing in (True, False):
+            with self.subTest(missing=missing):
+                path = self.args.root / "bundle/compose.yml" if missing else self.args.root / "bundle/extra.sh"
+                if missing:
+                    path.unlink()
+                else:
+                    self.write(path, b"unlisted")
+                resumed = self.subject()
+                with self.assertRaisesRegex(installer.InstallError, "Installed bundle"):
+                    resumed.execute()
+                self.assertEqual([], resumed.events)
+                if missing:
+                    self.write(path, self.payload["compose.yml"])
+                else:
+                    path.unlink()
+        for phase in ("initializing", "prepared"):
+            subject.save(phase=phase)
+            for command in ("install", "prepare"):
+                with self.subTest(phase=phase, command=command):
+                    self.args.command = command
+                    path = self.args.root / "bundle/server_install.py"
+                    path.write_bytes(b"modified during extraction")
+                    resumed = self.subject()
+                    with self.assertRaisesRegex(installer.InstallError, "Installed bundle content"):
+                        resumed.execute()
+                    self.assertEqual([], resumed.events)
+                    self.assertEqual(b"modified during extraction", path.read_bytes())
+                    path.write_bytes(self.payload["server_install.py"])
+
+    def test_bundle_path_cannot_redirect_ownership_or_runtime_checks(self):
+        subject = self.subject()
+        subject.initialize_state()
+        subject.extract()
+        subject.save(bundlePath=str(self.assets))
+        with self.assertRaisesRegex(installer.InstallError, "bundle path"):
+            self.subject().load_state()
+
+    def test_interrupted_initial_extraction_resumes_only_through_install_or_prepare(self):
+        subject = self.subject()
+        subject.initialize_state()
+        bundle = self.args.root / "bundle"
+        bundle.mkdir(mode=0o700)
+        self.write(bundle / "images.env", self.payload["images.env"])
+        for command in ("initialize", "activate", "status", "rotate-token"):
+            with self.subTest(command=command):
+                self.args.command = command
+                with self.assertRaisesRegex(installer.InstallError, "Installed bundle"):
+                    self.subject().execute()
+        self.args.command = "prepare"
+        resumed = self.subject()
+        self.assertEqual("prepared", resumed.execute()["state"])
+        self.assertEqual(subject.state["installationId"], resumed.state["installationId"])
+        self.assertEqual(subject.state["operationId"], resumed.state["operationId"])
+        for name, data in self.payload.items():
+            self.assertEqual(data, (bundle / name).read_bytes())
+        self.args.command = "install"
+        self.assertEqual("awaiting_operator", self.subject().execute()["state"])
+        self.args.root = self.base / "second-installation"
+        interrupted = self.subject()
+        interrupted.initialize_state()
+        self.assertEqual("awaiting_operator", self.subject().execute()["state"])
+        self.assertEqual(interrupted.state["operationId"], installer.read_json(interrupted.state_path)["operationId"])
+
     def test_incomplete_migration_replays_original_operation_without_regenerating_credentials(self):
         subject = self.subject()
         subject.fail_migration = True
@@ -309,6 +432,7 @@ class InstallerTests(unittest.TestCase):
     def test_compose_uses_pinned_existing_images_and_excludes_ambient_secret_overrides(self):
         subject = self.subject()
         subject.initialize_state()
+        subject.extract()
         with mock.patch.dict(os.environ, {"COMPOSE_FILE": "foreign.yml", "DOCKER_HOST": "ssh://foreign",
                                           "DOCKER_AUTH_CONFIG": "synthetic-credential", "BAO_TOKEN": "synthetic-root"}), \
              mock.patch.object(installer, "run", return_value=b"") as command:
@@ -321,6 +445,11 @@ class InstallerTests(unittest.TestCase):
                 self.assertNotIn(key, env)
             self.assertEqual(subject.state["installationId"], env["MINICLOUD_INSTALLATION_ID"])
             self.assertEqual(str(self.args.root / "secrets"), env["MINICLOUD_SECRETS_DIR"])
+            command.reset_mock()
+            (self.args.root / "bundle/compose.yml").write_bytes(b"modified after preflight")
+            with self.assertRaisesRegex(installer.InstallError, "Installed bundle content"):
+                installer.Installer.compose(subject, "up", "-d", "api")
+            command.assert_not_called()
 
     def test_uncertain_initialized_openbao_never_reinitializes_or_loses_recovery(self):
         subject = self.subject()
@@ -477,6 +606,30 @@ class InstallerTests(unittest.TestCase):
             command.assert_not_called()
         self.assertTrue((self.assets / "checksums.txt.partial").exists())
         self.assertFalse((self.assets / "checksums.txt").exists())
+
+    def test_download_promotion_never_overwrites_an_asset_created_concurrently(self):
+        bootstrap = self.bootstrap_namespace()
+        argv = self.signed_fixture() + ["--download"]
+        path = self.assets / "checksums.txt"
+        path.unlink()
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        reads = iter((b"downloaded-by-this-invocation", b""))
+
+        def read(size):
+            if not path.exists():
+                self.write(path, b"concurrent-owner-asset")
+            return next(reads)
+
+        response.read.side_effect = read
+        with mock.patch("sys.argv", argv), mock.patch.object(subprocess, "run") as command, \
+             mock.patch.object(installer.urllib.request, "build_opener") as opener:
+            opener.return_value.open.return_value = response
+            with self.assertRaises(FileExistsError):
+                bootstrap["main"]()
+            command.assert_not_called()
+        self.assertEqual(b"concurrent-owner-asset", path.read_bytes())
+        self.assertEqual(b"downloaded-by-this-invocation", (self.assets / "checksums.txt.partial").read_bytes())
 
 
 if __name__ == "__main__":

@@ -51,6 +51,9 @@ independently verified the installer before using it. Existing files are never
 replaced. Failed downloads retain a `.partial` file; inspect and remove only
 that exact partial file before retrying. No installer/verifier executes after
 a failed download, signature or checksum check.
+Promotion uses an atomic no-replace hard link on the assets filesystem: if
+another invocation supplies the destination during download, it is preserved,
+the completed `.partial` remains for inspection, and this invocation fails.
 
 ## Protected inputs and preflight
 
@@ -91,6 +94,9 @@ sh "$assets/install-server.sh" --tag "$tag" --assets-dir "$assets" preflight \
 Preflight checks OS/architecture, local daemon/tool interfaces, protected
 configuration/paths, conflicting services, TCP 80/443 and UDP 443, DNS,
 existing installation identities and installation-owned volumes/networks.
+A host with unsupported IPv6, or a kernel-confirmed global IPv6 disablement,
+may pass using IPv4 alone. IPv6 TCP/UDP listener conflicts, permission errors
+and unconfirmed address errors still fail; the installer never enables IPv6.
 A fresh dedicated host must have no containers (including stopped ones) or
 Minicloud-prefixed volumes/networks. Recognized resumes may reuse only their
 installation-labeled persistent resources and original Compose working path.
@@ -163,6 +169,14 @@ The shared helper supplies only validated public values, image references,
 host maintenance must preserve that exact environment and the same lock;
 do not bypass it with ad-hoc `docker compose up`, copied templates or parallel
 host commands. Existing migration/bootstrap/database locks remain separate.
+Every resume verifies the persisted bundle path is exactly the canonical
+`$root/bundle` and its installed file inventory/bytes match the selected signed
+manifest. This is repeated immediately before every shared Compose command,
+including manual initialization, activation, status and token rotation.
+Extra, modified or missing installed files cannot execute or be silently
+overwritten. Only `install`/`prepare` while the durable phase is `initializing`
+may fill missing files from an interrupted initial extraction; existing
+partial files must still match the signed release exactly.
 
 ## Resume, token rotation and readiness
 
