@@ -262,6 +262,8 @@ public sealed class Deployment
     public AssetRelease? AssetRelease { get; set; }
     [Key]
     public string Id { get; set; } = default!;
+    /// <summary>Customer-facing <c>yyyyMMdd.N</c> label, unique per organization and allocated on first insert.</summary>
+    public string Number { get; set; } = string.Empty;
     public string OrganizationId { get; set; } = default!;
     public Organization Organization { get; set; } = default!;
     public string AppId { get; set; } = default!;
@@ -285,6 +287,14 @@ public sealed class Deployment
     public List<DeploymentService> Services { get; set; } = [];
     public List<DeploymentEvent> Events { get; set; } = [];
     public List<DeploymentLog> Logs { get; set; } = [];
+}
+
+/// <summary>Durable per-organization UTC-day counter. Rows survive deployment deletion so numbers are never reused.</summary>
+public sealed class DeploymentNumberCounter
+{
+    public string OrganizationId { get; set; } = default!;
+    public DateOnly UtcDate { get; set; }
+    public long LastValue { get; set; }
 }
 
 public sealed class DeploymentService

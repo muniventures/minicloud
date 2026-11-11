@@ -38,6 +38,7 @@ public sealed class AssetsController : ControllerBase
         }
         catch (ProviderCatalogException ex) { return EndpointResults.Problem(ex.Code, ex.Message, StatusCodes.Status400BadRequest); }
         catch (SecretStoreUnavailableException) { return EndpointResults.Problem("secret_store_unavailable", "Provider credentials are temporarily unavailable.", StatusCodes.Status503ServiceUnavailable); }
+        catch (DeploymentNumberExhaustedException) { return EndpointResults.DeploymentNumberExhausted(); }
         catch (ArgumentException ex) { return Results.BadRequest(new { code = "invalid_asset_release", message = ex.Message }); }
     }
 

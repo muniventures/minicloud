@@ -30,30 +30,36 @@ public sealed class DeploymentPreparationsController : ControllerBase
         var validation = ControlPlaneValidation.ValidateDeploymentPreparation(request);
         if (!validation.IsValid) { return EndpointResults.ValidationProblem("Local build preparation is invalid.", validation); }
         var key = Guid.Parse(request.IdempotencyKey);
-        try { return await preparations.LockedAsync(targetAppId, async () =>
+        try
         {
-            var app = await db.Apps.SingleAsync(x => x.Id == targetAppId, ct);
-            if (app.DeletionStatus is not null || await db.Applications.AnyAsync(x => x.Id == app.ApplicationId && x.DeletionStatus != null, ct)) { return EndpointResults.Conflict("app_deleting", "The app is being deleted."); }
-            var id = "dep_" + key.ToString("N");
-            var existing = await db.Deployments.SingleOrDefaultAsync(x => x.Id == id, ct);
-            if (existing is not null)
+            var result = await preparations.LockedAsync<IResult>(targetAppId, async () =>
             {
-                if (existing.AppId != app.Id || !preparations.Matches(existing, request.ServiceNames))
-                { return EndpointResults.Conflict("preparation_conflict", "Preparation key is already bound to another request."); }
-                if (request.Plan is not null && existing.PlanId != (await catalog.ResolveAsync(app.OrganizationId, request.Plan, ct, requireEnabled: false)).Id)
-                { return EndpointResults.Conflict("preparation_conflict", "Preparation key is already bound to another plan."); }
-                if (existing.Status != DeploymentStatus.WaitingForBuild || preparations.IsExpired(existing))
-                { return EndpointResults.Conflict("preparation_closed", "Preparation has ended; use a new key."); }
-                return Results.Ok(ToResponse(existing, app.ApplicationId));
-            }
-            if (await preparations.HasActiveAsync(app.Id, null, ct))
-            { return EndpointResults.Conflict("deployment_active", "This app already has an active deployment or local build."); }
-            if (request.Plan is not null) await catalog.BindAsync(app, request.Plan, ct);
-            var deployment = preparations.Start(app, id, request.ServiceNames);
-            await catalog.ReserveAsync(app, deployment, ct);
-            db.Deployments.Add(deployment);
-            return Results.Created($"/api/deployments/{deployment.Id}", ToResponse(deployment, app.ApplicationId));
-        }, ct); }
+                var app = await db.Apps.SingleAsync(x => x.Id == targetAppId, ct);
+                if (app.DeletionStatus is not null || await db.Applications.AnyAsync(x => x.Id == app.ApplicationId && x.DeletionStatus != null, ct)) { return EndpointResults.Conflict("app_deleting", "The app is being deleted."); }
+                var id = "dep_" + key.ToString("N");
+                var existing = await db.Deployments.SingleOrDefaultAsync(x => x.Id == id, ct);
+                if (existing is not null)
+                {
+                    if (existing.AppId != app.Id || !preparations.Matches(existing, request.ServiceNames))
+                    { return EndpointResults.Conflict("preparation_conflict", "Preparation key is already bound to another request."); }
+                    if (request.Plan is not null && existing.PlanId != (await catalog.ResolveAsync(app.OrganizationId, request.Plan, ct, requireEnabled: false)).Id)
+                    { return EndpointResults.Conflict("preparation_conflict", "Preparation key is already bound to another plan."); }
+                    if (existing.Status != DeploymentStatus.WaitingForBuild || preparations.IsExpired(existing))
+                    { return EndpointResults.Conflict("preparation_closed", "Preparation has ended; use a new key."); }
+                    return new PreparationResult(existing, app.ApplicationId, Replayed: true);
+                }
+                if (await preparations.HasActiveAsync(app.Id, null, ct))
+                { return EndpointResults.Conflict("deployment_active", "This app already has an active deployment or local build."); }
+                if (request.Plan is not null) await catalog.BindAsync(app, request.Plan, ct);
+                var deployment = preparations.Start(app, id, request.ServiceNames);
+                await catalog.ReserveAsync(app, deployment, ct);
+                db.Deployments.Add(deployment);
+                return new PreparationResult(deployment, app.ApplicationId, Replayed: false);
+            }, ct);
+            // Numbers are allocated with the insert; replays return the persisted number and CreatedAt.
+            return result is PreparationResult prepared ? prepared.ToResult() : result;
+        }
+        catch (DeploymentNumberExhaustedException) { return EndpointResults.DeploymentNumberExhausted(); }
         catch (ProviderCatalogException ex)
         { return EndpointResults.Problem(ex.Code, ex.Message, StatusCodes.Status400BadRequest); }
         catch (SecretStoreUnavailableException)
@@ -92,6 +98,17 @@ public sealed class DeploymentPreparationsController : ControllerBase
         }, ct);
     }
 
-    private static DeploymentCreateResponse ToResponse(Deployment d, string? applicationId) => new(d.Id, d.AppId,
-        ControlPlaneValidation.ToWireValue(d.Status), $"/api/deployments/{d.Id}", null, d.CreatedAt, ApplicationId: applicationId, EnvironmentId: d.AppId);
+    private sealed record PreparationResult(Deployment Deployment, string? ApplicationId, bool Replayed) : IResult
+    {
+        public IResult ToResult()
+        {
+            var location = DeploymentLinks.ApiPath(Deployment.OrganizationId, Deployment.Number);
+            var response = new DeploymentCreateResponse(Deployment.Id, Deployment.Number, Deployment.AppId,
+                ControlPlaneValidation.ToWireValue(Deployment.Status), location, null, Deployment.CreatedAt,
+                ApplicationId: ApplicationId, EnvironmentId: Deployment.AppId);
+            return Replayed ? Results.Ok(response) : Results.Created(location, response);
+        }
+
+        public Task ExecuteAsync(HttpContext httpContext) => throw new InvalidOperationException("Preparation must be mapped to its response.");
+    }
 }

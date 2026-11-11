@@ -1037,6 +1037,12 @@ namespace Minicloud.Common.Migrations
                         .HasColumnType("text")
                         .HasColumnName("github_run_url");
 
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(28)
+                        .HasColumnType("character varying(28)")
+                        .HasColumnName("number");
+
                     b.Property<string>("OrganizationId")
                         .IsRequired()
                         .HasColumnType("text")
@@ -1177,6 +1183,9 @@ namespace Minicloud.Common.Migrations
                     b.HasIndex("AppId", "CreatedAt");
 
                     b.HasIndex("OrganizationId", "CreatedAt");
+
+                    b.HasIndex("OrganizationId", "Number")
+                        .IsUnique();
 
                     b.HasIndex("OrganizationId", "ProviderAccountId");
 
@@ -1352,6 +1361,28 @@ namespace Minicloud.Common.Migrations
                     b.HasIndex("DeploymentId", "CreatedAt");
 
                     b.ToTable("deployment_logs", (string)null);
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.DeploymentNumberCounter", b =>
+                {
+                    b.Property<string>("OrganizationId")
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateOnly>("UtcDate")
+                        .HasColumnType("date")
+                        .HasColumnName("utc_date");
+
+                    b.Property<long>("LastValue")
+                        .HasColumnType("bigint")
+                        .HasColumnName("last_value");
+
+                    b.HasKey("OrganizationId", "UtcDate");
+
+                    b.ToTable("deployment_number_counters", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_deployment_number_counters_positive", "last_value >= 1");
+                        });
                 });
 
             modelBuilder.Entity("Minicloud.Common.Models.DeploymentService", b =>

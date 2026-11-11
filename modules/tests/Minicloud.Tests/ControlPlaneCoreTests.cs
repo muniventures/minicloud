@@ -308,6 +308,7 @@ public class DeploymentDtoMappingTests
         var deployment = new Deployment
         {
             Id = "dep_test",
+            Number = "20260521.3",
             AppId = app.Id,
             App = app,
             OrganizationId = app.OrganizationId,
@@ -322,6 +323,9 @@ public class DeploymentDtoMappingTests
         };
 
         var response = deployment.ToResponse("https://cloud.muni.dev");
+
+        Assert.Equal(("dep_test", "20260521.3"), (response.Id, response.Number));
+        Assert.Equal("https://cloud.muni.dev/deployments/20260521.3?organizationId=org_test", response.ConsoleUrl);
 
         Assert.Collection(
             response.Services.OrderBy(x => x.Name),

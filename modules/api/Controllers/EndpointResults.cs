@@ -26,6 +26,11 @@ public static class EndpointResults
     public static IResult Problem(string code, string message, int statusCode) =>
         Results.Json(new ErrorResponse(new ErrorBody(code, message, [])), statusCode: statusCode);
 
+    public static IResult DeploymentNotFound() => NotFound("deployment_not_found", "Deployment was not found.");
+
+    public static IResult DeploymentNumberExhausted() =>
+        Conflict(Minicloud.Common.Data.DeploymentNumberExhaustedException.Code, "No deployment numbers remain for this organization today.");
+
     public static async Task<IResult?> VerifyTargetOwnershipAsync(
         MinicloudDbContext db,
         string? appId,
