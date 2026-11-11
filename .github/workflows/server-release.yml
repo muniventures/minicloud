@@ -27,7 +27,16 @@ jobs:
       - name: Test release contracts without registry or signing credentials
         run: python3 -B -m unittest discover -s scripts/server-release -p 'test_*.py' -v
       - name: Install authenticated recovery test dependency
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends age
+        env:
+          AGE_VERSION: v1.3.2
+          AGE_SHA256: cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10
+        run: |
+          # Pinned upstream release instead of the Ubuntu archive; the checksum must match exactly.
+          archive="$RUNNER_TEMP/age.tar.gz"
+          curl -fsSL --retry 3 -o "$archive" "https://github.com/FiloSottile/age/releases/download/${AGE_VERSION}/age-${AGE_VERSION}-linux-amd64.tar.gz"
+          echo "${AGE_SHA256}  ${archive}" | sha256sum -c -
+          sudo tar -xzf "$archive" -C /usr/local/bin --strip-components=1 age/age age/age-keygen
+          age --version
       - name: Test self-hosting and installer contracts without host mutation
         run: python3 -B -m unittest discover -s scripts/self-hosting -p 'test_*.py' -v
 
