@@ -74,6 +74,7 @@ references (`MINICLOUD_*_IMAGE`) come from the generated, digest-pinned
 | `MINICLOUD_SOURCE_URL` | Optional. The public source link shown in the dashboard. |
 | `MINICLOUD_SECRETS_DIR` | Root-owned directory (`0700`) holding the files below. |
 | `MINICLOUD_INSTALLATION_ID` | Persistent non-secret installation identity from host metadata, shared by API and bootstrap inputs. Never regenerate it on restart. |
+| `MINICLOUD_HOST_ID` | Optional non-secret host-local maintenance identity from `<root>/host-id`, written by the packaged maintenance tooling and never backed up. Leave empty for manual Compose; `transfer` binds the maintenance authority to it. |
 | `OPENBAO_ROOT_TOKEN_FILE` | Used only by the `openbao-configure` maintenance service. Unset during normal operation. |
 
 The dashboard container receives only `MINICLOUD_API_URL`,
