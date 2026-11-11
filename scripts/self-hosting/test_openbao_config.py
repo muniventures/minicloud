@@ -30,6 +30,7 @@ class OpenBaoConfigurationTests(unittest.TestCase):
                 "API_HOSTNAME": "api.alpha.example",
                 "CONSOLE_HOSTNAME": "console.alpha.example",
                 "APP_DOMAIN": "apps.alpha.example",
+                "MINICLOUD_INSTALLATION_ID": "synthetic-persistent-installation",
                 "MINICLOUD_SECRETS_DIR": str(fixture),
             }
             for component in ("API", "DASHBOARD", "WORKER", "POSTGRES", "OPENBAO", "KRATOS", "CADDY"):
@@ -37,7 +38,8 @@ class OpenBaoConfigurationTests(unittest.TestCase):
             models = []
             for compose in (ROOT / "compose.self-host.yml", BUNDLE / "compose.yml"):
                 result = subprocess.run(
-                    [env["MINICLOUD_TEST_COMPOSE_BINARY"], "-f", str(compose), "config", "--format", "json"],
+                    [env["MINICLOUD_TEST_COMPOSE_BINARY"], "--profile", "maintenance",
+                     "-f", str(compose), "config", "--format", "json"],
                     env=env, text=True, capture_output=True, check=False,
                 )
                 self.assertEqual(0, result.returncode, result.stderr)
@@ -56,6 +58,39 @@ class OpenBaoConfigurationTests(unittest.TestCase):
                 for migrator in ("api-migrate", "kratos-migrate"):
                     self.assertEqual("service_completed_successfully", services[migrator]["depends_on"]["database-initialize"]["condition"])
                 self.assertIn("/opt/minicloud/openbao-ready.sh", services["openbao-agent"]["healthcheck"]["test"])
+                bootstrap = services["api-bootstrap"]
+                self.assertEqual(["maintenance"], bootstrap["profiles"])
+                self.assertEqual(services["api"]["image"], bootstrap["image"])
+                self.assertEqual(
+                    ["bootstrap", "status", "--input-file", "/run/minicloud-bootstrap/input/request.json"],
+                    bootstrap["command"],
+                )
+                self.assertIsNone(bootstrap.get("entrypoint"))
+                self.assertTrue(bootstrap["stdin_open"])
+                self.assertEqual(
+                    services["api"]["environment"]["Bootstrap__InstallationId"],
+                    bootstrap["environment"]["Bootstrap__InstallationId"],
+                )
+                self.assertEqual("service_completed_successfully", bootstrap["depends_on"]["api-migrate"]["condition"])
+                self.assertNotIn("kratos", bootstrap["depends_on"])
+                inputs = next(mount for mount in bootstrap["volumes"] if mount["target"].endswith("/input"))
+                outputs = next(mount for mount in bootstrap["volumes"] if mount["target"].endswith("/output"))
+                self.assertTrue(inputs["read_only"])
+                self.assertFalse(outputs.get("read_only", False))
+                self.assertFalse(inputs["bind"].get("create_host_path", False))
+                self.assertFalse(outputs["bind"].get("create_host_path", False))
+                normal = subprocess.run(
+                    [env["MINICLOUD_TEST_COMPOSE_BINARY"], "-f", str(compose), "config", "--format", "json"],
+                    env=env, text=True, capture_output=True, check=True,
+                )
+                self.assertNotIn("api-bootstrap", json.loads(normal.stdout)["services"])
+                missing_identity = subprocess.run(
+                    [env["MINICLOUD_TEST_COMPOSE_BINARY"], "-f", str(compose), "config", "--format", "json"],
+                    env=env | {"MINICLOUD_INSTALLATION_ID": ""},
+                    text=True, capture_output=True, check=False,
+                )
+                self.assertNotEqual(0, missing_identity.returncode)
+                self.assertIn("MINICLOUD_INSTALLATION_ID", missing_identity.stderr)
                 for consumer in ("api", "worker"):
                     token_volume = next(mount for mount in services[consumer]["volumes"] if mount["target"] == "/run/minicloud-openbao")
                     self.assertTrue(token_volume["read_only"])

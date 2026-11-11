@@ -27,6 +27,7 @@ x-api-environment: &api-environment
   Kratos__PublicBaseUrl: http://kratos:4433/
   Kratos__AdminBaseUrl: http://kratos:4434/
   Kratos__DashboardOrigin: ${CONSOLE_URL:?set CONSOLE_URL}
+  Bootstrap__InstallationId: ${MINICLOUD_INSTALLATION_ID:?set the persistent MINICLOUD_INSTALLATION_ID}
 
 services:
   postgres:
@@ -211,6 +212,38 @@ services:
       - app-db-password
     depends_on:
       database-initialize:
+        condition: service_completed_successfully
+    networks: [private]
+
+  # Explicit host-only operation; never part of ordinary startup.
+  api-bootstrap:
+    profiles: ["maintenance"]
+    image: ${MINICLOUD_API_IMAGE:?set MINICLOUD_API_IMAGE}
+    restart: "no"
+    command: ["bootstrap", "status", "--input-file", "/run/minicloud-bootstrap/input/request.json"]
+    stdin_open: true
+    environment:
+      Database__Provider: Postgres
+      Database__PasswordFile: /run/secrets/app-db-password
+      ConnectionStrings__Minicloud: Host=postgres;Port=5432;Database=minicloud;Username=minicloud
+      Kratos__AdminBaseUrl: http://kratos:4434/
+      Bootstrap__InstallationId: ${MINICLOUD_INSTALLATION_ID:?set the persistent MINICLOUD_INSTALLATION_ID}
+    secrets:
+      - app-db-password
+    volumes:
+      - type: bind
+        source: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/bootstrap/input
+        target: /run/minicloud-bootstrap/input
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MINICLOUD_SECRETS_DIR:?set MINICLOUD_SECRETS_DIR}/bootstrap/output
+        target: /run/minicloud-bootstrap/output
+        bind:
+          create_host_path: false
+    depends_on:
+      api-migrate:
         condition: service_completed_successfully
     networks: [private]
 
