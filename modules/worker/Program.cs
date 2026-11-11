@@ -182,6 +182,7 @@ builder.Services.AddSingleton<IArtifactRetriever>(sp => sp.GetRequiredService<Lo
 
 // Pipeline Executor (T40 full pipeline)
 builder.Services.AddMinicloudProviders(builder.Configuration);
+builder.Services.AddScoped<ProviderSshKeyService>();
 if (!builder.Configuration.GetValue<bool>("Providers:AllowLegacyConfiguration"))
 {
     // A type-only resolver cannot identify an account. Keep legacy dispatch an
@@ -235,6 +236,10 @@ builder.Services.AddScoped<DatabaseManagementService>();
 builder.Services.AddScoped<DatabaseNetworkService>();
 builder.Services.Configure<Minicloud.Worker.Databases.DatabasePlatformOptions>(builder.Configuration.GetSection(Minicloud.Worker.Databases.DatabasePlatformOptions.SectionName));
 builder.Services.AddHostedService<Minicloud.Worker.Databases.DatabaseOperationWorker>();
+
+// Maintenance authority: every claim loop validates this process's epoch/host before claiming work.
+builder.Services.AddMinicloudMaintenanceParticipant(builder.Configuration, "worker");
+builder.Services.AddHostedService<Minicloud.Worker.Maintenance.MaintenanceParticipantRegistrationService>();
 
 // Queue Consumer Background Service
 builder.Services.AddSingleton<PostgresDeploymentQueueConsumer>();

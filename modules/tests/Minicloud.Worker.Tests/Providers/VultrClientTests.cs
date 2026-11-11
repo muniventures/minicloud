@@ -113,7 +113,7 @@ public class VultrClientTests
             Name: "minicloud-vultr-srv",
             Plan: "vc2-1c-1gb",
             Region: "ewr",
-            SshKeyIdOrPublicKey: "vultr-ssh-key",
+            SshKeyReferences: ["vultr-ssh-key", "second-key"],
             UserDataCloudInit: rawUserData,
             Hostname: "vultr.app.muni.dev");
 
@@ -133,6 +133,23 @@ public class VultrClientTests
         Assert.Contains($"\"user_data\":\"{expectedBase64}\"", req.Body);
         Assert.Contains("\"os_id\":2284", req.Body);
         Assert.Contains("\"hostname\":\"vultr.app.muni.dev\"", req.Body);
+        Assert.Contains("\"sshkey_id\":[\"vultr-ssh-key\",\"second-key\"]", req.Body);
+    }
+
+    [Fact]
+    public async Task SshKeyInventoryAndRegistrationUseVultrApiShapes()
+    {
+        _handler.QueueJsonResponse("""{"ssh_keys":[{"id":"key-1","name":"work","ssh_key":"ssh-ed25519 fixture"}],"meta":{"links":{"next":null}}}""");
+        _handler.QueueJsonResponse("""{"ssh_key":{"id":"key-2","name":"new","ssh_key":"ssh-ed25519 fixture"}}""", HttpStatusCode.Created);
+        var client = CreateClient();
+
+        var listed = await client.ListSshKeysAsync();
+        var registered = await client.RegisterSshKeyAsync("new", "ssh-ed25519 AAAA");
+
+        Assert.Equal(new ProviderSshKeyInfo("key-1", "work", "ssh-ed25519 fixture"), Assert.Single(listed));
+        Assert.Equal(new ProviderSshKeyInfo("key-2", "new", "ssh-ed25519 fixture"), registered);
+        Assert.Contains("/v2/ssh-keys?per_page=500&page=1", _handler.RecordedRequests[0].Uri);
+        Assert.Contains("\"ssh_key\":\"ssh-ed25519 AAAA\"", _handler.RecordedRequests[1].Body);
     }
 
     [Theory]
@@ -142,7 +159,7 @@ public class VultrClientTests
     {
         _handler.QueueJsonResponse("""{"instance":{"id":"mapped-os","label":"mapped-os","status":"pending"}}""", HttpStatusCode.Accepted);
         _options.DefaultOsId = defaultOsId;
-        var request = new CreateServerRequest("mapped-os", "vc2-1c-1gb", "ewr", "", "", Image: "1743");
+        var request = new CreateServerRequest("mapped-os", "vc2-1c-1gb", "ewr", [], "", Image: "1743");
 
         await CreateClient().CreateServerAsync(request);
 
@@ -163,7 +180,7 @@ public class VultrClientTests
     public async Task CreateServerAsync_InvalidPerRequestOsIdFailsBeforeAnyNetworkCall(string image)
     {
         _options.DefaultOsId = null;
-        var request = new CreateServerRequest("invalid-os", "vc2-1c-1gb", "ewr", "", "", Image: image);
+        var request = new CreateServerRequest("invalid-os", "vc2-1c-1gb", "ewr", [], "", Image: image);
 
         await Assert.ThrowsAsync<ArgumentException>(() => CreateClient().CreateServerAsync(request));
 

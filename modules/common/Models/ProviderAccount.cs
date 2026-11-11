@@ -63,3 +63,20 @@ public sealed class ProviderCredentialCleanup
     public string? Version { get; set; }
     public DateTimeOffset NotBefore { get; set; }
 }
+
+public sealed class ProviderSshKey
+{
+    public string Id { get; set; } = default!;
+    public string OrganizationId { get; set; } = default!;
+    public string ProviderAccountId { get; set; } = default!;
+    public string? ProviderKeyId { get; set; }
+    public string Name { get; set; } = default!;
+    public string PublicKey { get; set; } = default!;
+    public string Fingerprint { get; set; } = default!;
+    public string KeyType { get; set; } = default!;
+    public string RegistrationState { get; set; } = "discovered";
+    public string? CreatedBy { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public DateTimeOffset? RegisteredAt { get; set; }
+}

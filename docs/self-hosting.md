@@ -155,6 +155,10 @@ shared command returns sanitized nonzero failures. Do not equate service exit
 or `/health` alone with onboarding completion: inspect shared bootstrap status
 and preserve awaiting-DNS/TLS, awaiting-operator, ready and failed distinctions.
 
+The same entry point exposes `maintenance <status|fence|drain-status|release|transfer>`
+for upgrade, restore and host-transfer fencing. See
+[server maintenance authority](server-maintenance-authority.md).
+
 ### OpenBao lifecycle
 
 OpenBao uses persistent file storage and TLS 1.3 on the private network. After

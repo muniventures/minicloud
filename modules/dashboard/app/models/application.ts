@@ -15,6 +15,38 @@ export type EnvironmentRuntimeObservation = {
   healthyServices: number;
 };
 
+// SSH access contract (mirrors modules/contracts/Contracts/SshAccessDtos.cs).
+export type SshRegistrationState =
+  | "none" | "not_registered" | "discovered" | "pending" | "registering" | "ready" | "failed" | "unknown";
+
+export type SshAccessRequest =
+  | { mode: "none"; expectedRevision?: number }
+  | { mode: "existing"; keyId: string; expectedRevision?: number }
+  | { mode: "new"; name: string; publicKey: string; expectedRevision?: number };
+
+export type ProviderSshKey = {
+  id: string;
+  providerAccountId: string;
+  name: string;
+  fingerprint: string;
+  keyType: "ed25519" | "rsa" | string;
+  registrationState: SshRegistrationState | string;
+};
+
+export type EnvironmentSshAccess = {
+  mode: "none" | "existing" | "new" | string;
+  providerAccountId: string | null;
+  keyId: string | null;
+  name: string | null;
+  fingerprint: string | null;
+  keyType: string | null;
+  revision: number;
+  registrationState: SshRegistrationState | string;
+  selectionLocked: boolean;
+};
+
+export type SshConnection = { address: string; username: string };
+
 export type ApplicationEnvironment = {
   id: string;
   applicationId: string;
@@ -35,6 +67,8 @@ export type ApplicationEnvironment = {
   runtimeObservation: EnvironmentRuntimeObservation;
   createdAt: string;
   updatedAt: string;
+  sshAccess?: EnvironmentSshAccess | null;
+  sshConnection?: SshConnection | null;
 };
 
 export type Application = {

@@ -18,12 +18,14 @@ public sealed class PostgresDeploymentQueueConsumer : BackgroundService, IDeploy
     private readonly WorkerOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<PostgresDeploymentQueueConsumer> _logger;
+    private readonly MaintenanceParticipant _maintenance;
 
     public PostgresDeploymentQueueConsumer(
         IServiceScopeFactory scopeFactory,
         IOptions<WorkerOptions> options,
         TimeProvider timeProvider,
-        ILogger<PostgresDeploymentQueueConsumer> logger)
+        ILogger<PostgresDeploymentQueueConsumer> logger,
+        MaintenanceParticipant? maintenance = null)
     {
         ArgumentNullException.ThrowIfNull(scopeFactory);
         ArgumentNullException.ThrowIfNull(options);
@@ -39,6 +41,7 @@ public sealed class PostgresDeploymentQueueConsumer : BackgroundService, IDeploy
         }
         _timeProvider = timeProvider;
         _logger = logger;
+        _maintenance = maintenance ?? new MaintenanceParticipant(scopeFactory, "worker", null, timeProvider, logger);
     }
 
     public async Task<Deployment?> TryClaimNextDeploymentAsync(CancellationToken cancellationToken)
@@ -50,6 +53,14 @@ public sealed class PostgresDeploymentQueueConsumer : BackgroundService, IDeploy
         return await strategy.ExecuteAsync(async () =>
         {
             await using var transaction = await dbContext.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+
+            // Accepted queued work may be claimed while fenced (so maintenance can drain), but never
+            // by a process whose authority epoch was superseded or that runs on a foreign host.
+            if (!await _maintenance.CanClaimAsync(dbContext, cancellationToken))
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return null;
+            }
 
             Deployment? deployment;
 
@@ -320,6 +331,15 @@ public sealed class PostgresDeploymentQueueConsumer : BackgroundService, IDeploy
                 var dbContext = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
                 var now = _timeProvider.GetUtcNow();
 
+                if ((await _maintenance.CheckAsync(dbContext, requireOpen: false, cancellationToken)).IsRevoked)
+                {
+                    _logger.LogWarning(
+                        "Maintenance authority for this worker was revoked; stopping deployment {DeploymentId} without further commits", deploymentId);
+                    await ownershipLostCts.CancelAsync();
+                    await pipelineCts.CancelAsync();
+                    break;
+                }
+
                 int rowsAffected = 0;
                 try
                 {
@@ -569,6 +589,11 @@ public sealed class PostgresDeploymentQueueConsumer : BackgroundService, IDeploy
             try
             {
                 active.RemoveWhere(task => task.IsCompleted);
+                if (!await HasCurrentAuthorityAsync(stoppingToken))
+                {
+                    await Task.Delay(_options.PollingInterval, _timeProvider, stoppingToken);
+                    continue;
+                }
                 await FailStaleDeploymentsAsync(stoppingToken);
                 while (active.Count < _options.MaxConcurrentDeployments)
                 {
@@ -609,6 +634,13 @@ public sealed class PostgresDeploymentQueueConsumer : BackgroundService, IDeploy
         await Task.WhenAll(active);
 
         _logger.LogInformation("PostgresDeploymentQueueConsumer stopped");
+    }
+
+    private async Task<bool> HasCurrentAuthorityAsync(CancellationToken cancellationToken)
+    {
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+        return (await _maintenance.CheckAsync(db, requireOpen: false, cancellationToken)).IsAdmitted;
     }
 
     private async Task ProcessDeploymentSafelyAsync(Deployment deployment, CancellationToken cancellationToken)

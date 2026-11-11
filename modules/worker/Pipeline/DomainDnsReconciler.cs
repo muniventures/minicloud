@@ -87,7 +87,7 @@ public sealed class DomainDnsReconciler(
     }
 }
 
-public sealed class DomainDnsWorker(IServiceScopeFactory scopes, ILogger<DomainDnsWorker> logger) : BackgroundService
+public sealed class DomainDnsWorker(IServiceScopeFactory scopes, ILogger<DomainDnsWorker> logger, MaintenanceParticipant? maintenance = null) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -95,8 +95,14 @@ public sealed class DomainDnsWorker(IServiceScopeFactory scopes, ILogger<DomainD
         {
             try
             {
-                await using var scope = scopes.CreateAsyncScope();
-                await scope.ServiceProvider.GetRequiredService<DomainDnsReconciler>().ReconcileAsync(stoppingToken);
+                // Managed DNS changes originate external writes, so they pause while maintenance holds the fence.
+                Func<CancellationToken, Task> pass = async ct =>
+                {
+                    await using var scope = scopes.CreateAsyncScope();
+                    await scope.ServiceProvider.GetRequiredService<DomainDnsReconciler>().ReconcileAsync(ct);
+                };
+                if (maintenance is null) await pass(stoppingToken);
+                else await maintenance.RunActivityAsync("managed_dns_reconcile", requireOpen: true, pass, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

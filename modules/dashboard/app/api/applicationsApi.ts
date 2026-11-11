@@ -2,6 +2,7 @@ import { apiRequest } from "./apiClient";
 import type {
   ApplicationEnvironment,
   Application,
+  SshAccessRequest,
 } from "../models/application";
 import { appsFixtureApplications, appsFixturesEnabled } from "./applicationsFixtures";
 
@@ -9,7 +10,7 @@ export type CreateApplicationRequest = {
   organizationId: string;
   name: string;
   slug: string;
-  initialEnvironment?: { name: string; plan: string; database?: string } | null;
+  initialEnvironment?: { name: string; plan: string; database?: string; sshAccess?: SshAccessRequest } | null;
 };
 
 export type UpdateApplicationRequest = {
@@ -24,6 +25,7 @@ export type CreateEnvironmentRequest = {
   kind?: string;
   sourceBranch?: string | null;
   sourceEnvironmentId?: string | null;
+  sshAccess?: SshAccessRequest;
 };
 
 export type UpdateEnvironmentRequest = {
@@ -31,6 +33,8 @@ export type UpdateEnvironmentRequest = {
   plan?: string;
   database?: string;
   setAsDefault?: boolean;
+  // Omit to preserve the saved selection; explicit selections require expectedRevision.
+  sshAccess?: SshAccessRequest & { expectedRevision: number };
 };
 
 // Production requests use the explicit application/environment API. Synthetic

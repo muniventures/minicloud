@@ -118,6 +118,17 @@ public sealed class MinicloudApp
     public string? RuntimeParentSlug { get; set; }
     public string? SourceBranch { get; set; }
     public string? SourceEnvironmentId { get; set; }
+    public string SshAccessMode { get; set; } = "none";
+    public string? SshProviderAccountId { get; set; }
+    public string? SshKeyId { get; set; }
+    public string? SshKeyName { get; set; }
+    public string? SshPublicKey { get; set; }
+    public string? SshFingerprint { get; set; }
+    public string? SshKeyType { get; set; }
+    public string SshRegistrationState { get; set; } = "not_registered";
+    public long SshRevision { get; set; }
+    public string? SshSelectedBy { get; set; }
+    public DateTimeOffset? SshSelectedAt { get; set; }
     // Root app ID + case-folded name enforces uniqueness across root and child environments.
     public string? EnvironmentKey { get; set; }
     public string? DeletionStatus { get; set; }
@@ -231,6 +242,19 @@ public sealed class Deployment
     public string? ProviderImage { get; set; }
     public string? ProviderBuildPlatform { get; set; }
     public bool ProviderCreationAttempted { get; set; }
+    public long? SshSelectionRevision { get; set; }
+    public string? SshSelectionMode { get; set; }
+    public string? SshKeyId { get; set; }
+    public string? SshKeyName { get; set; }
+    public string? SshPublicKey { get; set; }
+    public string? SshFingerprint { get; set; }
+    public string? SshKeyType { get; set; }
+    public string? SshProviderAccountId { get; set; }
+    public string? SshCredentialGeneration { get; set; }
+    public string? SshSelectingActor { get; set; }
+    public string? SshProviderReferencesJson { get; set; }
+    public string? SshRegistrationState { get; set; }
+    public DateTimeOffset? SshSnapshotTakenAt { get; set; }
     public DateTimeOffset? CancellationRequestedAt { get; set; }
     public string? CancellationRequestedBy { get; set; }
     public string? RequestedServiceNamesJson { get; set; }

@@ -273,6 +273,7 @@ describe("AppLandingRedirect & AppSettingsModule", () => {
         name: "qa",
         plan: "Small NB",
         database: "sqlite",
+        sshAccess: { mode: "none" },
       }),
     );
 

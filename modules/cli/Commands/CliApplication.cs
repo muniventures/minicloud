@@ -187,9 +187,9 @@ public sealed partial class CliApplication
         _console.WriteLine("  init            Initialize a new application and generate minicloud.yml");
         _console.WriteLine("  add-service     Add a new service configuration to an existing application");
         _console.WriteLine("  deploy          Deploy changed services to Minicloud (or 'all' / '--all' to deploy all)");
-        _console.WriteLine("  environments    List, create, or rename application environments");
+        _console.WriteLine("  environments    List, create, update, or rename application environments");
         _console.WriteLine("  plans           List named plans in an organization");
-        _console.WriteLine("  providers       Add provider accounts or import legacy resource bindings");
+        _console.WriteLine("  providers       Add provider accounts, list SSH keys, or import legacy bindings");
         _console.WriteLine("  branch          Manage preview environments (deploy branch, branch destroy)");
         _console.WriteLine("  assets          Publish immutable customer assets on the assigned VPS");
         _console.WriteLine("  status          Show deployment status and service URLs (--watch to stream updates)");
@@ -266,8 +266,14 @@ public sealed partial class CliApplication
 
             case "environments":
                 _console.WriteLine("minicloud environments list [--config path]");
-                _console.WriteLine("minicloud environments create <name> --plan <plan> [--database sqlite|postgres] [--config path]");
+                _console.WriteLine($"minicloud environments create <name> --plan <plan> [--database sqlite|postgres] {SshOptionsUsage} [--config path]");
+                _console.WriteLine($"minicloud environments update <name> {SshOptionsUsage} [--config path]");
                 _console.WriteLine("minicloud environments rename <name> <new-name> [--config path]");
+                _console.WriteLine("SSH options select a personal key installed when the environment's VPS is first provisioned:");
+                _console.WriteLine("  --ssh-key <key-id>            Existing key from 'minicloud providers ssh-keys --plan <plan>' (providers:read)");
+                _console.WriteLine("  --ssh-public-key-file <path>  New OpenSSH public key (.pub) registered at provisioning (providers:write)");
+                _console.WriteLine("  --ssh-key-name <name>         Name for the new key (default: key comment or file name)");
+                _console.WriteLine("Omitting SSH options keeps Minicloud-only access on create and the current selection on update. Selections are immutable after server allocation.");
                 return CliExitCodes.Success;
             case "plans":
                 _console.WriteLine("minicloud plans list [--organization <id>] [--config path]");
@@ -276,6 +282,7 @@ public sealed partial class CliApplication
                 _console.WriteLine("minicloud providers add --organization <id> --name <name> --provider hetzner|digital-ocean|vultr [--project-id <id>] [--os-id <id>]");
                 _console.WriteLine("Reads the cloud token from the provider environment variable; tokens are never command arguments.");
                 _console.WriteLine("minicloud providers import-legacy --manifest <path>");
+                _console.WriteLine("minicloud providers ssh-keys <provider-account-id> | --plan <plan> [--organization <id>]");
                 return CliExitCodes.Success;
             case "deploy branch":
                 _console.WriteLine("Deploy all services to an isolated branch environment");
@@ -326,12 +333,15 @@ public sealed partial class CliApplication
                 _console.WriteLine("Initialize a new Minicloud application");
                 _console.WriteLine();
                 _console.WriteLine("Usage:");
-                _console.WriteLine("  minicloud init [--advanced] [--config minicloud.yml] [--force]");
+                _console.WriteLine($"  minicloud init [--advanced] [--config minicloud.yml] [--force] {SshOptionsUsage}");
                 _console.WriteLine();
                 _console.WriteLine("Options:");
                 _console.WriteLine("  --advanced              Interactive prompt for advanced routing, ports, and domains");
                 _console.WriteLine("  --config <path>         Output configuration file path (default: minicloud.yml)");
                 _console.WriteLine("  --force                 Overwrite existing configuration file without prompting");
+                _console.WriteLine("  --ssh-key <key-id>      Existing provider SSH key for a newly created app's first environment");
+                _console.WriteLine("  --ssh-public-key-file <path>  New OpenSSH public key for a newly created app; never a private key");
+                _console.WriteLine("  --ssh-key-name <name>   Name for the new public key");
                 return CliExitCodes.Success;
 
             case "add-service":

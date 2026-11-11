@@ -14,7 +14,18 @@ public sealed class AppSummaryReader(MinicloudDbContext db)
         var scope = db.Apps.Where(x => x.Id == appId || x.ParentAppId == appId ||
             (x.ApplicationId != null && target.Select(t => t.ApplicationId).Contains(x.ApplicationId)));
         var apps = await ReadEnvironmentsAsync(organizationId, scope, ct);
-        return apps.SingleOrDefault(x => x.Id == appId)?.ToResponse();
+        var app = apps.SingleOrDefault(x => x.Id == appId);
+        if (app is null) return null;
+        var sshLocked = await db.ServerInstances.AnyAsync(x => x.AppId == appId, ct) ||
+            await db.RuntimeServers.AnyAsync(x => x.AppId == appId, ct) ||
+            await db.Deployments.AnyAsync(x => x.AppId == appId &&
+                (x.ProviderCreationAttempted ||
+                 (x.SshRegistrationState == "unknown" || x.SshRegistrationState == "registering") ||
+                 (x.SshSnapshotTakenAt != null &&
+                  (x.Status == DeploymentStatus.Queued || x.Status == DeploymentStatus.WaitingForBuild ||
+                   x.Status == DeploymentStatus.Dispatching || x.Status == DeploymentStatus.Provisioning ||
+                   x.Status == DeploymentStatus.Deploying || x.Status == DeploymentStatus.Verifying))), ct);
+        return app.ToResponse(sshLocked);
     }
 
     // Three sequential queries; the caller owns authorization. Scope is additionally tenant-filtered here.
@@ -28,8 +39,11 @@ public sealed class AppSummaryReader(MinicloudDbContext db)
                 ParentAppId = x.ParentAppId, BranchName = x.BranchName, EnvironmentName = x.EnvironmentName,
                 EnvironmentKind = x.EnvironmentKind, SourceBranch = x.SourceBranch, SourceEnvironmentId = x.SourceEnvironmentId,
                 ApplicationId = x.ApplicationId, PlanId = x.PlanId, Plan = x.Plan, Database = x.Database,
+                SshAccessMode = x.SshAccessMode, SshProviderAccountId = x.SshProviderAccountId, SshKeyId = x.SshKeyId,
+                SshKeyName = x.SshKeyName, SshFingerprint = x.SshFingerprint, SshKeyType = x.SshKeyType,
+                SshRegistrationState = x.SshRegistrationState, SshRevision = x.SshRevision,
                 DeletionStatus = x.DeletionStatus, DeletionError = x.DeletionError, CreatedAt = x.CreatedAt, UpdatedAt = x.UpdatedAt,
-                SelectedPlan = x.SelectedPlan == null ? null : new ProviderPlan { Name = x.SelectedPlan.Name },
+                SelectedPlan = x.SelectedPlan == null ? null : new ProviderPlan { Name = x.SelectedPlan.Name, ProviderAccountId = x.SelectedPlan.ProviderAccountId },
                 Application = x.Application == null ? null : new MinicloudApplication
                 {
                     Id = x.Application.Id, OrganizationId = x.Application.OrganizationId,

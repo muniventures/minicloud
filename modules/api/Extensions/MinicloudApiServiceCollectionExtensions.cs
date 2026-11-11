@@ -167,6 +167,7 @@ public static class MinicloudApiServiceCollectionExtensions
         services.AddScoped<CustomDomainRegistrationService>();
         services.AddScoped<AppBranchService>();
         services.AddScoped<AppEnvironmentService>();
+        services.AddScoped<EnvironmentSshAccessService>();
         services.AddScoped<AppDeletionService>();
         services.AddScoped<DeploymentOrchestrator>();
         services.AddScoped<IAppSecretService, AppSecretService>();
@@ -181,6 +182,8 @@ public static class MinicloudApiServiceCollectionExtensions
                 OpenBaoHttpHandler.Create(provider.GetRequiredService<IOptions<OpenBaoSecretStoreOptions>>().Value));
         services.AddHostedService<OpenBaoTokenRenewalService>();
         services.AddHostedService<ProviderCredentialCleanupWorker>();
+        services.AddMinicloudMaintenanceParticipant(configuration, "api");
+        services.AddHostedService<MaintenanceParticipantRegistrationService>();
         // T90: GitHub dispatch client and DeploymentWorkflowMonitor decommissioned.
         // minicloud-worker claims Queued deployments via PostgreSQL SKIP LOCKED.
         services.AddScoped<ControlPlanePrincipalResolver>();

@@ -50,6 +50,7 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
 
     public DbSet<AppStorageVolume> AppStorageVolumes => Set<AppStorageVolume>();
     public DbSet<ProviderAccount> ProviderAccounts => Set<ProviderAccount>();
+    public DbSet<ProviderSshKey> ProviderSshKeys => Set<ProviderSshKey>();
     public DbSet<ProviderPlan> ProviderPlans => Set<ProviderPlan>();
     public DbSet<ProviderPlanName> ProviderPlanNames => Set<ProviderPlanName>();
     public DbSet<ProviderCredentialCleanup> ProviderCredentialCleanups => Set<ProviderCredentialCleanup>();
@@ -62,9 +63,50 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
 
     public DbSet<ManagedDatabaseBinding> ManagedDatabaseBindings => Set<ManagedDatabaseBinding>();
     public DbSet<ManagedDatabaseNetwork> ManagedDatabaseNetworks => Set<ManagedDatabaseNetwork>();
+    public DbSet<MaintenanceAuthorityRecord> MaintenanceAuthorities => Set<MaintenanceAuthorityRecord>();
+    public DbSet<MaintenanceActivity> MaintenanceActivities => Set<MaintenanceActivity>();
+    public DbSet<MaintenanceParticipantRecord> MaintenanceParticipants => Set<MaintenanceParticipantRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<MaintenanceAuthorityRecord>(entity =>
+        {
+            entity.ToTable("maintenance_authority", table => table.HasCheckConstraint(
+                "ck_maintenance_authority_singleton", "id = 1 AND epoch >= 1 AND state IN ('open', 'fenced')"));
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.InstallationId).HasMaxLength(128);
+            entity.Property(x => x.State).HasMaxLength(16);
+            entity.Property(x => x.HolderOperationId).HasMaxLength(128);
+            entity.Property(x => x.HostId).HasMaxLength(128);
+            entity.Property(x => x.TransferOperationId).HasMaxLength(128);
+            entity.HasData(new MaintenanceAuthorityRecord
+            {
+                Id = MaintenanceAuthorityRecord.SingletonId,
+                Epoch = 1,
+                State = MaintenanceAuthorityStates.Open,
+                UpdatedAt = new DateTimeOffset(2026, 11, 11, 0, 0, 0, TimeSpan.Zero)
+            });
+        });
+        modelBuilder.Entity<MaintenanceActivity>(entity =>
+        {
+            entity.ToTable("maintenance_activities");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasMaxLength(64);
+            entity.Property(x => x.Kind).HasMaxLength(64);
+            entity.Property(x => x.ParticipantId).HasMaxLength(64);
+            entity.Property(x => x.Detail).HasMaxLength(256);
+            entity.HasIndex(x => x.ExpiresAt);
+        });
+        modelBuilder.Entity<MaintenanceParticipantRecord>(entity =>
+        {
+            entity.ToTable("maintenance_participants");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasMaxLength(64);
+            entity.Property(x => x.Role).HasMaxLength(32);
+            entity.Property(x => x.HostId).HasMaxLength(128);
+            entity.HasIndex(x => x.LastSeenAt);
+        });
         modelBuilder.Entity<ManagedDatabaseNetwork>(entity =>
         {
             entity.ToTable("managed_database_networks");
@@ -165,9 +207,26 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
             entity.ToTable("provider_credential_cleanups");
             entity.HasKey(x => x.Id);
         });
+        modelBuilder.Entity<ProviderSshKey>(entity =>
+        {
+            entity.ToTable("provider_ssh_keys");
+            entity.HasKey(x => x.Id);
+            entity.HasAlternateKey(x => new { x.OrganizationId, x.ProviderAccountId, x.Id });
+            entity.HasIndex(x => new { x.OrganizationId, x.ProviderAccountId, x.ProviderKeyId }).IsUnique();
+            entity.HasIndex(x => new { x.OrganizationId, x.ProviderAccountId, x.Fingerprint }).IsUnique();
+            entity.HasOne<ProviderAccount>().WithMany()
+                .HasForeignKey(x => new { x.OrganizationId, x.ProviderAccountId })
+                .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<MinicloudApp>().HasOne(x => x.SelectedPlan).WithMany()
             .HasForeignKey(x => new { x.OrganizationId, x.PlanId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<MinicloudApp>().HasOne<ProviderAccount>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, x.SshProviderAccountId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<MinicloudApp>().HasOne<ProviderSshKey>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, x.SshProviderAccountId, x.SshKeyId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.ProviderAccountId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<Deployment>().HasOne<ProviderAccount>().WithMany()
             .HasForeignKey(x => new { x.OrganizationId, x.ProviderAccountId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
@@ -300,6 +359,8 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
         modelBuilder.Entity<MinicloudApp>(entity =>
         {
             entity.ToTable("apps");
+            entity.Property(x => x.SshAccessMode).HasDefaultValue("none");
+            entity.Property(x => x.SshRegistrationState).HasDefaultValue("not_registered");
             entity.HasIndex(x => new { x.OrganizationId, x.Slug }).IsUnique();
             entity.HasIndex(x => new { x.ParentAppId, x.BranchName }).IsUnique();
             entity.HasIndex(x => new { x.ApplicationId, x.NormalizedEnvironmentName }).IsUnique();

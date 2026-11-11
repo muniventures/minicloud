@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using System.Globalization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -11,7 +12,7 @@ using System.Net.Http;
 
 namespace Minicloud.Common.Providers.DigitalOcean;
 
-public sealed class DigitalOceanClient : IVpsProviderClient
+public sealed class DigitalOceanClient : IVpsProviderClient, IVpsProviderSshKeyClient
 {
     private readonly HttpClient _httpClient;
     private readonly DigitalOceanOptions _options;
@@ -41,6 +42,36 @@ public sealed class DigitalOceanClient : IVpsProviderClient
         {
             _httpClient.BaseAddress = new Uri(_options.BaseUrl.TrimEnd('/') + "/");
         }
+    }
+
+    public async Task<IReadOnlyList<ProviderSshKeyInfo>> ListSshKeysAsync(CancellationToken cancellationToken = default)
+    {
+        const int pageSize = 200;
+        var keys = new List<ProviderSshKeyInfo>();
+        for (var page = 1; ; page++)
+        {
+            using var request = CreateRequest(HttpMethod.Get, $"account/keys?per_page={pageSize}&page={page}");
+            using var response = await SendAsync(request, cancellationToken);
+            await EnsureSuccessAsync(response, cancellationToken);
+            var result = await response.Content.ReadFromJsonAsync<DigitalOceanSshKeyListResponse>(cancellationToken: cancellationToken);
+            var pageKeys = result?.SshKeys ?? [];
+            keys.AddRange(pageKeys.Where(x => x.Id > 0)
+                .Select(x => new ProviderSshKeyInfo(x.Id.ToString(), x.Name ?? string.Empty, x.PublicKey)));
+            if (pageKeys.Count < pageSize || (result?.Meta?.Total is int total && keys.Count >= total))
+                return keys;
+        }
+    }
+
+    public async Task<ProviderSshKeyInfo> RegisterSshKeyAsync(string name, string publicKey, CancellationToken cancellationToken = default)
+    {
+        using var request = CreateRequest(HttpMethod.Post, "account/keys");
+        request.Content = JsonContent.Create(new DigitalOceanCreateSshKeyPayload { Name = name, PublicKey = publicKey });
+        using var response = await SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        var result = await response.Content.ReadFromJsonAsync<DigitalOceanSshKeyResponse>(cancellationToken: cancellationToken);
+        if (result?.SshKey is not { Id: > 0 } key)
+            throw new ProviderApiException("DigitalOcean API returned an empty SSH key in the registration response.", response.StatusCode, Provider);
+        return new ProviderSshKeyInfo(key.Id.ToString(), key.Name ?? name, key.PublicKey);
     }
 
     public async Task<ProviderServerInfo?> FindServerAsync(string serverName, CancellationToken cancellationToken = default)
@@ -91,9 +122,12 @@ public sealed class DigitalOceanClient : IVpsProviderClient
             Tags = tags.Distinct().ToList()
         };
 
-        if (!string.IsNullOrWhiteSpace(request.SshKeyIdOrPublicKey))
+        if (request.SshKeyReferences.Count > 0)
         {
-            payload.SshKeys = [request.SshKeyIdOrPublicKey];
+            payload.SshKeys = request.SshKeyReferences.Select(reference =>
+                long.TryParse(reference, NumberStyles.None, CultureInfo.InvariantCulture, out var id) && id > 0
+                    ? (object)id
+                    : reference).ToArray();
         }
 
         using var httpRequest = CreateRequest(HttpMethod.Post, "droplets");
@@ -265,7 +299,52 @@ public sealed class DigitalOceanClient : IVpsProviderClient
         public List<string> Tags { get; set; } = new();
 
         [JsonPropertyName("ssh_keys")]
-        public string[]? SshKeys { get; set; }
+        public object[]? SshKeys { get; set; }
+    }
+
+    private sealed class DigitalOceanCreateSshKeyPayload
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("public_key")]
+        public string PublicKey { get; set; } = string.Empty;
+    }
+
+    private sealed class DigitalOceanSshKeyListResponse
+    {
+        [JsonPropertyName("ssh_keys")]
+        public List<DigitalOceanSshKeyDto>? SshKeys { get; set; }
+
+        [JsonPropertyName("meta")]
+        public DigitalOceanMetaDto? Meta { get; set; }
+    }
+
+    private sealed class DigitalOceanSshKeyResponse
+    {
+        [JsonPropertyName("ssh_key")]
+        public DigitalOceanSshKeyDto? SshKey { get; set; }
+    }
+
+    private sealed class DigitalOceanSshKeyDto
+    {
+        [JsonPropertyName("id")]
+        public long Id { get; set; }
+
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("public_key")]
+        public string? PublicKey { get; set; }
+
+        [JsonPropertyName("fingerprint")]
+        public string? Fingerprint { get; set; }
+    }
+
+    private sealed class DigitalOceanMetaDto
+    {
+        [JsonPropertyName("total")]
+        public int? Total { get; set; }
     }
 
     private sealed class DigitalOceanAssignResourcesPayload

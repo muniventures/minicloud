@@ -8,6 +8,12 @@ if (args.Length > 0 && args[0] == "bootstrap")
     return;
 }
 
+if (args.Length > 0 && args[0] == "maintenance")
+{
+    Environment.ExitCode = await MaintenanceCommand.RunAsync(args[1..]);
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 if (args.Length > 0 && args[0] == "migrate")
 {
@@ -37,6 +43,7 @@ builder.Services.AddScoped<DatabaseBackupPurgeService>();
 var app = builder.Build();
 
 await app.ConfigureMinicloudApiAsync();
+app.UseMiddleware<Minicloud.Api.Auth.MaintenanceAdmissionMiddleware>();
 app.MapHealthChecks("/health").AllowAnonymous();
 app.MapControllers();
 app.Run();

@@ -13,14 +13,21 @@ namespace Minicloud.Worker.Deletion;
 public sealed class AppDeletionProcessor(
     MinicloudDbContext db, VpsProviderClientResolver providers,
     ICloudflareDnsClient dns, ILogger<AppDeletionProcessor> logger, IOptions<ManagedDomainOptions>? managedDomains = null,
-    ProviderAccountClientFactory? accountClients = null)
+    ProviderAccountClientFactory? accountClients = null, MaintenanceParticipant? maintenance = null)
 {
     private readonly ManagedDomainOptions _managedDomains = managedDomains?.Value ?? new();
+    private readonly MaintenanceParticipant _maintenance = maintenance ?? MaintenanceParticipant.CreateLocal("worker", TimeProvider.System);
     public async Task<bool> ProcessNextAsync(CancellationToken ct)
     {
         return await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            // Queued deletions are accepted work and continue while fenced. This transaction spans remote
+            // deletes, so the authority row is checked without a share lock to avoid blocking fence/transfer.
+            if (!await _maintenance.CanClaimAsync(db, ct, lockRow: false))
+            {
+                return false;
+            }
             var query = db.Apps.Where(x => x.DeletionStatus == "queued" && !db.Apps.Any(child => child.ParentAppId == x.Id && child.DeletionStatus == "queued"));
             if (db.Database.IsNpgsql())
             {

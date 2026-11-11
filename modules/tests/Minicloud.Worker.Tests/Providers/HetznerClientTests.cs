@@ -117,7 +117,7 @@ public class HetznerClientTests
             Name: "minicloud-app-srv",
             Plan: "cx22",
             Region: "fsn1",
-            SshKeyIdOrPublicKey: "my-ssh-key",
+            SshKeyReferences: ["123", "456"],
             UserDataCloudInit: "#cloud-config\nusers: []",
             Labels: new Dictionary<string, string> { ["customer"] = "acme" });
 
@@ -136,8 +136,24 @@ public class HetznerClientTests
         Assert.Contains("\"name\":\"minicloud-app-srv\"", req.Body);
         Assert.Contains("\"server_type\":\"cx22\"", req.Body);
         Assert.Contains("\"location\":\"fsn1\"", req.Body);
-        Assert.Contains("\"ssh_keys\":[\"my-ssh-key\"]", req.Body);
+        Assert.Contains("\"ssh_keys\":[123,456]", req.Body);
         Assert.Contains("\"customer\":\"acme\"", req.Body);
+    }
+
+    [Fact]
+    public async Task SshKeyInventoryAndRegistrationUseHetznerApiShapes()
+    {
+        _handler.QueueJsonResponse("""{"ssh_keys":[{"id":123,"name":"work","public_key":"ssh-ed25519 fixture"}],"meta":{"pagination":{"next_page":null}}}""");
+        _handler.QueueJsonResponse("""{"ssh_key":{"id":456,"name":"new","public_key":"ssh-ed25519 fixture"}}""", HttpStatusCode.Created);
+        var client = CreateClient();
+
+        var listed = await client.ListSshKeysAsync();
+        var registered = await client.RegisterSshKeyAsync("new", "ssh-ed25519 AAAA");
+
+        Assert.Equal(new ProviderSshKeyInfo("123", "work", "ssh-ed25519 fixture"), Assert.Single(listed));
+        Assert.Equal(new ProviderSshKeyInfo("456", "new", "ssh-ed25519 fixture"), registered);
+        Assert.Contains("/v1/ssh_keys?per_page=50&page=1", _handler.RecordedRequests[0].Uri);
+        Assert.Contains("\"public_key\":\"ssh-ed25519 AAAA\"", _handler.RecordedRequests[1].Body);
     }
 
     [Fact]
@@ -148,7 +164,7 @@ public class HetznerClientTests
             "org", "app", "ssh-ed25519 TEST_PUBLIC_KEY");
 
         await CreateClient().CreateServerAsync(new CreateServerRequest(
-            "test", "cx23", "nbg1", string.Empty, cloudInit));
+            "test", "cx23", "nbg1", [], cloudInit));
 
         var request = Assert.Single(_handler.RecordedRequests);
         using var body = System.Text.Json.JsonDocument.Parse(request.Body!);

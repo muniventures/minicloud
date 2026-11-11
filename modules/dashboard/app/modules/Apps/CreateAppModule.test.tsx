@@ -20,7 +20,7 @@ it("selects a custom organization plan by name without a provider field", async 
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Demo" } });
   fireEvent.change(screen.getByLabelText("Plan"), { target: { value: "Small São Paulo" } });
   fireEvent.click(screen.getByRole("button", { name: "Create app" }));
-  await waitFor(() => expect(createApplication).toHaveBeenCalledWith({ organizationId: "org-1", name: "Demo", slug: "demo", initialEnvironment: { name: "production", plan: "Small São Paulo", database: "sqlite" } }));
+  await waitFor(() => expect(createApplication).toHaveBeenCalledWith({ organizationId: "org-1", name: "Demo", slug: "demo", initialEnvironment: { name: "production", plan: "Small São Paulo", database: "sqlite", sshAccess: { mode: "none" } } }));
 });
 it("blocks creation and links to provider setup when no plans exist", async () => {
   vi.mocked(listPlans).mockResolvedValue([]);

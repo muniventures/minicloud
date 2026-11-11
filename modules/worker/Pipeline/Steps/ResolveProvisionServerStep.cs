@@ -146,6 +146,13 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
             {
                 await EnsureNewAppAsync(context, cancellationToken);
                 await EnsureAllocationEnabledAsync(context, cancellationToken);
+                IReadOnlyList<string> sshKeyReferences;
+                await using (var scope = _scopeFactory.CreateAsyncScope())
+                {
+                    var sshKeys = scope.ServiceProvider.GetRequiredService<ProviderSshKeyService>();
+                    sshKeyReferences = await sshKeys.ResolveForAllocationAsync(
+                        context.DeploymentId, context.OrganizationId, context.AppId, cancellationToken);
+                }
                 _logger?.LogInformation(
                     "Provisioning new {Provider} server {Name} (plan {Plan}, region {Region})",
                     mapping.Provider, serverName, mapping.Sku, mapping.Region);
@@ -161,7 +168,7 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
                     mapping.Sku,
                     mapping.Region,
                     // The public key is installed for minicloud by cloud-init, not a provider key ID.
-                    string.Empty,
+                    sshKeyReferences,
                     BuildCloudInit(orgSlug, appSlug, _options.SshPublicKey),
                     new Dictionary<string, string>
                     {
@@ -194,6 +201,10 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
         catch (PipelineStepException)
         {
             throw;
+        }
+        catch (ProviderSshKeyException ex)
+        {
+            throw new PipelineStepException(ex.Code, ex.Message);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

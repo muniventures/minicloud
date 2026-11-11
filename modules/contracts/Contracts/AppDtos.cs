@@ -45,7 +45,9 @@ public sealed record EnvironmentDetailResponse(
     IReadOnlyList<AppEnvironmentResponse>? Environments = null,
     string? PlanId = null,
     string? ApplicationId = null,
-    string? DefaultEnvironmentId = null);
+    string? DefaultEnvironmentId = null,
+    EnvironmentSshAccessResponse? SshAccess = null,
+    SshConnectionResponse? SshConnection = null);
 
 public sealed record AppDomainResponse(
     string Id,
@@ -65,7 +67,8 @@ public sealed record AppEnvironmentResponse(string Id, string Name, string Plan,
 public sealed record CreateInitialEnvironmentRequest(
     string? Name,
     string Plan,
-    string Database = "sqlite");
+    string Database = "sqlite",
+    SshAccessRequest? SshAccess = null);
 
 [System.Text.Json.Serialization.JsonUnmappedMemberHandling(System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow)]
 public sealed record CreateApplicationRequest(
@@ -86,13 +89,15 @@ public sealed record CreateEnvironmentRequest(
     string? Database = "none",
     string? Kind = "persistent",
     string? SourceBranch = null,
-    string? SourceEnvironmentId = null);
+    string? SourceEnvironmentId = null,
+    SshAccessRequest? SshAccess = null);
 
 public sealed record UpdateEnvironmentRequest(
     string? Name = null,
     string? Plan = null,
     string? Database = null,
-    bool? SetAsDefault = null);
+    bool? SetAsDefault = null,
+    SshAccessRequest? SshAccess = null);
 
 public sealed record DeleteEnvironmentRequest(string Confirmation);
 public sealed record DeleteApplicationRequest(string Confirmation);
@@ -125,7 +130,9 @@ public sealed record ApplicationEnvironmentResponse(
     LatestDeploymentResponse? LatestDeployment,
     EnvironmentRuntimeObservationResponse RuntimeObservation,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    EnvironmentSshAccessResponse? SshAccess = null,
+    SshConnectionResponse? SshConnection = null);
 
 public sealed record ApplicationResponse(
     string Id,

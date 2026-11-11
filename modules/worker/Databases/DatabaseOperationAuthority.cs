@@ -24,6 +24,7 @@ public sealed partial class DatabaseOperationProcessor
                 throw new UnauthorizedAccessException("Database operation ownership changed before persistence.");
             if (current.Status == "cancelling" && operation.Status != "cancelled" && operation.Status != "failed")
                 throw new UnauthorizedAccessException("Database operation cancellation prevents further writes.");
+            await maintenanceAuthority.EnsureCommitAuthorityAsync(db, ct);
             await db.SaveChangesAsync(ct);
             if (transaction is not null) await transaction.CommitAsync(ct);
         });
