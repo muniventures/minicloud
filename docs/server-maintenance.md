@@ -177,12 +177,32 @@ original root path and the original configuration file. It decrypts and checks
 every component **before** it changes anything. A tampered, truncated or
 wrong-identity backup is rejected with nothing changed.
 
-A host may still be serving writes for this installation. That is the case when
-the authority is `open`, or unknown because the installed release differs or
-the database is unreachable. Restore then refuses unless you pass
-`--confirm-replace-live <installationId>`. With that confirmation, an open
-authority is fenced and drained first. Restore refuses outright to replace a
+A host may still be serving writes for this installation. Restore checks actual
+durable authority, never treating `pendingUpgrade`, `pendingRestore`,
+`restoreInProgress` or `heldFence` metadata as proof of fencing or drain. An
+`open` authority requires `--confirm-replace-live <installationId>` and is then
+fenced and drained. An existing fence must belong to a locally recorded operation;
+restore rechecks drain under that holder even if its recorded phase is `drained`.
+Drain failure stops restore before container shutdown; an existing fence is left
+held. A reachable authority that refuses the check or does not authorize this host
+cannot be bypassed with confirmation. Restore refuses outright to replace a
 different installation at the same root.
+
+If authority cannot be queried (for example, a lost host, an unreachable database,
+or a different installed release), restore requires that same confirmation **and**
+a successful local Docker inspection establishing that management containers are
+stopped (or absent on a replacement host). Running, paused, restarting or unknown
+management containers cause refusal; restore does not stop them to make progress.
+PostgreSQL, OpenBao, its agent and Caddy may remain running. This offline path is
+not proof that accepted work completed: before confirming, independently isolate
+the old host/participants so they cannot resume mutation, and reconcile accepted
+database and external effects, following the
+[authority recovery guidance](server-maintenance-authority.md#uncertain-activity-recovery)
+and [transfer limitation](#transfer-and-its-limitation). A stale heartbeat, missing
+process or pending phase is not reconciliation. If that evidence cannot be
+established, do not proceed. No automated isolation or force-clear is provided.
+Use verified tooling for the installed release to fence/drain reachable live
+participants before attempting a different-release restore.
 
 Restore then runs these steps:
 

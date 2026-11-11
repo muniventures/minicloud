@@ -908,6 +908,34 @@ class Maintenance:
 
     # ------------------------------------------------------------------------------ restore
 
+    def require_restore_participants_stopped(self):
+        """Offline recovery must not stop a possibly active management participant."""
+        env = self.i.docker_environment()
+        containers = self.p["run"](
+            ["docker", "ps", "--all", "-q", "--filter", "label=com.docker.compose.project=minicloud"],
+            env=env).decode().split()
+        if not containers:
+            return
+        inspected = json.loads(self.p["run"](["docker", "inspect", *containers], env=env),
+                               object_pairs_hook=self.p["no_duplicates"])
+        self.need(isinstance(inspected, list) and len(inspected) == len(containers),
+                  "Cannot establish stopped restore participants; nothing was stopped.")
+        for container in inspected:
+            self.need(isinstance(container, dict) and isinstance(container.get("Config"), dict),
+                      "Cannot establish restore container configuration; nothing was stopped.")
+            labels = container["Config"].get("Labels")
+            self.need(isinstance(labels, dict) and labels.get("com.docker.compose.project") == "minicloud",
+                      "Cannot establish restore container ownership; nothing was stopped.")
+            if labels.get("com.docker.compose.service") in ("postgres", "openbao", "openbao-agent", "caddy"):
+                continue
+            state = container.get("State")
+            self.need(isinstance(state, dict) and state.get("Status") in ("created", "exited")
+                      and state.get("Running") is False and state.get("Restarting") is False
+                      and state.get("Paused") is False,
+                      "Maintenance authority is unavailable and management containers are not positively stopped. "
+                      "Do not terminate accepted work. Establish external isolation and reconcile accepted effects "
+                      "as documented before offline restore; nothing was stopped.")
+
     def stop_project(self):
         env = self.i.docker_environment()
         containers = self.p["run"](["docker", "ps", "-q", "--filter", "label=com.docker.compose.project=minicloud"],
@@ -973,33 +1001,57 @@ class Maintenance:
         self.need(backup_state.get("configuration") == self.i.config,
                   "Restore requires the original configuration file content.")
         in_place = self.root.exists()
-        authority = "absent"
+        current = None
         if in_place:
             self.p["protected"](self.root, True)
             self.p["protected"](self.i.state_path)
             existing = self.p["read_json"](self.i.state_path)
             self.need(isinstance(existing, dict) and existing.get("installationId") == record["installationId"],
                       "A different installation exists at this root; refusing to replace it.")
-            if self.pending() or "heldFence" in self.record:
-                authority = "fenced"
-            else:
-                try:
-                    self.i.load_state()
-                    authority = self.authority_ok("status")["authority"]["state"]
-                except (self.p["InstallError"], OSError, ValueError, KeyError, TypeError,
-                        subprocess.TimeoutExpired):
-                    authority = "unknown"
+            try:
+                self.i.load_state()
+                status = self.authority("status")
+            except (self.p["InstallError"], OSError, ValueError, KeyError, TypeError,
+                    subprocess.TimeoutExpired):
+                status = None
+            if status is not None:
+                self.need(status.get("result") == "ok",
+                          "Maintenance authority refused restore status; reconcile old authority before restore.")
+                current = status.get("authority")
+                self.need(isinstance(current, dict) and current.get("state") in ("open", "fenced"),
+                          "Unexpected maintenance authority state; nothing was stopped.")
+            authority = current["state"] if current is not None else "unknown"
             self.need(authority == "fenced" or self.args.confirm_replace_live == record["installationId"],
                       f"A live installation ({authority} maintenance authority) may be serving writes. Re-run with "
                       f"--confirm-replace-live {record['installationId']} to fence, drain and replace it.")
         operation_id = str(uuid.uuid4())
-        if authority == "open":
-            self.fence(operation_id, "restore")
+        if current is not None:
+            self.need(current.get("localHostAuthorized") is True,
+                      "This host cannot establish an authorized restore fence; nothing was stopped. "
+                      "Use the documented external isolation/reconciliation procedure for old authority.")
+            fence_id = operation_id
+            acquired = current["state"] == "open"
+            if acquired:
+                self.fence(fence_id, "restore")
+            else:
+                fence_id = current.get("holderOperationId")
+                holders = [value.get("operationId") for value in self.pending().values()]
+                holders.append(self.record.get("heldFence", {}).get("operationId"))
+                self.need(fence_id is not None and fence_id in holders,
+                          "The durable fence belongs to an unrecognized operation; reconcile it before restore.")
             try:
-                self.drain(operation_id)
+                # Pending phases (even "drained") are not authority or current quiescence evidence.
+                self.drain(fence_id)
             except BaseException:
-                self.try_release(operation_id)
+                if acquired:
+                    self.try_release(fence_id)
                 raise
+        else:
+            self.need(self.args.confirm_replace_live == record["installationId"],
+                      "Offline/lost-host restore requires --confirm-replace-live "
+                      f"{record['installationId']} after documented external isolation and reconciliation. "
+                      + TRANSFER_LIMITATION)
+            self.require_restore_participants_stopped()
         state = backup_state | {"publicAddresses": self.args.public_address,
                                 "recoveryDir": str(self.args.recovery_dir)}
         if not in_place:
@@ -1045,6 +1097,7 @@ class Maintenance:
             self.persist()
             raise
         self.record.pop("restoreInProgress")
+        self.record.pop("pendingUpgrade", None)
         self.record["pendingRestore"] = {"operationId": operation_id, "backupId": record["backupId"],
                                          "epoch": transferred["epoch"], "hostId": host_id, "at": self.now()}
         return {"state": "restored_fenced", "operationId": operation_id, "backupId": record["backupId"],

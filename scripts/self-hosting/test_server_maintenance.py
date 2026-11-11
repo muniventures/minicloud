@@ -311,8 +311,13 @@ elif "-cf" in args:
         item.size = len(payload)
         archive.addfile(item, io.BytesIO(payload))
     out = buffer.getvalue()
-elif args[:2] == ["ps", "-q"]:
+elif args[:2] == ["ps", "-q"] or args[:3] == ["ps", "--all", "-q"]:
     out = b"c1\\nc2\\n"
+elif args[0] == "inspect":
+    out = json.dumps([{{"Config": {{"Labels": {{
+        "com.docker.compose.project": "minicloud", "com.docker.compose.service": service}}}},
+        "State": {{"Status": "running", "Running": True, "Restarting": False, "Paused": False}}}}
+        for service in ("api", "worker")]).encode()
 with open(LOG, "a") as log:
     log.write(json.dumps({{"args": args, "stdin": hashlib.sha256(data).hexdigest() if consume else None,
                           "stdout": hashlib.sha256(out).hexdigest()}}) + "\\n")
@@ -682,6 +687,180 @@ class CoordinatedMaintenanceTests(Fixture):
         self.assertEqual(([], []), (self.docker_calls(), self.events))
         self.assertEqual(before, (self.root / "installation.json").read_bytes())
         self.assertEqual("open", self.authority.state)
+
+    def interrupted_upgrade_backup(self, phase):
+        archive = Path(self.run_operation("backup")["archive"])
+        operation_id = str(uuid.uuid4())
+        record = self.record()
+        record["pendingUpgrade"] = {"operationId": operation_id, "phase": phase}
+        record["heldFence"] = {"operationId": operation_id, "operation": "upgrade"}
+        installer.atomic_json(self.root / "maintenance.json", record)
+        self.authority.calls.clear()
+        self.docker_log.unlink()
+        self.events.clear()
+        return archive, operation_id
+
+    def test_restore_pending_started_does_not_replace_confirmation_or_actual_drain(self):
+        archive, _ = self.interrupted_upgrade_backup("started")
+        with self.assertRaisesRegex(installer.InstallError, "--confirm-replace-live"):
+            self.run_operation("restore", archive=archive)
+        self.assertEqual([], self.docker_calls())
+        self.authority.drain = ["not_drained", "drained"]
+        result = self.run_operation("restore", archive=archive, confirm_replace_live=self.state["installationId"])
+        self.assertEqual("restored_fenced", result["state"])
+        self.assertEqual(["fence", "drain-status", "drain-status", "transfer"], self.authority_ops())
+        self.assertNotIn("pendingUpgrade", self.record())
+
+    def test_restore_rechecks_existing_upgrade_fence_even_after_recorded_drain(self):
+        for phase in ("started", "fenced", "drained"):
+            with self.subTest(phase=phase):
+                archive, holder = self.interrupted_upgrade_backup(phase)
+                self.authority.state, self.authority.holder = "fenced", holder
+                self.authority.drain = ["not_drained", "drained"]
+                result = self.run_operation("restore", archive=archive)
+                self.assertEqual("restored_fenced", result["state"])
+                self.assertEqual(["drain-status", "drain-status", "transfer"], self.authority_ops())
+                self.assertEqual(holder, self.authority.calls[1][1])
+                self.run_operation("restore-confirm", confirm_operation_id=result["operationId"])
+
+    def test_restore_uncertain_work_never_stops_containers_or_clears_existing_fence(self):
+        archive, holder = self.interrupted_upgrade_backup("drained")
+        self.authority.state, self.authority.holder = "fenced", holder
+        self.authority.drain = ["uncertain"] * 1000
+        clock = iter(range(0, 100000, 10))
+        with mock.patch.object(maintenance.time, "monotonic", lambda: next(clock)):
+            with self.assertRaisesRegex(installer.InstallError, "uncertain work"):
+                self.run_operation("restore", archive=archive, confirm_replace_live=self.state["installationId"])
+        self.assertEqual(("fenced", holder), (self.authority.state, self.authority.holder))
+        self.assertEqual([], self.docker_calls())
+        self.assertEqual([], self.events)
+        self.assertNotIn("transfer", self.authority_ops())
+        self.assertEqual(holder, self.record()["pendingUpgrade"]["operationId"])
+
+    def test_restore_failed_drain_of_new_fence_releases_without_stopping_work(self):
+        archive, _ = self.interrupted_upgrade_backup("started")
+        self.authority.drain = ["not_drained"] * 1000
+        clock = iter(range(0, 100000, 10))
+        with mock.patch.object(maintenance.time, "monotonic", lambda: next(clock)):
+            with self.assertRaisesRegex(installer.InstallError, "did not drain within 30s"):
+                self.run_operation("restore", archive=archive, drain_timeout=30,
+                                   confirm_replace_live=self.state["installationId"])
+        self.assertEqual("open", self.authority.state)
+        self.assertEqual("release", self.authority_ops()[-1])
+        self.assertEqual([], self.docker_calls())
+        self.assertEqual([], self.events)
+
+    def test_restore_unavailable_authority_cannot_stop_running_or_restarting_participants(self):
+        archive, _ = self.interrupted_upgrade_backup("started")
+        original_run = installer.run
+        original_authority = self.subject.authority
+
+        def unavailable(subject, operation, operation_id=None, host_id=None):
+            if operation == "status":
+                raise installer.InstallError("database unreachable")
+            return original_authority(operation, operation_id, host_id)
+
+        for status in ("running", "paused", "restarting", "dead", "unknown"):
+            with self.subTest(status=status):
+                def inspect(command, **kwargs):
+                    if command[:2] == ["docker", "inspect"]:
+                        return json.dumps([{
+                            "Config": {"Labels": {"com.docker.compose.project": "minicloud",
+                                                   "com.docker.compose.service": service}},
+                            "State": {"Status": status, "Running": status == "running",
+                                      "Restarting": status == "restarting", "Paused": status == "paused"},
+                        } for service in ("api", "worker")]).encode()
+                    return original_run(command, **kwargs)
+
+                with mock.patch.object(maintenance.Maintenance, "authority", unavailable), \
+                        mock.patch.object(installer, "run", side_effect=inspect):
+                    with self.assertRaisesRegex(installer.InstallError, "not positively stopped"):
+                        self.run_operation("restore", archive=archive,
+                                           confirm_replace_live=self.state["installationId"])
+                self.assertFalse(any("stop" in call["args"] for call in self.docker_calls()))
+                self.assertEqual([], self.events)
+                self.assertEqual([], self.authority_ops())
+
+    def test_offline_restore_with_stopped_participants_remains_available_after_confirmation(self):
+        archive, _ = self.interrupted_upgrade_backup("started")
+        original_run = installer.run
+
+        def inspect(command, **kwargs):
+            if command[:2] == ["docker", "inspect"]:
+                return json.dumps([{
+                    "Config": {"Labels": {"com.docker.compose.project": "minicloud",
+                                           "com.docker.compose.service": service}},
+                    "State": {"Status": "exited", "Running": False, "Restarting": False, "Paused": False},
+                } for service in ("api", "worker")]).encode()
+            return original_run(command, **kwargs)
+
+        with mock.patch.object(self.runtime, "load_state", side_effect=installer.InstallError("offline")), \
+                mock.patch.object(installer, "run", side_effect=inspect):
+            with self.assertRaisesRegex(installer.InstallError, "--confirm-replace-live"):
+                self.run_operation("restore", archive=archive)
+            self.assertEqual([], self.docker_calls())
+            result = self.run_operation("restore", archive=archive,
+                                        confirm_replace_live=self.state["installationId"])
+        self.assertEqual("restored_fenced", result["state"])
+        self.assertEqual(["transfer"], self.authority_ops())
+
+    def test_lost_host_restore_does_not_require_contacting_old_authority(self):
+        archive = Path(self.run_operation("backup")["archive"])
+        self.root.rename(self.base / "isolated-old-host")
+        self.authority.calls.clear()
+        original_run = installer.run
+
+        def replacement_host(command, **kwargs):
+            if command[:4] == ["docker", "ps", "--all", "-q"]:
+                return b""
+            return original_run(command, **kwargs)
+
+        with mock.patch.object(installer, "run", side_effect=replacement_host), \
+                mock.patch.object(self.runtime, "load_state", side_effect=AssertionError("old host unreachable")):
+            with self.assertRaisesRegex(installer.InstallError, "external isolation and reconciliation"):
+                self.run_operation("restore", archive=archive)
+            result = self.run_operation("restore", archive=archive,
+                                        confirm_replace_live=self.state["installationId"])
+        self.assertEqual("restored_fenced", result["state"])
+        self.assertEqual(["transfer"], self.authority_ops())
+        self.assertEqual(result["operationId"], self.authority.holder)
+
+    def test_restore_refused_unauthorized_or_unrecognized_authority_is_not_an_offline_bypass(self):
+        archive, holder = self.interrupted_upgrade_backup("fenced")
+        for case in ("refused", "unauthorized", "other_holder"):
+            with self.subTest(case=case):
+                self.authority.state, self.authority.holder = "fenced", holder
+                self.authority.authorized = case != "unauthorized"
+                if case == "other_holder":
+                    self.authority.holder = str(uuid.uuid4())
+                original_authority = self.subject.authority
+
+                def authority(subject, operation, operation_id=None, host_id=None):
+                    if operation == "status" and case == "refused":
+                        return self.authority.refuse(operation, "installation_mismatch")
+                    return original_authority(operation, operation_id, host_id)
+
+                with mock.patch.object(maintenance.Maintenance, "authority", authority):
+                    with self.assertRaises(installer.InstallError):
+                        self.run_operation("restore", archive=archive,
+                                           confirm_replace_live=self.state["installationId"])
+                self.assertEqual([], self.docker_calls())
+                self.assertEqual([], self.events)
+                self.assertNotIn("transfer", self.authority_ops())
+
+    def test_interrupted_restore_rechecks_drain_and_can_resume_after_failure(self):
+        archive = Path(self.run_operation("backup")["archive"])
+        self.compose_failure = "api-migrate"
+        with self.assertRaisesRegex(installer.InstallError, "synthetic compose failure"):
+            self.run_operation("restore", archive=archive, confirm_replace_live=self.state["installationId"])
+        interrupted = self.record()["restoreInProgress"]["operationId"]
+        self.assertEqual(interrupted, self.authority.holder)
+        self.compose_failure = None
+        self.authority.calls.clear()
+        result = self.run_operation("restore", archive=archive)
+        self.assertEqual("restored_fenced", result["state"])
+        self.assertEqual(["drain-status", "transfer"], self.authority_ops())
+        self.assertNotIn("restoreInProgress", self.record())
 
     def test_transfer_takes_authority_restarts_services_and_states_limitation(self):
         result = self.run_operation("transfer")
