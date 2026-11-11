@@ -1090,6 +1090,58 @@ namespace Minicloud.Common.Migrations
                         .HasColumnType("text")
                         .HasColumnName("requested_service_names_json");
 
+                    b.Property<string>("SshCredentialGeneration")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_credential_generation");
+
+                    b.Property<string>("SshFingerprint")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_fingerprint");
+
+                    b.Property<string>("SshKeyId")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_key_id");
+
+                    b.Property<string>("SshKeyName")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_key_name");
+
+                    b.Property<string>("SshKeyType")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_key_type");
+
+                    b.Property<string>("SshProviderAccountId")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_provider_account_id");
+
+                    b.Property<string>("SshProviderReferencesJson")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_provider_references_json");
+
+                    b.Property<string>("SshPublicKey")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_public_key");
+
+                    b.Property<string>("SshRegistrationState")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_registration_state");
+
+                    b.Property<string>("SshSelectingActor")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_selecting_actor");
+
+                    b.Property<string>("SshSelectionMode")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_selection_mode");
+
+                    b.Property<long?>("SshSelectionRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("ssh_selection_revision");
+
+                    b.Property<DateTimeOffset?>("SshSnapshotTakenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("ssh_snapshot_taken_at");
+
                     b.Property<DateTimeOffset?>("StartedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("started_at");
@@ -2280,6 +2332,56 @@ namespace Minicloud.Common.Migrations
                         .HasColumnType("text")
                         .HasColumnName("source_environment_id");
 
+                    b.Property<string>("SshAccessMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("none")
+                        .HasColumnName("ssh_access_mode");
+
+                    b.Property<string>("SshFingerprint")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_fingerprint");
+
+                    b.Property<string>("SshKeyId")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_key_id");
+
+                    b.Property<string>("SshKeyName")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_key_name");
+
+                    b.Property<string>("SshKeyType")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_key_type");
+
+                    b.Property<string>("SshProviderAccountId")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_provider_account_id");
+
+                    b.Property<string>("SshPublicKey")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_public_key");
+
+                    b.Property<string>("SshRegistrationState")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("not_registered")
+                        .HasColumnName("ssh_registration_state");
+
+                    b.Property<long>("SshRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("ssh_revision");
+
+                    b.Property<DateTimeOffset?>("SshSelectedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("ssh_selected_at");
+
+                    b.Property<string>("SshSelectedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("ssh_selected_by");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -2301,6 +2403,8 @@ namespace Minicloud.Common.Migrations
 
                     b.HasIndex("ParentAppId", "BranchName")
                         .IsUnique();
+
+                    b.HasIndex("OrganizationId", "SshProviderAccountId", "SshKeyId");
 
                     b.ToTable("apps", (string)null);
                 });
@@ -2663,6 +2767,78 @@ namespace Minicloud.Common.Migrations
                     b.HasKey("OrganizationId", "NormalizedName");
 
                     b.ToTable("provider_plan_names", (string)null);
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ProviderSshKey", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("fingerprint");
+
+                    b.Property<string>("KeyType")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("key_type");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("ProviderAccountId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("provider_account_id");
+
+                    b.Property<string>("ProviderKeyId")
+                        .HasColumnType("text")
+                        .HasColumnName("provider_key_id");
+
+                    b.Property<string>("PublicKey")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("public_key");
+
+                    b.Property<DateTimeOffset?>("RegisteredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("registered_at");
+
+                    b.Property<string>("RegistrationState")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("registration_state");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "ProviderAccountId", "Fingerprint")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "ProviderAccountId", "ProviderKeyId")
+                        .IsUnique();
+
+                    b.ToTable("provider_ssh_keys", (string)null);
                 });
 
             modelBuilder.Entity("Minicloud.Common.Models.RegistryGarbageCandidate", b =>
@@ -3874,6 +4050,18 @@ namespace Minicloud.Common.Migrations
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Minicloud.Common.Models.ProviderAccount", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "SshProviderAccountId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Minicloud.Common.Models.ProviderSshKey", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "SshProviderAccountId", "SshKeyId")
+                        .HasPrincipalKey("OrganizationId", "ProviderAccountId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Application");
 
                     b.Navigation("Organization");
@@ -3934,6 +4122,16 @@ namespace Minicloud.Common.Migrations
                         .IsRequired();
 
                     b.Navigation("ProviderAccount");
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.ProviderSshKey", b =>
+                {
+                    b.HasOne("Minicloud.Common.Models.ProviderAccount", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProviderAccountId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Minicloud.Common.Models.RegistrySession", b =>

@@ -82,6 +82,7 @@ public sealed class ApplicationsController : ControllerBase
         [FromServices] IIdGenerator ids,
         [FromServices] TimeProvider timeProvider,
         [FromServices] ProviderCatalogService catalog,
+        [FromServices] EnvironmentSshAccessService sshAccess,
         [FromServices] AuditEventService audit,
         CancellationToken cancellationToken)
     {
@@ -183,6 +184,18 @@ public sealed class ApplicationsController : ControllerBase
             CreatedAt = now,
             UpdatedAt = now
         };
+        if (request.InitialEnvironment?.SshAccess is { } initialSshAccess)
+        {
+            try
+            {
+                await sshAccess.ApplySelectionAsync(environment, plan.ProviderAccountId, initialSshAccess,
+                    principal.ToActorIdentity(), isPatch: false, cancellationToken);
+            }
+            catch (SshAccessException ex)
+            {
+                return EndpointResults.Problem(ex.Code, ex.Message, ex.StatusCode);
+            }
+        }
         application.Environments.Add(environment);
 
         db.Applications.Add(application);
@@ -204,6 +217,22 @@ public sealed class ApplicationsController : ControllerBase
             "application.created",
             $"{application.Id}:{environment.Id}",
             cancellationToken);
+        if (environment.SshRevision > 0)
+        {
+            await audit.AppendAsync(
+                request.OrganizationId,
+                environment.Id,
+                AuditEventService.ActorFor(principal.ToActorIdentity()),
+                "environment.ssh_access_selected",
+                System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    mode = environment.SshAccessMode,
+                    providerAccountId = environment.SshProviderAccountId,
+                    fingerprint = environment.SshFingerprint,
+                    revision = environment.SshRevision
+                }),
+                cancellationToken);
+        }
 
         var response = (await BuildApplicationResponsesAsync(db, [application], now, cancellationToken)).Single();
         return Results.Created($"/api/apps/{application.Id}", response);
@@ -246,6 +275,7 @@ public sealed class ApplicationsController : ControllerBase
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] TimeProvider timeProvider,
         [FromServices] AuditEventService audit,
+        [FromServices] EnvironmentSshAccessService sshAccess,
         CancellationToken cancellationToken)
     {
         var principal = RequirePrincipal(HttpContext);
@@ -413,7 +443,7 @@ public sealed class ApplicationsController : ControllerBase
 
         try
         {
-            var env = await environments.CreateForApplicationAsync(application, request, cancellationToken);
+            var env = await environments.CreateForApplicationAsync(application, request, principal.ToActorIdentity(), cancellationToken);
             await audit.AppendAsync(
                 application.OrganizationId,
                 env.Id,
@@ -421,9 +451,25 @@ public sealed class ApplicationsController : ControllerBase
                 "environment.created",
                 $"{application.Id}:{env.Id}:{env.EnvironmentName}",
                 cancellationToken);
+            if (env.SshRevision > 0)
+            {
+                await audit.AppendAsync(
+                    application.OrganizationId,
+                    env.Id,
+                    AuditEventService.ActorFor(principal.ToActorIdentity()),
+                    "environment.ssh_access_selected",
+                    System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        mode = env.SshAccessMode,
+                        providerAccountId = env.SshProviderAccountId,
+                        fingerprint = env.SshFingerprint,
+                        revision = env.SshRevision
+                    }),
+                    cancellationToken);
+            }
 
             var observations = await BuildObservationsByEnvIdAsync(db, [env.Id], timeProvider.GetUtcNow(), cancellationToken);
-            var lockedIds = await GetPlacementLockedEnvIdsAsync(db, [env.Id], cancellationToken);
+            var (lockedIds, _) = await GetEnvironmentLockIdsAsync(db, [env.Id], cancellationToken);
             var response = env.ToResponse(
                 application.Id,
                 observations.GetValueOrDefault(env.Id),
@@ -436,6 +482,10 @@ public sealed class ApplicationsController : ControllerBase
                 ? StatusCodes.Status409Conflict
                 : StatusCodes.Status400BadRequest;
             return Results.Json(new ErrorResponse(new ErrorBody(ex.Code, ex.Message, [])), statusCode: status);
+        }
+        catch (SshAccessException ex)
+        {
+            return EndpointResults.Problem(ex.Code, ex.Message, ex.StatusCode);
         }
         catch (ProviderCatalogException ex)
         {
@@ -483,8 +533,9 @@ public sealed class ApplicationsController : ControllerBase
 
         var now = timeProvider.GetUtcNow();
         var observations = await BuildObservationsByEnvIdAsync(db, [env.Id], now, cancellationToken);
-        var lockedIds = await GetPlacementLockedEnvIdsAsync(db, [env.Id], cancellationToken);
-        return Results.Ok(env.ToResponse(application.Id, observations.GetValueOrDefault(env.Id), lockedIds.Contains(env.Id)));
+        var (lockedIds, sshLockedIds) = await GetEnvironmentLockIdsAsync(db, [env.Id], cancellationToken);
+        return Results.Ok(env.ToResponse(application.Id, observations.GetValueOrDefault(env.Id),
+            lockedIds.Contains(env.Id), sshLockedIds.Contains(env.Id)));
     }
 
     [HttpPatch("{applicationId}/environments/{environmentId}")]
@@ -497,6 +548,7 @@ public sealed class ApplicationsController : ControllerBase
         [FromServices] AppEnvironmentService environments,
         [FromServices] ProviderCatalogService catalog,
         [FromServices] DeploymentPreparationService preparations,
+        [FromServices] EnvironmentSshAccessService sshAccess,
         [FromServices] TimeProvider timeProvider,
         [FromServices] AuditEventService audit,
         CancellationToken cancellationToken)
@@ -538,6 +590,8 @@ public sealed class ApplicationsController : ControllerBase
                 }
 
                 var now = timeProvider.GetUtcNow();
+                var previousSshRevision = env.SshRevision;
+                var previousPlanAccountId = env.SelectedPlan?.ProviderAccountId;
                 if (request.SetAsDefault is true && env.EnvironmentKind != EnvironmentKinds.Persistent)
                     return Results.BadRequest(new ErrorResponse(new ErrorBody("default_environment_invalid", "Only persistent environments can be set as the default dashboard environment.", [])));
                 var database = env.Database;
@@ -551,6 +605,19 @@ public sealed class ApplicationsController : ControllerBase
                     return EndpointResults.Problem("environment_name_invalid", "Choose a valid environment name.", StatusCodes.Status400BadRequest);
                 if (request.Plan is not null)
                     await catalog.BindAsync(env, request.Plan, cancellationToken);
+                var destinationAccountId = env.SelectedPlan?.ProviderAccountId;
+                if (request.SshAccess is null && env.SshAccessMode != "none" &&
+                    !string.Equals(previousPlanAccountId, destinationAccountId, StringComparison.Ordinal))
+                    return EndpointResults.Conflict("ssh_selection_account_mismatch",
+                        "Changing provider accounts requires an explicit SSH access selection for the destination account.");
+                if (request.SshAccess is not null)
+                {
+                    if (await HasSshAllocationLockAsync(db, env.Id, cancellationToken))
+                        return EndpointResults.Conflict("ssh_selection_locked",
+                            "SSH access cannot be changed during or after server allocation.");
+                    await sshAccess.ApplySelectionAsync(env, destinationAccountId, request.SshAccess,
+                        principal.ToActorIdentity(), isPatch: true, cancellationToken);
+                }
                 if (request.Name is not null && !string.Equals(request.Name.Trim(), env.EnvironmentName, StringComparison.Ordinal))
                     await environments.RenameAsync(env, request.Name, cancellationToken, allowPreview: true);
                 env.Database = database;
@@ -571,10 +638,27 @@ public sealed class ApplicationsController : ControllerBase
                     "environment.updated",
                     $"{application.Id}:{env.Id}",
                     cancellationToken);
+                if (env.SshRevision != previousSshRevision)
+                {
+                    await audit.AppendAsync(
+                        application.OrganizationId,
+                        env.Id,
+                        AuditEventService.ActorFor(principal.ToActorIdentity()),
+                        "environment.ssh_access_selected",
+                        System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            mode = env.SshAccessMode,
+                            providerAccountId = env.SshProviderAccountId,
+                            fingerprint = env.SshFingerprint,
+                            revision = env.SshRevision
+                        }),
+                        cancellationToken);
+                }
 
                 var observations = await BuildObservationsByEnvIdAsync(db, [env.Id], now, cancellationToken);
-                var lockedIds = await GetPlacementLockedEnvIdsAsync(db, [env.Id], cancellationToken);
-                return Results.Ok(env.ToResponse(application.Id, observations.GetValueOrDefault(env.Id), lockedIds.Contains(env.Id)));
+                var (lockedIds, sshLockedIds) = await GetEnvironmentLockIdsAsync(db, [env.Id], cancellationToken);
+                return Results.Ok(env.ToResponse(application.Id, observations.GetValueOrDefault(env.Id),
+                    lockedIds.Contains(env.Id), sshLockedIds.Contains(env.Id)));
             }, cancellationToken);
         }
         catch (AppEnvironmentException ex)
@@ -583,6 +667,10 @@ public sealed class ApplicationsController : ControllerBase
                 ? StatusCodes.Status409Conflict
                 : StatusCodes.Status400BadRequest;
             return Results.Json(new ErrorResponse(new ErrorBody(ex.Code, ex.Message, [])), statusCode: status);
+        }
+        catch (SshAccessException ex)
+        {
+            return EndpointResults.Problem(ex.Code, ex.Message, ex.StatusCode);
         }
         catch (ProviderCatalogException ex)
         {
@@ -629,6 +717,21 @@ public sealed class ApplicationsController : ControllerBase
             : query.Include(x => x.Environments).ThenInclude(x => x.Deployments);
     }
 
+    private static async Task<bool> HasSshAllocationLockAsync(MinicloudDbContext db, string environmentId, CancellationToken ct)
+    {
+        if (await db.ServerInstances.AnyAsync(x => x.AppId == environmentId, ct) ||
+            await db.RuntimeServers.AnyAsync(x => x.AppId == environmentId, ct))
+            return true;
+
+        return await db.Deployments.AnyAsync(x => x.AppId == environmentId &&
+            (x.ProviderCreationAttempted ||
+             (x.SshSnapshotTakenAt != null &&
+              ((x.Status == DeploymentStatus.Queued || x.Status == DeploymentStatus.WaitingForBuild ||
+                x.Status == DeploymentStatus.Dispatching || x.Status == DeploymentStatus.Provisioning ||
+                x.Status == DeploymentStatus.Deploying || x.Status == DeploymentStatus.Verifying) ||
+               x.SshRegistrationState == "registering" || x.SshRegistrationState == "unknown"))), ct);
+    }
+
     internal static async Task<IReadOnlyList<ApplicationResponse>> BuildApplicationResponsesAsync(
         MinicloudDbContext db,
         IReadOnlyList<MinicloudApplication> applications,
@@ -648,10 +751,10 @@ public sealed class ApplicationsController : ControllerBase
             .ToArray();
 
         var observations = await BuildObservationsByEnvIdAsync(db, envIds, now, ct);
-        var lockedIds = await GetPlacementLockedEnvIdsAsync(db, envIds, ct);
+        var (lockedIds, sshLockedIds) = await GetEnvironmentLockIdsAsync(db, envIds, ct);
 
         return applications
-            .Select(app => app.ToResponse(observations, lockedIds))
+            .Select(app => app.ToResponse(observations, lockedIds, sshLockedIds))
             .ToArray();
     }
 
@@ -747,15 +850,12 @@ public sealed class ApplicationsController : ControllerBase
         return result;
     }
 
-    internal static async Task<HashSet<string>> GetPlacementLockedEnvIdsAsync(
+    internal static async Task<(HashSet<string> Placement, HashSet<string> SshSelection)> GetEnvironmentLockIdsAsync(
         MinicloudDbContext db,
         IReadOnlyCollection<string> envIds,
         CancellationToken ct)
     {
-        if (envIds.Count == 0)
-        {
-            return [];
-        }
+        if (envIds.Count == 0) return ([], []);
 
         var serverEnvIds = await db.ServerInstances.AsNoTracking()
             .Where(x => envIds.Contains(x.AppId))
@@ -767,19 +867,27 @@ public sealed class ApplicationsController : ControllerBase
             .Select(x => x.AppId)
             .Distinct()
             .ToListAsync(ct);
-        var deploymentEnvIds = await db.Deployments.AsNoTracking()
-            .Where(x => envIds.Contains(x.AppId) &&
-                (x.ProviderAccountId != null ||
-                 x.Status == DeploymentStatus.Queued || x.Status == DeploymentStatus.WaitingForBuild ||
-                 x.Status == DeploymentStatus.Provisioning || x.Status == DeploymentStatus.Deploying ||
-                 x.Status == DeploymentStatus.Verifying))
-            .Select(x => x.AppId)
-            .Distinct()
-            .ToListAsync(ct);
+        var deployments = await db.Deployments.AsNoTracking().Where(x => envIds.Contains(x.AppId))
+            .Select(x => new
+            {
+                x.AppId, x.ProviderAccountId, x.ProviderCreationAttempted, x.SshRegistrationState,
+                x.SshSnapshotTakenAt, x.Status
+            }).ToListAsync(ct);
 
-        return serverEnvIds
+        var placement = serverEnvIds
             .Concat(runtimeEnvIds)
-            .Concat(deploymentEnvIds)
+            .Concat(deployments.Where(x => x.ProviderAccountId is not null ||
+                x.Status == DeploymentStatus.Queued || x.Status == DeploymentStatus.WaitingForBuild ||
+                x.Status == DeploymentStatus.Provisioning || x.Status == DeploymentStatus.Deploying ||
+                x.Status == DeploymentStatus.Verifying).Select(x => x.AppId))
             .ToHashSet(StringComparer.Ordinal);
+        var sshSelection = serverEnvIds.Concat(runtimeEnvIds)
+            .Concat(deployments.Where(x => x.ProviderCreationAttempted || x.SshRegistrationState is "unknown" or "registering" ||
+                (x.SshSnapshotTakenAt is not null &&
+                 (x.Status is DeploymentStatus.Queued or DeploymentStatus.WaitingForBuild or DeploymentStatus.Dispatching or
+                  DeploymentStatus.Provisioning or DeploymentStatus.Deploying or DeploymentStatus.Verifying)))
+                .Select(x => x.AppId))
+            .ToHashSet(StringComparer.Ordinal);
+        return (placement, sshSelection);
     }
 }

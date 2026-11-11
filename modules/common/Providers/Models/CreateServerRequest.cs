@@ -4,7 +4,7 @@ public record CreateServerRequest(
     string Name,
     string Plan,
     string Region,
-    string SshKeyIdOrPublicKey,
+    IReadOnlyList<string> SshKeyReferences,
     string UserDataCloudInit,
     IReadOnlyDictionary<string, string>? Labels = null,
     IReadOnlyList<string>? Tags = null,

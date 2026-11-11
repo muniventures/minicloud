@@ -85,6 +85,7 @@ public sealed class ProviderCatalogService(MinicloudDbContext db, IIdGenerator i
         {
             if (deployment.PlanId != plan.Id || deployment.ProviderAccountId != plan.ProviderAccountId)
                 throw new ProviderCatalogException("provider_binding_inconsistent", "The deployment already has a different placement reservation.");
+            SnapshotSshAccess(app, deployment, plan);
             return;
         }
         if (plan.ProvisioningLockedAt is null)
@@ -101,6 +102,28 @@ public sealed class ProviderCatalogService(MinicloudDbContext db, IIdGenerator i
         deployment.ProviderSku = plan.Sku;
         deployment.ProviderImage = plan.Image;
         deployment.ProviderBuildPlatform = plan.BuildPlatform;
+        SnapshotSshAccess(app, deployment, plan);
+    }
+
+    private void SnapshotSshAccess(MinicloudApp app, Deployment deployment, ProviderPlan plan)
+    {
+        if (deployment.SshSnapshotTakenAt is null)
+        {
+            if (app.SshAccessMode is "existing" or "new" && app.SshProviderAccountId != plan.ProviderAccountId)
+                throw new ProviderCatalogException("ssh_key_changed", "The SSH selection does not match the reserved provider account.");
+            deployment.SshSelectionRevision = app.SshRevision;
+            deployment.SshSelectionMode = app.SshAccessMode;
+            deployment.SshProviderAccountId = app.SshProviderAccountId ?? plan.ProviderAccountId;
+            deployment.SshKeyId = app.SshKeyId;
+            deployment.SshKeyName = app.SshKeyName;
+            deployment.SshPublicKey = app.SshPublicKey;
+            deployment.SshFingerprint = app.SshFingerprint;
+            deployment.SshKeyType = app.SshKeyType;
+            deployment.SshRegistrationState = app.SshRegistrationState;
+            deployment.SshCredentialGeneration = plan.ProviderAccount.CredentialGeneration;
+            deployment.SshSelectingActor = app.SshSelectedBy;
+            deployment.SshSnapshotTakenAt = clock.GetUtcNow();
+        }
     }
 
     public async Task<ProviderPlan> CreateAsync(CreateProviderPlanRequest request, CancellationToken ct)

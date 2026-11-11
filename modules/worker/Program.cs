@@ -182,6 +182,7 @@ builder.Services.AddSingleton<IArtifactRetriever>(sp => sp.GetRequiredService<Lo
 
 // Pipeline Executor (T40 full pipeline)
 builder.Services.AddMinicloudProviders(builder.Configuration);
+builder.Services.AddScoped<ProviderSshKeyService>();
 if (!builder.Configuration.GetValue<bool>("Providers:AllowLegacyConfiguration"))
 {
     // A type-only resolver cannot identify an account. Keep legacy dispatch an

@@ -80,7 +80,7 @@ public sealed class IdentityAndBrowserSessionsMigrationTests
                 $"INSERT INTO \"__EFMigrationsHistory\" (\"MigrationId\", \"ProductVersion\") VALUES ({migration}, '10.0.5')");
         }
         Assert.Contains(PreviousMigration, await db.Database.GetAppliedMigrationsAsync());
-        await db.Database.MigrateAsync();
+        await db.Database.MigrateAsync(CurrentMigration);
 
         var user = await db.Users.AsNoTracking().SingleAsync();
         var member = await db.OrganizationMembers.AsNoTracking().SingleAsync();

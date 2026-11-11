@@ -193,7 +193,7 @@ public sealed class ResolveProvisionServerStepTests : IClassFixture<WorkerSqlite
         await step.ExecuteAsync(context, CancellationToken.None);
 
         Assert.NotNull(capturedRequest);
-        Assert.Empty(capturedRequest.SshKeyIdOrPublicKey);
+        Assert.Empty(capturedRequest.SshKeyReferences);
         Assert.Contains("TEST_PUBLIC_KEY", capturedRequest.UserDataCloudInit);
         Assert.Equal("198.51.100.42", context.ServerIp);
 

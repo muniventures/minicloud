@@ -116,7 +116,7 @@ public class DigitalOceanClientTests
             Name: "minicloud-do-app",
             Plan: "s-1vcpu-1gb",
             Region: "nyc1",
-            SshKeyIdOrPublicKey: "ssh-key-id",
+            SshKeyReferences: ["123", "456"],
             UserDataCloudInit: "#cloud-config",
             Tags: ["minicloud-app-test"]);
 
@@ -138,12 +138,29 @@ public class DigitalOceanClientTests
         Assert.Contains("\"name\":\"minicloud-do-app\"", createReq.Body);
         Assert.Contains("\"size\":\"s-1vcpu-1gb\"", createReq.Body);
         Assert.Contains("\"region\":\"nyc1\"", createReq.Body);
+        Assert.Contains("\"ssh_keys\":[123,456]", createReq.Body);
 
         // Second request: assign project
         var assignReq = _handler.RecordedRequests[1];
         Assert.Equal(HttpMethod.Post, assignReq.Method);
         Assert.Contains("projects/project-uuid-9876/resources", assignReq.Uri);
         Assert.Contains("\"do:droplet:6002\"", assignReq.Body);
+    }
+
+    [Fact]
+    public async Task SshKeyInventoryAndRegistrationUseDigitalOceanApiShapes()
+    {
+        _handler.QueueJsonResponse("""{"ssh_keys":[{"id":12,"name":"work","public_key":"ssh-ed25519 fixture","fingerprint":"SHA256:fixture"}],"meta":{"total":1}}""");
+        _handler.QueueJsonResponse("""{"ssh_key":{"id":13,"name":"new","public_key":"ssh-ed25519 fixture","fingerprint":"SHA256:fixture"}}""", HttpStatusCode.Created);
+        var client = CreateClient();
+
+        var listed = await client.ListSshKeysAsync();
+        var registered = await client.RegisterSshKeyAsync("new", "ssh-ed25519 AAAA");
+
+        Assert.Equal(new ProviderSshKeyInfo("12", "work", "ssh-ed25519 fixture"), Assert.Single(listed));
+        Assert.Equal(new ProviderSshKeyInfo("13", "new", "ssh-ed25519 fixture"), registered);
+        Assert.Contains("/v2/account/keys?per_page=200&page=1", _handler.RecordedRequests[0].Uri);
+        Assert.Contains("\"public_key\":\"ssh-ed25519 AAAA\"", _handler.RecordedRequests[1].Body);
     }
 
     [Theory]
@@ -158,7 +175,7 @@ public class DigitalOceanClientTests
         _handler.QueueJsonResponse("""{"message":"Invalid token dop_v1_secret_token_abcdef123456"}""", status);
 
         var error = await Assert.ThrowsAsync<ProviderApiException>(() => CreateClient().CreateServerAsync(
-            new CreateServerRequest("minicloud-do-app", "s-1vcpu-1gb", "nyc1", "", "#cloud-config")));
+            new CreateServerRequest("minicloud-do-app", "s-1vcpu-1gb", "nyc1", [], "#cloud-config")));
 
         Assert.Null(error.StatusCode);
         Assert.Equal(Minicloud.Common.Providers.CloudProvider.DigitalOcean, error.Provider);
@@ -181,7 +198,7 @@ public class DigitalOceanClientTests
         _handler.QueueJsonResponse("""{"message":"Droplet creation rejected"}""", status);
 
         var error = await Assert.ThrowsAsync<ProviderApiException>(() => CreateClient().CreateServerAsync(
-            new CreateServerRequest("minicloud-do-app", "s-1vcpu-1gb", "nyc1", "", "#cloud-config")));
+            new CreateServerRequest("minicloud-do-app", "s-1vcpu-1gb", "nyc1", [], "#cloud-config")));
 
         Assert.Equal(status, error.StatusCode);
         Assert.Null(error.InnerException);

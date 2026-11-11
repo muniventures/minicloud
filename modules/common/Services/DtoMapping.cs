@@ -10,7 +10,7 @@ public static class DtoMapping
     public static OrganizationResponse ToResponse(this Organization organization) =>
         new(organization.Id, organization.Name, organization.Slug, organization.CreatedAt);
 
-    public static EnvironmentDetailResponse ToResponse(this MinicloudApp app)
+    public static EnvironmentDetailResponse ToResponse(this MinicloudApp app, bool sshSelectionLocked = false)
     {
         var latestDeployment = app.Deployments
             .Where(x => x.AssetReleaseId == null)
@@ -78,14 +78,17 @@ public static class DtoMapping
             persistentEnvironments,
             app.PlanId,
             app.ApplicationId ?? app.Application?.Id,
-            app.Application?.DefaultEnvironmentId);
+            app.Application?.DefaultEnvironmentId,
+            ToSshAccessResponse(app, sshSelectionLocked),
+            null);
     }
 
     public static ApplicationEnvironmentResponse ToResponse(
         this MinicloudApp env,
         string applicationId,
         EnvironmentRuntimeObservationResponse? runtimeObservation = null,
-        bool placementLocked = false)
+        bool placementLocked = false,
+        bool sshSelectionLocked = false)
     {
         var latestDeployment = env.Deployments
             .Where(x => x.AssetReleaseId == null)
@@ -133,13 +136,27 @@ public static class DtoMapping
             latestDeployment,
             runtimeObservation ?? new EnvironmentRuntimeObservationResponse("unprovisioned", false, false, null, null, 0, 0),
             env.CreatedAt,
-            env.UpdatedAt);
+            env.UpdatedAt,
+            ToSshAccessResponse(env, sshSelectionLocked),
+            null);
     }
+
+    private static EnvironmentSshAccessResponse ToSshAccessResponse(MinicloudApp env, bool placementLocked) =>
+        new(env.SshAccessMode,
+            env.SshProviderAccountId ?? env.SelectedPlan?.ProviderAccountId,
+            env.SshAccessMode == "existing" ? env.SshKeyId : null,
+            env.SshAccessMode == "none" ? null : env.SshKeyName,
+            env.SshAccessMode == "none" ? null : env.SshFingerprint,
+            env.SshAccessMode == "none" ? null : env.SshKeyType,
+            env.SshRevision,
+            env.SshRegistrationState,
+            placementLocked);
 
     public static ApplicationResponse ToResponse(
         this MinicloudApplication application,
         IReadOnlyDictionary<string, EnvironmentRuntimeObservationResponse>? runtimeObservations = null,
-        IReadOnlySet<string>? placementLockedEnvironmentIds = null)
+        IReadOnlySet<string>? placementLockedEnvironmentIds = null,
+        IReadOnlySet<string>? sshLockedEnvironmentIds = null)
     {
         var orderedEnvironments = application.Environments
             .Where(x => !string.Equals(x.EnvironmentKind, EnvironmentKinds.Internal, StringComparison.Ordinal))
@@ -149,7 +166,8 @@ public static class DtoMapping
             .Select(x => x.ToResponse(
                 application.Id,
                 runtimeObservations is not null && runtimeObservations.TryGetValue(x.Id, out var obs) ? obs : null,
-                placementLockedEnvironmentIds is not null && placementLockedEnvironmentIds.Contains(x.Id)))
+                placementLockedEnvironmentIds is not null && placementLockedEnvironmentIds.Contains(x.Id),
+                sshLockedEnvironmentIds is not null && sshLockedEnvironmentIds.Contains(x.Id)))
             .ToArray();
 
         var persistentCount = orderedEnvironments.Count(x => x.Kind == EnvironmentKinds.Persistent);
