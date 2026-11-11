@@ -34,8 +34,11 @@ public static class MinicloudApplicationExtensions
             app.MapOpenApi();
         }
 
+        app.UseSetupTransport();
         app.UseHttpsRedirection();
+        app.UseRouting();
         app.UseCors("Dashboard");
+        app.UseRateLimiter();
         app.UseMiddleware<KratosUnavailableMiddleware>();
         app.UseAuthentication();
         app.UseMiddleware<BrowserRequestSecurityMiddleware>();

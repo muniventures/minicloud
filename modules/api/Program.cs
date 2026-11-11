@@ -29,6 +29,7 @@ builder.Services.AddScoped<DatabaseNetworkService>();
 
 builder.Services.AddMinicloudApi(builder.Configuration, builder.Environment);
 builder.Services.AddMinicloudBootstrap();
+builder.Services.AddSetupTransport();
 
 builder.Services.AddScoped<DatabaseManagementService>();
 builder.Services.AddScoped<DatabaseBackupPurgeService>();

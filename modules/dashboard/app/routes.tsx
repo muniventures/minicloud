@@ -17,10 +17,13 @@ import { SignInModule } from "./modules/Auth/SignInModule";
 import { AccountFlowForm } from "./modules/Auth/AccountFlowForm";
 import { TeamSettingsModule } from "./modules/Settings/TeamSettingsModule";
 import { CliLoginModule } from "./modules/CliLogin/CliLoginModule";
+import { SetupModule } from "./modules/Setup/SetupModule";
+import { ProviderPlanGuide } from "./modules/Setup/ProviderPlanGuide";
 
 import { ProviderAccountsModule, ProvidersModule } from "./modules/Providers/ProvidersModule";
 
 export const routes: RouteObject[] = [
+  { path: "/setup", element: <SetupModule /> },
   {
     element: <AuthLayout />,
     children: [
@@ -34,6 +37,7 @@ export const routes: RouteObject[] = [
     element: <AppShell />,
     children: [
       { path: "/", element: <Navigate to="/apps" replace /> },
+      { path: "/getting-started", element: <ProviderPlanGuide /> },
       { path: "/apps", element: <AppsModule /> },
       { path: "/apps/new", element: <CreateAppModule /> },
       { path: "/databases", element: <DatabasesModule /> },
