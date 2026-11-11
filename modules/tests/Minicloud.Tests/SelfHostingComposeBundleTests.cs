@@ -96,6 +96,8 @@ public sealed class SelfHostingComposeBundleTests
         var publicBaseUrl = Text(((YamlMappingNode)((YamlMappingNode)kratos["serve"])["public"])["base_url"]);
         var api = Environment(Service("api"));
         Assert.Equal(api["Kratos__PublicBaseUrl"], publicBaseUrl);
+        // Kratos rejects its whole config at startup when log.level is outside its schema enum.
+        Assert.Contains(Text(((YamlMappingNode)kratos["log"])["level"]), new[] { "trace", "debug", "info", "warning", "error", "fatal", "panic" });
         Assert.Equal("http://kratos:4434/", api["Kratos__AdminBaseUrl"]);
         Assert.Equal("false", api["Database__RunMigrationsOnStartup"]);
         Assert.DoesNotContain("kratos\", \"healthcheck", string.Join("\", \"", Sequence((YamlMappingNode)Service("kratos")["healthcheck"], "test")));
