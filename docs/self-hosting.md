@@ -7,8 +7,12 @@ host based on these source assets. Once a versioned release is available, use
 its signed installer and release documentation; never build a production host
 from a checkout or substitute floating image tags.
 
-The public control-plane installer, setup flow, upgrade and recovery procedures
-are being completed in T42–T44. `compose.self-host.yml` is the release-stack
+The public control-plane installer and setup flow now have source implementations;
+upgrade/recovery and installation qualification remain open. The
+[versioned installer/manual guide](server-installer.md) documents exact-release
+verification, protected inputs, shared staged Compose operations and resumable
+readiness. It is not a claim that a server release exists.
+`compose.self-host.yml` is the release-stack
 entry point and includes the versioned Compose definition in
 `packaging/server/bundle/compose.yml`. It requires an exact release's digest
 `images.env`, runtime `server-release.json`, validated host configuration and
@@ -40,8 +44,8 @@ restart is not a substitute for an unseal or recovery procedure.
 
 ## Stack reference
 
-This section describes the source bundle that the installer (T43) will
-prepare. It is not yet a supported manual installation procedure.
+This section describes the source bundle consumed by the installer and its
+manual staged primitives. It is not yet a qualified installation procedure.
 
 ### Operator inputs
 
@@ -100,8 +104,9 @@ so upgrades do not depend on first-volume scripts.
 
 First-operator seeding uses the API executable's shared
 [`bootstrap` host entry point](bootstrap.md), after migrations. The packaged
-installer and browser setup transport are still separate follow-up work;
-this command does not make the source bundle a qualified installation.
+installer invokes this producer and the browser setup transport consumes the
+same durable state. These implementations do not make the source bundle a
+qualified installation.
 
 ### Protected host bootstrap interface
 

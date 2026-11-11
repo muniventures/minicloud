@@ -7,7 +7,7 @@
   "manageDnsRecords": false,
   "sourceUrl": "https://github.com/muniventures/minicloud",
   "recovery": {
-    "openBaoUnsealMaterialPath": "/path/on/off-host/recovery-media",
+    "openBaoUnsealMaterialPath": "/mnt/operator-recovery",
     "backupDestination": "operator-managed-off-host-location"
   }
 }

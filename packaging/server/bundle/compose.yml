@@ -1,5 +1,8 @@
 name: minicloud
 
+x-installation-labels: &installation-labels
+  com.minicloud.installation-id: ${MINICLOUD_INSTALLATION_ID:?set the persistent MINICLOUD_INSTALLATION_ID}
+
 x-shared-environment: &shared-environment
   Database__Provider: Postgres
   Database__PasswordFile: /run/secrets/app-db-password
@@ -364,19 +367,26 @@ secrets:
 
 volumes:
   postgres:
+    labels: *installation-labels
   openbao:
+    labels: *installation-labels
   # Memory-backed so the renewable token never reaches disk. The agent checks
   # it against OpenBao: consumers can retain this volume across agent restarts.
   openbao-agent-token:
+    labels: *installation-labels
     driver: local
     driver_opts:
       type: tmpfs
       device: tmpfs
       o: size=1m,mode=0750
   artifacts:
+    labels: *installation-labels
   caddy-data:
+    labels: *installation-labels
   caddy-config:
+    labels: *installation-labels
 
 networks:
   private:
+    labels: *installation-labels
     driver: bridge
