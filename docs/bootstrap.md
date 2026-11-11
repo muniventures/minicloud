@@ -85,9 +85,10 @@ inject `BootstrapService`. T42's transport calls:
 The browser method loads the operation ID server-side and performs the same
 admission/seed/reconciliation logic as `CompleteHostAsync`. Map
 `BootstrapException.Code`/`StatusCode` into the existing API error envelope.
-The existing capabilities controller still has its earlier state reader;
-the account/setup integration owner must switch that reader to this shared
-status method before qualifying public mismatched-installation behavior.
+The capabilities controller uses this same status method, collapsing only
+`required`/`in_progress` to `required`, preserving `blocked`/`ready`, and
+returning a sanitized no-store 503 on identity dependency unavailability.
+A missing or invalid configured installation ID is `blocked`.
 The frozen errors are `setup_token_invalid` (401), `setup_token_expired`
 (410), `setup_in_progress`, `setup_already_completed`, `setup_state_conflict`
 (409), and `auth_unavailable` (503). Dependency failures are errors, never
