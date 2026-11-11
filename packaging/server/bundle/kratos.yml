@@ -24,6 +24,8 @@ selfservice:
   default_browser_return_url: https://localhost/
   allowed_return_urls: []
   methods:
+    oidc:
+      enabled: false
     password:
       enabled: true
   flows:

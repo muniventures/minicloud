@@ -5,6 +5,7 @@
   "apiHostname": "api.cloud.example.com",
   "consoleHostname": "cloud.example.com",
   "manageDnsRecords": false,
+  "googleOidc": { "enabled": false },
   "sourceUrl": "https://github.com/muniventures/minicloud",
   "recovery": {
     "openBaoUnsealMaterialPath": "/mnt/operator-recovery",
