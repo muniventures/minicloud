@@ -15,11 +15,11 @@ public interface IDeploymentRenderer : IDisposable, IAsyncDisposable
     void ArtifactUploadCompleted(string serviceName, long byteCount);
 
     void DeploymentCreationStarted();
-    void DeploymentCreated(string deploymentId, string status);
-    void DeploymentStatusUpdated(string deploymentId, string status, string? consoleUrl = null);
-    void DeploymentActivityUpdated(string deploymentId, string phase, string? detail = null);
+    void DeploymentCreated(string deploymentNumber, string status);
+    void DeploymentStatusUpdated(string deploymentNumber, string status, string? consoleUrl = null);
+    void DeploymentActivityUpdated(string deploymentNumber, string phase, string? detail = null);
     void DeploymentReconnecting();
-    void DeploymentReconnected(string deploymentId, string status);
+    void DeploymentReconnected(string deploymentNumber, string status);
 
     void DeploymentSucceeded(DeploymentSuccessResult result);
     void DeploymentFailed(DeploymentFailureResult result);

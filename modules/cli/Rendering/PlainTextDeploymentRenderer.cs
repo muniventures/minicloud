@@ -127,19 +127,19 @@ public sealed class PlainTextDeploymentRenderer : IDeploymentRenderer
         }
     }
 
-    public void DeploymentCreated(string deploymentId, string status)
+    public void DeploymentCreated(string deploymentNumber, string status)
     {
         lock (_lock)
         {
             _deployStarted = true;
             _lastDeployStatus = status;
-            _console.WriteLine($"Deploy: created deployment {deploymentId} (status: {status})");
+            _console.WriteLine($"Deploy: created deployment {deploymentNumber} (status: {status})");
             _tracker?.OnDeploymentCreated();
             CheckProgress();
         }
     }
 
-    public void DeploymentStatusUpdated(string deploymentId, string status, string? consoleUrl = null)
+    public void DeploymentStatusUpdated(string deploymentNumber, string status, string? consoleUrl = null)
     {
         lock (_lock)
         {
@@ -151,7 +151,7 @@ public sealed class PlainTextDeploymentRenderer : IDeploymentRenderer
         }
     }
 
-    public void DeploymentActivityUpdated(string deploymentId, string phase, string? detail = null)
+    public void DeploymentActivityUpdated(string deploymentNumber, string phase, string? detail = null)
     {
         lock (_lock)
         {
@@ -172,7 +172,7 @@ public sealed class PlainTextDeploymentRenderer : IDeploymentRenderer
         }
     }
 
-    public void DeploymentReconnected(string deploymentId, string status)
+    public void DeploymentReconnected(string deploymentNumber, string status)
     {
         lock (_lock)
         {
@@ -242,9 +242,9 @@ public sealed class PlainTextDeploymentRenderer : IDeploymentRenderer
                 lines.Add(result.FailureMessage);
             }
 
-            if (!string.IsNullOrWhiteSpace(result.DeploymentId))
+            if (!string.IsNullOrWhiteSpace(result.DeploymentNumber))
             {
-                lines.Add($"Logs: minicloud logs {result.DeploymentId}");
+                lines.Add($"Logs: minicloud logs {result.DeploymentNumber}");
             }
             else
             {

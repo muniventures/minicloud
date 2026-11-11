@@ -25,7 +25,7 @@ public sealed class CliServiceUrlTests
             var client = new MinicloudApiClient(environment, tokens, new HttpClient(new DeploymentHandler(hasDomains)));
             var app = new CliApplication(console, environment, tokens, client);
 
-            Assert.Equal(CliExitCodes.Success, await app.RunAsync(["status", "dep_test"], CancellationToken.None));
+            Assert.Equal(CliExitCodes.Success, await app.RunAsync(["status", "20261110.1"], CancellationToken.None));
             Assert.DoesNotContain("https://old-main.example", console.Output);
             Assert.DoesNotContain("Website URL", console.Output);
             Assert.Contains("Console: https://console.example", console.Output);
@@ -51,10 +51,11 @@ public sealed class CliServiceUrlTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Assert.Equal("/api/deployments/dep_test", request.RequestUri!.AbsolutePath);
+            if (CliApiFixtures.TryMe(request, "org_test") is { } me) return Task.FromResult(me);
+            Assert.Equal("/api/deployments/20261110.1?organizationId=org_test", request.RequestUri!.PathAndQuery);
             var payload = new
             {
-                id = "dep_test", appId = "app_test", organizationId = "org_test", database = "sqlite",
+                id = "dep_test", number = "20261110.1", appId = "app_test", organizationId = "org_test", database = "sqlite",
                 status = "succeeded", websiteUrl = "https://old-main.example", consoleUrl = "https://console.example",
                 createdAt = "2026-09-08T12:00:00Z",
                 services = new[]

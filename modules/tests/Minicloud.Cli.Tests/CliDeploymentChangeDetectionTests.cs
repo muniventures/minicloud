@@ -373,6 +373,7 @@ public sealed class CliDeploymentChangeDetectionTests
                     Content = JsonContent.Create(new
                     {
                         id = "dep_test_123",
+                        number = "20261110.4",
                         appId = "app_main",
                         status = "succeeded"
                     })
@@ -417,13 +418,14 @@ public sealed class CliDeploymentChangeDetectionTests
                     };
             }
 
-            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/api/deployments/dep_test_123/refresh")
+            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/api/deployments/20261110.4/refresh")
             {
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = JsonContent.Create(new
                     {
                         id = "dep_test_123",
+                        number = "20261110.4",
                         appId = "app_main",
                         organizationId = "org_1",
                         database = "sqlite",

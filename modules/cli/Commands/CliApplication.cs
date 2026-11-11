@@ -234,15 +234,16 @@ public sealed partial class CliApplication
                 _console.WriteLine("Activation requires an explicit service assetMounts.<name>.releaseId pin.");
                 return CliExitCodes.Success;
             case "deploy cancel":
-                _console.WriteLine("Usage: minicloud deploy cancel <deployment-id>");
+                _console.WriteLine("Usage: minicloud deploy cancel <deployment-number> [--organization <id>]");
                 _console.WriteLine("Stops further deployment work. Changes already applied are not restored.");
+                _console.WriteLine("Deployment numbers look like 20261110.1 and are scoped to an organization.");
                 return CliExitCodes.Success;
             case "deploy":
                 _console.WriteLine("Deploy services to Minicloud");
                 _console.WriteLine();
                 _console.WriteLine("Usage:");
                 _console.WriteLine("  minicloud deploy [service ...] [--all] [--config minicloud.yml] [--database db] [--pgpassword password] [--build-mode source|local] [--build-jobs N] [--no-publish]");
-                _console.WriteLine("  minicloud deploy cancel <deployment-id>");
+                _console.WriteLine("  minicloud deploy cancel <deployment-number> [--organization <id>]");
                 _console.WriteLine("  minicloud deploy branch [--config minicloud.yml] [--database db] [--pgpassword password] [--build-mode source|local] [--build-jobs N] [--no-publish]");
                 _console.WriteLine();
                 _console.WriteLine("Details:");
@@ -310,19 +311,30 @@ public sealed partial class CliApplication
                 _console.WriteLine("Show deployment status and service URLs");
                 _console.WriteLine();
                 _console.WriteLine("Usage:");
-                _console.WriteLine("  minicloud status [deployment-id] [--watch]");
+                _console.WriteLine("  minicloud status [deployment-number] [--watch] [--organization <id>] [--diagnostics]");
+                _console.WriteLine();
+                _console.WriteLine("Details:");
+                _console.WriteLine("  Deployment numbers look like 20261110.1 and are scoped to an organization.");
+                _console.WriteLine("  Without a number, shows the latest deployment in the selected organization.");
                 _console.WriteLine();
                 _console.WriteLine("Options:");
                 _console.WriteLine("  --watch                 Continuously watch and stream deployment status until finished");
+                _console.WriteLine("  --organization <id>     Organization to resolve the number in (default: the token's only organization, or the app in minicloud.yml)");
+                _console.WriteLine("  --diagnostics           Also print the internal deployment ID for support correlation");
                 return CliExitCodes.Success;
 
             case "logs":
                 _console.WriteLine("View and tail logs for an application or deployment");
                 _console.WriteLine();
                 _console.WriteLine("Usage:");
-                _console.WriteLine("  minicloud logs [app|deployment-id] [--service service] [--source source] [--tail count] [--since duration]");
+                _console.WriteLine("  minicloud logs [app|deployment-number] [--service service] [--source source] [--tail count] [--since duration] [--organization <id>]");
+                _console.WriteLine();
+                _console.WriteLine("Details:");
+                _console.WriteLine("  A deployment number such as 20261110.1 shows that deployment's logs; any other value is an app name or ID.");
+                _console.WriteLine("  Without an argument, shows logs of the latest deployment in the selected organization.");
                 _console.WriteLine();
                 _console.WriteLine("Options:");
+                _console.WriteLine("  --organization <id>     Organization for deployment numbers (default: the token's only organization, or the app in minicloud.yml)");
                 _console.WriteLine("  --service <name>        Filter logs by service name");
                 _console.WriteLine("  --source <name>         Filter by log source (e.g. docker, system)");
                 _console.WriteLine("  --tail <count>          Number of log lines to show (default: 100)");
@@ -479,7 +491,8 @@ public sealed partial class CliApplication
             "--value",
             "--config",
             "--hostname",
-            "--label"
+            "--label",
+            "--organization"
         };
 
         for (var i = 0; i < args.Count; i++)

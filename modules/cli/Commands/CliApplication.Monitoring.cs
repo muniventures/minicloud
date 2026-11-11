@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
+using Minicloud.Cli.Config;
 using Minicloud.Common.Contracts;
 
 namespace Minicloud.Cli.Commands;
@@ -9,44 +10,32 @@ public sealed partial class CliApplication
     private async Task<int> RunStatusAsync(string[] args, CancellationToken cancellationToken)
     {
         var watch = args.Contains("--watch", StringComparer.Ordinal) || args.Contains("-w", StringComparer.Ordinal);
-        var deploymentId = args.FirstOrDefault(x => !x.StartsWith("-", StringComparison.Ordinal));
-        if (string.IsNullOrWhiteSpace(deploymentId))
+        var diagnostics = args.Contains("--diagnostics", StringComparer.Ordinal);
+        var deploymentNumber = FirstPositional(args);
+        if (deploymentNumber is not null)
         {
-            var me = await _apiClient.GetMeAsync(cancellationToken);
-            var organization = me.Organizations.FirstOrDefault();
-            if (organization is null)
-            {
-                _console.WriteError("Auth error: your token is not associated with an organization.");
-                return CliExitCodes.AuthError;
-            }
-
-            var deployments = await _apiClient.GetDeploymentsAsync(organization.Id, appId: null, cancellationToken);
-            var latest = deployments.FirstOrDefault();
-            if (latest is null)
-            {
-                _console.WriteError($"No deployments found in organization '{organization.Name}'.");
-                return CliExitCodes.ValidationError;
-            }
-
-            deploymentId = latest.Id;
+            ValidateDeploymentNumberArgument(deploymentNumber);
         }
 
-        var deployment = await _apiClient.GetDeploymentAsync(deploymentId, cancellationToken);
+        var organization = await ResolveDeploymentOrganizationAsync(args, cancellationToken);
+        deploymentNumber ??= await GetLatestDeploymentNumberAsync(organization, cancellationToken);
+
+        var deployment = await _apiClient.GetDeploymentAsync(organization.Id, deploymentNumber, cancellationToken);
         if (!TerminalStatuses.Contains(deployment.Status))
         {
             if (watch)
             {
-                PrintDeployment(deployment);
-                deployment = await PollDeploymentAsync(deployment.Id, deployment.Status, cancellationToken);
+                PrintDeployment(deployment, diagnostics);
+                deployment = await PollDeploymentAsync(organization.Id, deployment.Number, deployment.Status, cancellationToken);
                 _console.WriteLine();
-                PrintDeployment(deployment);
+                PrintDeployment(deployment, diagnostics);
                 return deployment.Status is "failed" or "canceled" ? CliExitCodes.DeploymentFailed : CliExitCodes.Success;
             }
 
-            deployment = await _apiClient.RefreshDeploymentAsync(deploymentId, cancellationToken);
+            deployment = await _apiClient.RefreshDeploymentAsync(organization.Id, deployment.Number, cancellationToken);
         }
 
-        PrintDeployment(deployment);
+        PrintDeployment(deployment, diagnostics);
         return deployment.Status is "failed" or "canceled" ? CliExitCodes.DeploymentFailed : CliExitCodes.Success;
     }
 
@@ -58,32 +47,18 @@ public sealed partial class CliApplication
         var since = GetOption(args, "--since");
         var tailValue = GetOption(args, "--tail");
         var tail = int.TryParse(tailValue, out var parsedTail) ? parsedTail : 100;
-        if (string.IsNullOrWhiteSpace(appOrDeployment))
+        if (appOrDeployment is null || LooksLikeDeploymentReference(appOrDeployment))
         {
-            var meForLatest = await _apiClient.GetMeAsync(cancellationToken);
-            var organizationForLatest = meForLatest.Organizations.FirstOrDefault();
-            if (organizationForLatest is null)
+            if (appOrDeployment is not null)
             {
-                _console.WriteError("Auth error: your token is not associated with an organization.");
-                return CliExitCodes.AuthError;
+                ValidateDeploymentNumberArgument(appOrDeployment);
             }
 
-            var deployments = await _apiClient.GetDeploymentsAsync(organizationForLatest.Id, appId: null, cancellationToken);
-            var latest = deployments.FirstOrDefault();
-            if (latest is null)
-            {
-                _console.WriteError($"No deployments found in organization '{organizationForLatest.Name}'.");
-                return CliExitCodes.ValidationError;
-            }
-
-            appOrDeployment = latest.Id;
-        }
-
-        if (appOrDeployment.StartsWith("dep_", StringComparison.Ordinal))
-        {
-            var deployment = await _apiClient.GetDeploymentAsync(appOrDeployment, cancellationToken);
+            var organization = await ResolveDeploymentOrganizationAsync(args, cancellationToken);
+            var deploymentNumber = appOrDeployment ?? await GetLatestDeploymentNumberAsync(organization, cancellationToken);
+            var deployment = await _apiClient.GetDeploymentAsync(organization.Id, deploymentNumber, cancellationToken);
             PrintDeploymentFailure(deployment);
-            var logs = await _apiClient.GetDeploymentLogsAsync(appOrDeployment, cancellationToken);
+            var logs = await _apiClient.GetDeploymentLogsAsync(organization.Id, deployment.Number, cancellationToken);
             foreach (var log in logs.Where(x => source is null || x.Source == source).TakeLast(tail))
             {
                 _console.WriteLine($"{log.CreatedAt:O} [{log.Source}] {log.Content}");
@@ -104,8 +79,73 @@ public sealed partial class CliApplication
         return CliExitCodes.Success;
     }
 
+    // App slugs never contain '.', so dotted numeric input and legacy opaque IDs are deployment references.
+    internal static bool LooksLikeDeploymentReference(string value) =>
+        value.StartsWith("dep_", StringComparison.Ordinal) ||
+        (value.Contains('.') && value.All(x => char.IsAsciiDigit(x) || x == '.'));
+
+    private static void ValidateDeploymentNumberArgument(string value)
+    {
+        if (!DeploymentNumber.IsValid(value))
+        {
+            throw new CliCommandException(
+                CliExitCodes.ValidationError,
+                $"'{value}' is not a deployment number. Use the number shown by Minicloud, for example 20261110.1.");
+        }
+    }
+
+    private async Task<OrganizationSummaryDto> ResolveDeploymentOrganizationAsync(string[] args, CancellationToken cancellationToken)
+    {
+        var requested = GetOption(args, "--organization");
+        if (args.Any(x => x == "--organization" || x.StartsWith("--organization=", StringComparison.Ordinal)) && string.IsNullOrWhiteSpace(requested))
+        {
+            throw new CliCommandException(CliExitCodes.ValidationError, "--organization requires an organization ID.");
+        }
+
+        var me = await _apiClient.GetMeAsync(cancellationToken);
+        if (me.Organizations.Count == 0)
+        {
+            throw new CliCommandException(CliExitCodes.AuthError, "Auth error: your token is not associated with an organization.");
+        }
+
+        if (requested is not null)
+        {
+            return me.Organizations.FirstOrDefault(x => string.Equals(x.Id, requested, StringComparison.Ordinal))
+                ?? throw new CliCommandException(CliExitCodes.AuthError, "The selected organization is not available to this token.");
+        }
+
+        if (me.Organizations.Count == 1)
+        {
+            return me.Organizations[0];
+        }
+
+        var path = GetOption(args, "--config") ?? MinicloudConfigLoader.ResolveDefaultPath();
+        if (File.Exists(path))
+        {
+            var config = MinicloudConfigLoader.Load(path);
+            if (config.IsValid && !string.IsNullOrWhiteSpace(config.Config?.AppId))
+            {
+                var application = await GetApplicationContextAsync(config.Config.AppId, cancellationToken);
+                return me.Organizations.FirstOrDefault(x => x.Id == application.OrganizationId)
+                    ?? throw new CliCommandException(CliExitCodes.AuthError, $"Auth error: your token is not associated with app '{config.Config.AppId}'.");
+            }
+        }
+
+        throw new CliCommandException(
+            CliExitCodes.ValidationError,
+            "Deployment numbers are scoped to an organization. Select one with --organization <id> or run the command next to an application's minicloud.yml.");
+    }
+
+    private async Task<string> GetLatestDeploymentNumberAsync(OrganizationSummaryDto organization, CancellationToken cancellationToken)
+    {
+        var deployments = await _apiClient.GetDeploymentsAsync(organization.Id, appId: null, cancellationToken);
+        return deployments.FirstOrDefault()?.Number
+            ?? throw new CliCommandException(CliExitCodes.ValidationError, $"No deployments found in organization '{organization.Name}'.");
+    }
+
     private async Task<DeploymentResponse> PollDeploymentAsync(
-        string deploymentId,
+        string organizationId,
+        string deploymentNumber,
         string initialStatus,
         CancellationToken cancellationToken,
         Rendering.IDeploymentRenderer? renderer = null,
@@ -122,12 +162,12 @@ public sealed partial class CliApplication
             DeploymentResponse deployment;
             try
             {
-                deployment = await _apiClient.RefreshDeploymentAsync(deploymentId, cancellationToken);
+                deployment = await _apiClient.RefreshDeploymentAsync(organizationId, deploymentNumber, cancellationToken);
                 if (reportedInterruption)
                 {
                     if (renderer != null)
                     {
-                        renderer.DeploymentReconnected(deploymentId, deployment.Status);
+                        renderer.DeploymentReconnected(deployment.Number, deployment.Status);
                     }
                     else
                     {
@@ -163,7 +203,7 @@ public sealed partial class CliApplication
             {
                 if (renderer != null)
                 {
-                    renderer.DeploymentStatusUpdated(deployment.Id, deployment.Status, deployment.ConsoleUrl);
+                    renderer.DeploymentStatusUpdated(deployment.Number, deployment.Status, deployment.ConsoleUrl);
                 }
                 else
                 {
@@ -176,12 +216,12 @@ public sealed partial class CliApplication
             {
                 try
                 {
-                    var (phase, detail) = await InspectDeploymentActivityAsync(deployment.Id, deployment.Status, totalServices, cancellationToken);
+                    var (phase, detail) = await InspectDeploymentActivityAsync(organizationId, deployment.Number, deployment.Status, totalServices, cancellationToken);
                     if (!string.IsNullOrWhiteSpace(phase))
                     {
                         if (renderer != null)
                         {
-                            renderer.DeploymentActivityUpdated(deployment.Id, phase, detail);
+                            renderer.DeploymentActivityUpdated(deployment.Number, phase, detail);
                         }
                     }
                 }
@@ -208,7 +248,8 @@ public sealed partial class CliApplication
     }
 
     private async Task<(string? Phase, string? Detail)> InspectDeploymentActivityAsync(
-        string deploymentId,
+        string organizationId,
+        string deploymentNumber,
         string deploymentStatus,
         int totalServices,
         CancellationToken cancellationToken)
@@ -223,7 +264,7 @@ public sealed partial class CliApplication
 
         try
         {
-            var events = await _apiClient.GetDeploymentEventsAsync(deploymentId, cancellationToken);
+            var events = await _apiClient.GetDeploymentEventsAsync(organizationId, deploymentNumber, cancellationToken);
             if (events is { Count: > 0 })
             {
                 var lastEvent = events[^1];
@@ -258,7 +299,7 @@ public sealed partial class CliApplication
         {
             try
             {
-                var logs = await _apiClient.GetDeploymentLogsAsync(deploymentId, cancellationToken);
+                var logs = await _apiClient.GetDeploymentLogsAsync(organizationId, deploymentNumber, cancellationToken);
                 if (logs is { Count: > 0 })
                 {
                     var builtServices = new HashSet<string>(StringComparer.Ordinal);
@@ -412,9 +453,13 @@ public sealed partial class CliApplication
         }
     }
 
-    private void PrintDeployment(DeploymentResponse deployment)
+    private void PrintDeployment(DeploymentResponse deployment, bool diagnostics = false)
     {
-        _console.WriteLine($"Deployment: {deployment.Id}");
+        _console.WriteLine($"Deployment: {deployment.Number}");
+        if (diagnostics)
+        {
+            _console.WriteLine($"Deployment ID (diagnostic correlation): {deployment.Id}");
+        }
         _console.WriteLine($"App: {deployment.AppId}");
         _console.WriteLine($"Status: {deployment.Status}");
         PrintDeploymentFailure(deployment);
