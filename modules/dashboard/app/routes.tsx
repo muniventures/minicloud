@@ -15,6 +15,7 @@ import { DeploymentsModule } from "./modules/Deployments/DeploymentsModule";
 import { OnboardingModule } from "./modules/Onboarding/OnboardingModule";
 import { SignInModule } from "./modules/Auth/SignInModule";
 import { AccountFlowForm } from "./modules/Auth/AccountFlowForm";
+import { ProviderContinuationModule } from "./modules/Auth/ProviderContinuationModule";
 import { TeamSettingsModule } from "./modules/Settings/TeamSettingsModule";
 import { CliLoginModule } from "./modules/CliLogin/CliLoginModule";
 import { SetupModule } from "./modules/Setup/SetupModule";
@@ -33,6 +34,7 @@ export const routes: RouteObject[] = [
   },
   { path: "/onboarding", element: <OnboardingModule /> },
   { path: "/cli/login", element: <CliLoginModule /> },
+  { path: "/sign-in/continue", element: <ProviderContinuationModule /> },
   {
     element: <AppShell />,
     children: [

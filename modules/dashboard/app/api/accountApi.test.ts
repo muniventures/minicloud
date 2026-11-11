@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiDownload, apiRequest, apiUrl, setCsrfToken, subscribeAuthFailures } from "./apiClient";
-import { safeReturnPath, startAccountFlow, submitAccountFlow, validateFlow } from "./accountApi";
-import { browserFlow, jsonResponse } from "../test/accountFixtures";
+import { parseProviderContinuation, safeReturnPath, startAccountFlow, startProviderRedirect, submitAccountFlow, validateFlow } from "./accountApi";
+import { browserFlow, googleFlow, googleUrl, jsonResponse } from "../test/accountFixtures";
 
 beforeEach(() => setCsrfToken(null));
 afterEach(() => vi.unstubAllGlobals());
@@ -69,6 +69,43 @@ describe("browser account transport", () => {
       expect(() => validateFlow({ ...flow, ui: { ...flow.ui, action } }, "login")).toThrow();
     }
     expect(() => validateFlow({ ...flow, kind: "settings" }, "login")).toThrow();
+  });
+});
+
+describe("optional Google provider transport", () => {
+  it("accepts only the fixed provider action for the same flow", () => {
+    const flow = googleFlow();
+    expect(validateFlow(flow, "login")).toBe(flow);
+    for (const action of ["https://evil.test/api/account/flows/login/oidc?flow=" + flow.id, "/api/account/flows/login?flow=" + flow.id,
+      "/api/account/flows/login/oidc?flow=00000000-2222-4333-8444-555555555555"]) {
+      expect(() => validateFlow({ ...flow, ui: { ...flow.ui, providers: [{ id: "google", action, method: "POST" }] } }, "login")).toThrow();
+    }
+    expect(() => validateFlow({ ...flow, ui: { ...flow.ui, providers: [{ ...flow.ui.providers![0], id: "github" }] } }, "login")).toThrow();
+  });
+
+  it("submits only flow CSRF and provider, then returns only an allowlisted HTTPS provider URL", async () => {
+    const fetcher = vi.fn().mockResolvedValue(jsonResponse({ provider: "google", redirectUrl: googleUrl }));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(startProviderRedirect(googleFlow(), "google", "/cli/login?session=request-1")).resolves.toBe(googleUrl);
+    const [url, init] = fetcher.mock.calls[0];
+    expect(url).toBe(apiUrl(`/api/account/flows/login/oidc?flow=${googleFlow().id}&returnTo=%2Fcli%2Flogin%3Fsession%3Drequest-1`));
+    expect(JSON.parse(init.body)).toEqual({ csrf_token: "upstream-csrf", provider: "google" });
+    expect(init.headers).not.toHaveProperty("X-Minicloud-CSRF");
+    for (const redirectUrl of ["http://accounts.google.com/o/oauth2/v2/auth", "https://evil.test/o/oauth2/v2/auth",
+      "https://accounts.google.com.evil.test/o/oauth2/v2/auth", "https://user@accounts.google.com/o/oauth2/v2/auth",
+      "https://accounts.google.com:8443/o/oauth2/v2/auth", "javascript:alert(1)"]) {
+      fetcher.mockResolvedValueOnce(jsonResponse({ provider: "google", redirectUrl }));
+      await expect(startProviderRedirect(googleFlow(), "google", "/apps")).rejects.toThrow();
+    }
+    await expect(startProviderRedirect(browserFlow(), "google", "/apps")).rejects.toThrow();
+  });
+
+  it("parses callback continuations without trusting their return target or flow id", () => {
+    expect(parseProviderContinuation(new URLSearchParams("result=success&kind=login&returnTo=%2Fcli%2Flogin%3Fsession%3Dr1")))
+      .toEqual({ result: "success", kind: "login", flowId: null, returnTo: "/cli/login?session=r1" });
+    expect(parseProviderContinuation(new URLSearchParams("result=other&kind=admin&returnTo=https%3A%2F%2Fevil.test&flow=..%2Fadmin")))
+      .toEqual({ result: "failed", kind: "login", flowId: null, returnTo: "/apps" });
+    expect(safeReturnPath("/sign-in/continue?result=success")).toBe("/apps");
   });
 });
 

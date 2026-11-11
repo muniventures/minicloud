@@ -2,15 +2,16 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { AuthContext } from "../../core/auth/AuthProvider";
-import { accountCapabilities, accountSession, authFixture, browserFlow, jsonResponse } from "../../test/accountFixtures";
+import { accountCapabilities, accountSession, authFixture, browserFlow, googleFlow, googleUrl, jsonResponse } from "../../test/accountFixtures";
 import { AccountFlowForm } from "./AccountFlowForm";
 import { routes } from "../../routes";
 import { setCsrfToken } from "../../api/apiClient";
+import { browserNavigation } from "../../api/accountApi";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); setCsrfToken(null); });
-function mount(kind: "login" | "settings" | "recovery" = "login", recovery = false, google = false) {
+function mount(kind: "login" | "settings" | "recovery" = "login", recovery = false, google = false, returnTo?: string) {
   const auth = authFixture({ capabilities: { ...accountCapabilities, emailRecovery: recovery, google } });
-  render(<AuthContext.Provider value={auth}><MemoryRouter><AccountFlowForm kind={kind} /></MemoryRouter></AuthContext.Provider>);
+  render(<AuthContext.Provider value={auth}><MemoryRouter><AccountFlowForm kind={kind} returnTo={returnTo} /></MemoryRouter></AuthContext.Provider>);
   return auth;
 }
 
@@ -116,5 +117,44 @@ describe("account browser forms", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save password" }));
     expect(await screen.findByText("Password updated.")).toBeInTheDocument();
     expect(fetcher.mock.calls[1][1].headers).toHaveProperty("X-Minicloud-CSRF", "synthetic-csrf");
+  });
+
+  it("hides Google unless both runtime capabilities and the flow expose the provider", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ flow: googleFlow(), session: null })));
+    mount("login", false, false);
+    await screen.findByLabelText("Email");
+    expect(screen.queryByText(/Google/)).not.toBeInTheDocument();
+    cleanup();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ flow: browserFlow(), session: null })));
+    mount("login", false, true);
+    await screen.findByLabelText("Email");
+    expect(screen.queryByText(/Google/)).not.toBeInTheDocument();
+  });
+
+  it("navigates to the validated provider only after an explicit click", async () => {
+    const assign = vi.spyOn(browserNavigation, "assign").mockImplementation(() => {});
+    const fetcher = vi.fn().mockResolvedValueOnce(jsonResponse({ flow: googleFlow(), session: null }))
+      .mockResolvedValueOnce(jsonResponse({ provider: "google", redirectUrl: googleUrl }));
+    vi.stubGlobal("fetch", fetcher);
+    mount("login", false, true, "/cli/login?session=request-1");
+    const button = await screen.findByRole("button", { name: "Continue with Google" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(assign).not.toHaveBeenCalled();
+    fireEvent.click(button);
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(googleUrl));
+    expect(fetcher.mock.calls[1][0]).toContain("/api/account/flows/login/oidc?flow=");
+    expect(fetcher.mock.calls[1][0]).toContain("returnTo=%2Fcli%2Flogin%3Fsession%3Drequest-1");
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual({ csrf_token: "upstream-csrf", provider: "google" });
+  });
+
+  it("never navigates to an unexpected provider destination", async () => {
+    const assign = vi.spyOn(browserNavigation, "assign").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({ flow: googleFlow("settings"), session: null }))
+      .mockResolvedValueOnce(jsonResponse({ provider: "google", redirectUrl: "https://evil.test/o/oauth2/v2/auth" })));
+    setCsrfToken("synthetic-csrf");
+    mount("settings", false, true);
+    fireEvent.click(await screen.findByRole("button", { name: "Link Google account" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(assign).not.toHaveBeenCalled();
   });
 });

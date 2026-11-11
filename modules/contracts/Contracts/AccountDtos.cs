@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Minicloud.Common.Contracts;
 
 public sealed record AccountCapabilitiesResponse(
@@ -26,7 +28,19 @@ public sealed record AccountFlowUi(
     string Action,
     string Method,
     IReadOnlyList<AccountFlowNode> Nodes,
-    IReadOnlyList<AccountFlowMessage> Messages);
+    IReadOnlyList<AccountFlowMessage> Messages,
+    // Omitted unless an enabled optional provider is offered by this flow.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<AccountFlowProvider>? Providers = null);
+
+public sealed record AccountFlowProvider(
+    string Id,
+    string Action,
+    string Method);
+
+public sealed record AccountProviderRedirectResponse(
+    string Provider,
+    string RedirectUrl);
 
 public sealed record AccountFlowNode(
     string Group,
