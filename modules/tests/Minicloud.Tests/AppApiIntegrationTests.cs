@@ -181,7 +181,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         var accepted = await client.PostAsJsonAsync("/api/deployments", request);
         Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
         var created = (await accepted.Content.ReadFromJsonAsync<DeploymentCreateResponse>())!;
-        var saved = await client.GetFromJsonAsync<DeploymentResponse>("/api/deployments/" + created.Id);
+        var saved = await client.GetFromJsonAsync<DeploymentResponse>(created.StatusUrl);
         Assert.Equal(new StorageMountRequest(20, "/app/uploads", 1000, 1000), Assert.Single(saved!.Services).Storage!["uploads"]);
     }
 
@@ -235,26 +235,26 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
     {
         var seed = await SeedAsync("org_cancel_api", "app_cancel_api", DateTimeOffset.UtcNow);
         var other = await SeedAsync("org_cancel_other", "app_cancel_other", DateTimeOffset.UtcNow);
-        await using (var scope = _factory!.Services.CreateAsyncScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
-            db.Deployments.Add(new Deployment { Id = "dep_cancel_api", OrganizationId = seed.OrganizationId, AppId = seed.AppId,
-                Status = DeploymentStatus.Queued, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow });
-            await db.SaveChangesAsync();
-        }
+        var number = await SeedDeploymentAsync("dep_cancel_api", seed, DeploymentStatus.Queued);
+        var cancel = DeploymentPath(seed.OrganizationId, number, "/cancel");
         using var client = _factory!.CreateClient();
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsync("/api/deployments/dep_cancel_api/cancel", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsync(cancel, null)).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", other.ApiKeyToken);
-        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync("/api/deployments/dep_cancel_api/cancel", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync(cancel, null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync(DeploymentPath(other.OrganizationId, number, "/cancel"), null)).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
-        var result = await client.PostAsync("/api/deployments/dep_cancel_api/cancel", null);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync("/api/deployments/dep_cancel_api/cancel?organizationId=" + seed.OrganizationId, null)).StatusCode);
+        var result = await client.PostAsync(cancel, null);
         Assert.Equal(HttpStatusCode.OK, result.StatusCode);
-        Assert.True((await result.Content.ReadFromJsonAsync<DeploymentCancellationResponse>())!.CancellationRequested);
-        var deployment = await client.GetFromJsonAsync<DeploymentResponse>("/api/deployments/dep_cancel_api");
+        var acknowledgement = (await result.Content.ReadFromJsonAsync<DeploymentCancellationResponse>())!;
+        Assert.True(acknowledgement.CancellationRequested);
+        Assert.Equal(("dep_cancel_api", number), (acknowledgement.Id, acknowledgement.Number));
+        var deployment = await client.GetFromJsonAsync<DeploymentResponse>(DeploymentPath(seed.OrganizationId, number));
         Assert.Equal("canceled", deployment!.Status);
+        Assert.Equal(number, deployment.Number);
         Assert.NotNull(deployment.CancellationRequestedAt);
         Assert.NotNull(deployment.CompletedAt);
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/deployments/dep_cancel_api/cancel", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync(cancel, null)).StatusCode);
     }
 
     [Fact]
@@ -267,17 +267,18 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         using var response = await client.PostAsJsonAsync("/api/deployments/preparations", start);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var pending = (await response.Content.ReadFromJsonAsync<DeploymentCreateResponse>())!;
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/deployments/{pending.Id}/cancel", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync(DeploymentPath(seed.OrganizationId, pending.Number, "/cancel"), null)).StatusCode);
 
-        var deployment = await client.GetFromJsonAsync<DeploymentResponse>($"/api/deployments/{pending.Id}");
+        var deployment = await client.GetFromJsonAsync<DeploymentResponse>(pending.StatusUrl);
         Assert.Equal("canceled", deployment!.Status);
+        Assert.Equal(pending.Number, deployment.Number);
         Assert.NotNull(deployment.CancellationRequestedAt);
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync($"/api/deployments/preparations/{pending.Id}",
             new UpdateDeploymentPreparationRequest(seed.AppId, "heartbeat"))).StatusCode);
         var submit = new CreateDeploymentRequest(seed.AppId, "none", null,
             [new DeploymentServiceRequest("api", "example/api:latest", 8080, true, "/", "/health")], PreparationId: pending.Id);
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/deployments", submit)).StatusCode);
-        var redispatch = await client.PostAsync($"/api/deployments/{pending.Id}/dispatch", null);
+        var redispatch = await client.PostAsync(DeploymentPath(seed.OrganizationId, pending.Number, "/dispatch"), null);
         Assert.Equal(HttpStatusCode.Conflict, redispatch.StatusCode);
         using var redispatchError = JsonDocument.Parse(await redispatch.Content.ReadAsStringAsync());
         Assert.Equal("preparation_not_submitted",
@@ -310,7 +311,8 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
 
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
-        var response = await client.PostAsync($"/api/deployments/{deploymentId}/dispatch", null);
+        var number = await NumberOfAsync(deploymentId);
+        var response = await client.PostAsync(DeploymentPath(seed.OrganizationId, number, "/dispatch"), null);
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         using var error = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -320,6 +322,61 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         var deployment = await verifyDb.Deployments.SingleAsync(x => x.Id == deploymentId);
         Assert.Equal(DeploymentStatus.Deploying, deployment.Status);
         Assert.Equal("synthetic-active-owner", deployment.OwnershipToken);
+    }
+
+    [Fact]
+    public async Task DeploymentNumbers_AreOrganizationScopedStableAndResolveEveryNumberRoute()
+    {
+        var first = await SeedAsync("org_numbers_a", "app_numbers_a", DateTimeOffset.UtcNow);
+        var second = await SeedAsync("org_numbers_b", "app_numbers_b", DateTimeOffset.UtcNow);
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", first.ApiKeyToken);
+        var start = new StartDeploymentPreparationRequest(first.AppId, Guid.NewGuid().ToString("D"), ["api"]);
+        var prepared = await client.PostAsJsonAsync("/api/deployments/preparations", start);
+        Assert.Equal(HttpStatusCode.Created, prepared.StatusCode);
+        var pending = (await prepared.Content.ReadFromJsonAsync<DeploymentCreateResponse>())!;
+        var today = DateTime.UtcNow.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal(today + ".1", pending.Number);
+        Assert.Equal(DeploymentPath(first.OrganizationId, pending.Number), pending.StatusUrl);
+        Assert.Equal(pending.StatusUrl, prepared.Headers.Location!.OriginalString);
+        var replay = await client.PostAsJsonAsync("/api/deployments/preparations", start);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        var replayed = (await replay.Content.ReadFromJsonAsync<DeploymentCreateResponse>())!;
+        Assert.Equal((pending.Id, pending.Number), (replayed.Id, replayed.Number));
+
+        var submitted = await client.PostAsJsonAsync("/api/deployments", new CreateDeploymentRequest(first.AppId, "none", null,
+            [new DeploymentServiceRequest("api", "example/api:latest", 8080, true, "/", "/health")], PreparationId: pending.Id));
+        Assert.Equal(HttpStatusCode.Created, submitted.StatusCode);
+        Assert.Equal(pending.Number, (await submitted.Content.ReadFromJsonAsync<DeploymentCreateResponse>())!.Number);
+        var direct = await client.PostAsJsonAsync("/api/deployments", new CreateDeploymentRequest(first.AppId, "none", null,
+            [new DeploymentServiceRequest("api", "example/api:latest", 8080, true, "/", "/health")]));
+        Assert.Equal(HttpStatusCode.Created, direct.StatusCode);
+        Assert.Equal(today + ".2", (await direct.Content.ReadFromJsonAsync<DeploymentCreateResponse>())!.Number);
+
+        var listed = await client.GetFromJsonAsync<DeploymentResponse[]>($"/api/deployments?organizationId={first.OrganizationId}&all=true");
+        Assert.Equal([today + ".1", today + ".2"], listed!.Select(x => x.Number).Order(StringComparer.Ordinal));
+        var detail = (await client.GetFromJsonAsync<DeploymentResponse>(pending.StatusUrl))!;
+        Assert.Equal((pending.Id, pending.Number), (detail.Id, detail.Number));
+        // The logs route is not exercised here: its runtime-log DateTimeOffset filter is PostgreSQL-only.
+        foreach (var action in new[] { "/events", "/activities" })
+        {
+            using var routed = await client.GetAsync(DeploymentPath(first.OrganizationId, pending.Number, action));
+            Assert.True(routed.IsSuccessStatusCode, action + ": " + await routed.Content.ReadAsStringAsync());
+        }
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/deployments/{pending.Number}")).StatusCode);
+        foreach (var malformed in new[] { pending.Id, today + ".01", today + ".0", "+" + today + ".1", today + ".1 ", "99999999.1" })
+        {
+            Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(DeploymentPath(first.OrganizationId, malformed))).StatusCode);
+        }
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(DeploymentPath(second.OrganizationId, pending.Number))).StatusCode);
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", second.ApiKeyToken);
+        var otherNumber = await SeedDeploymentAsync("dep_numbers_b", second, DeploymentStatus.Queued);
+        Assert.Equal(today + ".1", otherNumber);
+        var other = (await client.GetFromJsonAsync<DeploymentResponse>(DeploymentPath(second.OrganizationId, otherNumber)))!;
+        Assert.Equal("dep_numbers_b", other.Id);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(DeploymentPath(first.OrganizationId, pending.Number))).StatusCode);
     }
 
     [Fact]
@@ -379,7 +436,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         }
         var closed = await client.PostAsJsonAsync($"/api/deployments/preparations/{pending.Id}", new UpdateDeploymentPreparationRequest(seed.AppId, action == "expired" ? "heartbeat" : action));
         Assert.Equal(action == "expired" ? HttpStatusCode.Conflict : HttpStatusCode.NoContent, closed.StatusCode);
-        var detail = (await client.GetFromJsonAsync<DeploymentResponse>($"/api/deployments/{pending.Id}"))!;
+        var detail = (await client.GetFromJsonAsync<DeploymentResponse>(pending.StatusUrl))!;
         Assert.Equal(expected, detail.Status);
         Assert.Equal(failure, detail.FailureCode);
         Assert.NotNull(detail.CompletedAt);
@@ -734,12 +791,13 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         }
         using var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var number = await NumberOfAsync(id);
 
         async Task<DeploymentResponse[]> ReadResponses()
         {
             var list = await client.GetFromJsonAsync<DeploymentResponse[]>($"/api/deployments?organizationId={seed.OrganizationId}&all=true");
-            var detail = await client.GetFromJsonAsync<DeploymentResponse>($"/api/deployments/{id}");
-            using var refresh = await client.PostAsync($"/api/deployments/{id}/refresh", null);
+            var detail = await client.GetFromJsonAsync<DeploymentResponse>(DeploymentPath(seed.OrganizationId, number));
+            using var refresh = await client.PostAsync(DeploymentPath(seed.OrganizationId, number, "/refresh"), null);
             refresh.EnsureSuccessStatusCode();
             return [Assert.Single(list!), detail!, (await refresh.Content.ReadFromJsonAsync<DeploymentResponse>())!];
         }
@@ -753,7 +811,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         }
 
         var beforeDispatch = DateTimeOffset.UtcNow;
-        using var dispatched = await client.PostAsync($"/api/deployments/{id}/dispatch", null);
+        using var dispatched = await client.PostAsync(DeploymentPath(seed.OrganizationId, number, "/dispatch"), null);
         dispatched.EnsureSuccessStatusCode();
         var queued = (await dispatched.Content.ReadFromJsonAsync<DeploymentResponse>())!;
         Assert.InRange(queued.RequeuedAt!.Value, beforeDispatch, DateTimeOffset.UtcNow);
@@ -761,6 +819,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         {
             Assert.Equal(createdAt, response.CreatedAt);
             Assert.Equal(queued.RequeuedAt, response.RequeuedAt);
+            Assert.Equal(number, response.Number);
             Assert.Equal("queued", response.Status);
             Assert.Null(response.StartedAt);
             Assert.Null(response.CompletedAt);
@@ -841,7 +900,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
         var created = await createResponse.Content.ReadFromJsonAsync<DeploymentCreateResponse>();
         Assert.NotNull(created);
-        var deployment = await client.GetFromJsonAsync<DeploymentResponse>($"/api/deployments/{created!.Id}");
+        var deployment = await client.GetFromJsonAsync<DeploymentResponse>(created!.StatusUrl);
         var service = Assert.Single(deployment!.Services);
         Assert.Equal($"minicloud/app-api-local-image-web:{created.Id}", service.Image);
         Assert.DoesNotContain("ghcr.io", service.Image);
@@ -925,6 +984,29 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         }
 
         return new SeedResult(organizationId, appId, apiKeyToken.Token, applicationId);
+    }
+
+    private static string DeploymentPath(string organizationId, string number, string action = "") =>
+        $"/api/deployments/{number}{action}?organizationId={Uri.EscapeDataString(organizationId)}";
+
+    private async Task<string> NumberOfAsync(string deploymentId)
+    {
+        await using var scope = _factory!.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+        return await db.Deployments.Where(x => x.Id == deploymentId).Select(x => x.Number).SingleAsync();
+    }
+
+    private async Task<string> SeedDeploymentAsync(string id, SeedResult seed, DeploymentStatus status, DateTimeOffset? createdAt = null)
+    {
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+            var now = createdAt ?? DateTimeOffset.UtcNow;
+            db.Deployments.Add(new Deployment { Id = id, OrganizationId = seed.OrganizationId, AppId = seed.AppId,
+                Status = status, CreatedAt = now, UpdatedAt = now });
+            await db.SaveChangesAsync();
+        }
+        return await NumberOfAsync(id);
     }
 
     private sealed record SeedResult(string OrganizationId, string AppId, string ApiKeyToken, string ApplicationId);

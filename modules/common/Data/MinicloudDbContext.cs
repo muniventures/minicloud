@@ -4,7 +4,7 @@ using System.Text;
 
 namespace Minicloud.Common.Data;
 
-public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> options) : DbContext(options)
+public sealed partial class MinicloudDbContext(DbContextOptions<MinicloudDbContext> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
     public DbSet<BrowserSession> BrowserSessions => Set<BrowserSession>();
@@ -25,6 +25,7 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
     public DbSet<RegistryGarbageCandidate> RegistryGarbageCandidates => Set<RegistryGarbageCandidate>();
     public DbSet<RegistryMaintenanceState> RegistryMaintenanceStates => Set<RegistryMaintenanceState>();
     public DbSet<Deployment> Deployments => Set<Deployment>();
+    public DbSet<DeploymentNumberCounter> DeploymentNumberCounters => Set<DeploymentNumberCounter>();
     public DbSet<DeploymentService> DeploymentServices => Set<DeploymentService>();
     public DbSet<DeploymentEvent> DeploymentEvents => Set<DeploymentEvent>();
     public DbSet<DeploymentLog> DeploymentLogs => Set<DeploymentLog>();
@@ -464,9 +465,19 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
             entity.Property(x => x.ExchangedAt).HasColumnName("exchanged_at");
         });
 
+        modelBuilder.Entity<DeploymentNumberCounter>(entity =>
+        {
+            entity.ToTable("deployment_number_counters", table => table.HasCheckConstraint(
+                "ck_deployment_number_counters_positive", "last_value >= 1"));
+            // No organization FK: the counter is allocated before EF inserts an organization created in the same save.
+            entity.HasKey(x => new { x.OrganizationId, x.UtcDate });
+        });
+
         modelBuilder.Entity<Deployment>(entity =>
         {
             entity.ToTable("deployments");
+            entity.Property(x => x.Number).HasMaxLength(Minicloud.Common.Contracts.DeploymentNumber.MaxLength).IsRequired();
+            entity.HasIndex(x => new { x.OrganizationId, x.Number }).IsUnique();
             entity.Property(x => x.CancellationRequestedAt).HasColumnName("cancellation_requested_at").IsConcurrencyToken();
             entity.Property(x => x.CancellationRequestedBy).HasColumnName("cancellation_requested_by");
             entity.HasIndex(x => new { x.OrganizationId, x.CreatedAt });

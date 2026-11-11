@@ -80,7 +80,8 @@ public sealed class AppSummaryReader(MinicloudDbContext db)
         }
         var deployments = await latest.Select(d => new Deployment
         {
-            Id = d.Id, AppId = d.AppId, Status = d.Status, WebsiteUrl = d.WebsiteUrl, CompletedAt = d.CompletedAt
+            Id = d.Id, Number = d.Number, OrganizationId = d.OrganizationId, AppId = d.AppId,
+            Status = d.Status, WebsiteUrl = d.WebsiteUrl, CompletedAt = d.CompletedAt
         }).ToListAsync(ct);
         var domains = await db.Domains.AsNoTracking()
             .Where(d => d.OrganizationId == organizationId && ids.Contains(d.AppId) && d.Status != DomainBindingService.StatusDisabled)

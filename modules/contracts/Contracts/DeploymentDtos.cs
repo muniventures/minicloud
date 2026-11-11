@@ -2,7 +2,7 @@
 
 namespace Minicloud.Common.Contracts;
 
-public sealed record DeploymentCancellationResponse(string Id, bool CancellationRequested);
+public sealed record DeploymentCancellationResponse(string Id, string Number, bool CancellationRequested);
 
 public sealed record CreateDeploymentRequest(
     string AppId,
@@ -32,6 +32,7 @@ public sealed record DeploymentServiceRequest(
 
 public sealed record DeploymentCreateResponse(
     string Id,
+    string Number,
     string AppId,
     string Status,
     string StatusUrl,
@@ -43,6 +44,7 @@ public sealed record DeploymentCreateResponse(
 
 public sealed record DeploymentResponse(
     string Id,
+    string Number,
     string AppId,
     string OrganizationId,
     string Database,

@@ -346,7 +346,7 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
         var preparation = await SuccessAsync<DeploymentCreateResponse>(await client.PostAsJsonAsync("/api/deployments/preparations",
             new StartDeploymentPreparationRequest(app.Id, Guid.NewGuid().ToString("D"), ["api"])));
         if (terminalStatus == "canceled")
-            Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/deployments/{preparation.Id}/cancel", null)).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/deployments/{preparation.Number}/cancel?organizationId={Uri.EscapeDataString(OrganizationId)}", null)).StatusCode);
         else
             Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsJsonAsync($"/api/deployments/preparations/{preparation.Id}",
                 new UpdateDeploymentPreparationRequest(app.Id, "failed"))).StatusCode);

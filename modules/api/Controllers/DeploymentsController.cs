@@ -248,20 +248,11 @@ public sealed class DeploymentsController : ControllerBase
             // minicloud-worker claims it via PostgreSQL SKIP LOCKED. No GitHub dispatch.
             var enqueue = await deploymentOrchestrator.EnqueueAsync(appRecord.Organization, appRecord, deployment, request.PostgresPassword, desiredServices, defaultBindings, cancellationToken);
             if (preparation is null) { db.Deployments.Add(deployment); }
-            return Results.Created($"/api/deployments/{deployment.Id}", new DeploymentCreateResponse(
-                deployment.Id,
-                deployment.AppId,
-                ControlPlaneValidation.ToWireValue(deployment.Status),
-                $"/api/deployments/{deployment.Id}",
-                deployment.WebsiteUrl,
-                deployment.CreatedAt,
-                enqueue.GeneratedPostgresPassword,
-                appRecord.ApplicationId,
-                appRecord.Id));
+            return new DeploymentCreated(deployment, enqueue.GeneratedPostgresPassword);
         }
         try
         {
-            return await ImagePublicationsController.Handle(() => preparations.LockedAsync(appRecord.Id, async () =>
+            var result = await ImagePublicationsController.Handle(() => preparations.LockedAsync(appRecord.Id, async () =>
             {
                 var result = await CreateCore();
                 // A rejected admission must not commit a newly selected plan or freeze its mapping.
@@ -269,8 +260,24 @@ public sealed class DeploymentsController : ControllerBase
                     throw new PlanAdmissionRejectedException(result);
                 return result;
             }, cancellationToken));
+            if (result is not DeploymentCreated created) { return result; }
+            // The number is allocated with the insert, so links are built only after commit.
+            var deployment = created.Deployment;
+            var location = DeploymentLinks.ApiPath(deployment.OrganizationId, deployment.Number);
+            return Results.Created(location, new DeploymentCreateResponse(
+                deployment.Id,
+                deployment.Number,
+                deployment.AppId,
+                ControlPlaneValidation.ToWireValue(deployment.Status),
+                location,
+                deployment.WebsiteUrl,
+                deployment.CreatedAt,
+                created.GeneratedPostgresPassword,
+                appRecord.ApplicationId,
+                appRecord.Id));
         }
         catch (PlanAdmissionRejectedException ex) { return ex.Result; }
+        catch (DeploymentNumberExhaustedException) { return EndpointResults.DeploymentNumberExhausted(); }
         catch (ProviderCatalogException ex)
         { return EndpointResults.Problem(ex.Code, ex.Message, StatusCodes.Status400BadRequest); }
         catch (SecretStoreUnavailableException)
@@ -284,6 +291,13 @@ public sealed class DeploymentsController : ControllerBase
     private sealed class PlanAdmissionRejectedException(IResult result) : Exception
     {
         public IResult Result { get; } = result;
+    }
+
+    private sealed class DeploymentCreated(Deployment deployment, string? generatedPostgresPassword) : IResult
+    {
+        public Deployment Deployment { get; } = deployment;
+        public string? GeneratedPostgresPassword { get; } = generatedPostgresPassword;
+        public Task ExecuteAsync(HttpContext httpContext) => throw new InvalidOperationException("Deployment creation must be mapped to its response.");
     }
 
     private static async Task<ValidationResult> FinalizeArtifactBackedServicesAsync(
@@ -336,45 +350,40 @@ public sealed class DeploymentsController : ControllerBase
     private static string ArtifactImage(MinicloudApp app, Deployment deployment, DeploymentService service) =>
         $"minicloud/{app.Slug}-{service.Name}:{deployment.Id}".ToLowerInvariant();
 
-    [HttpGet("{deploymentId}")]
-    public async Task<IResult> GetDeployment([FromRoute] string deploymentId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] IConsoleUrlProvider consoleUrls, CancellationToken cancellationToken)
+    [HttpGet("{deploymentNumber}")]
+    public async Task<IResult> GetDeployment([FromRoute] string deploymentNumber, [FromQuery] string? organizationId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] IConsoleUrlProvider consoleUrls, CancellationToken cancellationToken)
     {
-        var principal = RequirePrincipal(HttpContext);
-        var deployment = await db.Deployments
+        var lookup = await DeploymentNumberResolver.ResolveAsync(HttpContext, authorization, db.Deployments
             .Include(x => x.App)
             .ThenInclude(x => x.Domains)
             .Include(x => x.Services)
-            .Include(x => x.Events.Where(e => e.Message == DeploymentLifecycleService.ManuallyQueuedMessage))
-            .SingleOrDefaultAsync(x => x.Id == deploymentId, cancellationToken);
-        if (deployment is null)
+            .Include(x => x.Events.Where(e => e.Message == DeploymentLifecycleService.ManuallyQueuedMessage)),
+            organizationId, deploymentNumber, OrganizationAction.ReadDeployments, cancellationToken);
+        if (lookup.Error is not null)
         {
-            return EndpointResults.NotFound("deployment_not_found", "Deployment was not found.");
+            return lookup.Error;
         }
 
-        if (!await authorization.CanAccessOrganizationAsync(principal.ToActorIdentity(), deployment.OrganizationId, OrganizationAction.ReadDeployments, cancellationToken))
-        {
-            return EndpointResults.Forbidden();
-        }
-
-        return Results.Ok(deployment.ToResponse(consoleUrls.GetConsoleBaseUrl()));
+        return Results.Ok(lookup.Deployment!.ToResponse(consoleUrls.GetConsoleBaseUrl()));
     }
 
-    [HttpPost("{deploymentId}/dispatch")]
-    public async Task<IResult> DispatchDeployment([FromRoute] string deploymentId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] DeploymentLifecycleService deploymentLifecycle, [FromServices] DeploymentServiceSetService serviceSets, [FromServices] DomainBindingService domainBindings, [FromServices] DeploymentOrchestrator deploymentOrchestrator, [FromServices] IConsoleUrlProvider consoleUrls, [FromServices] ImagePublicationService imagePublications, [FromServices] ProviderCatalogService catalog, CancellationToken cancellationToken)
+    [HttpPost("{deploymentNumber}/dispatch")]
+    public async Task<IResult> DispatchDeployment([FromRoute] string deploymentNumber, [FromQuery] string? organizationId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] DeploymentLifecycleService deploymentLifecycle, [FromServices] DeploymentServiceSetService serviceSets, [FromServices] DomainBindingService domainBindings, [FromServices] DeploymentOrchestrator deploymentOrchestrator, [FromServices] IConsoleUrlProvider consoleUrls, [FromServices] ImagePublicationService imagePublications, [FromServices] ProviderCatalogService catalog, CancellationToken cancellationToken)
     {
         var principal = RequirePrincipal(HttpContext);
-        var deployment = await db.Deployments
+        var lookup = await DeploymentNumberResolver.ResolveAsync(HttpContext, authorization, db.Deployments
             .Include(x => x.App)
             .ThenInclude(x => x.Organization)
             .Include(x => x.App)
             .ThenInclude(x => x.Domains)
-            .Include(x => x.Services)
-            .SingleOrDefaultAsync(x => x.Id == deploymentId, cancellationToken);
-        if (deployment is null)
+            .Include(x => x.Services),
+            organizationId, deploymentNumber, OrganizationAction.CreateDeployments, cancellationToken);
+        if (lookup.Error is not null)
         {
-            return EndpointResults.NotFound("deployment_not_found", "Deployment was not found.");
+            return lookup.Error;
         }
 
+        var deployment = lookup.Deployment!;
         if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), deployment.AppId, OrganizationAction.CreateDeployments, cancellationToken))
         {
             return EndpointResults.Forbidden();
@@ -428,40 +437,44 @@ public sealed class DeploymentsController : ControllerBase
         catch (SecretStoreUnavailableException) { return EndpointResults.Problem("secret_store_unavailable", "Provider credentials are temporarily unavailable.", StatusCodes.Status503ServiceUnavailable); }
     }
 
-    [HttpPost("{deploymentId}/cancel")]
-    public async Task<IResult> CancelDeployment([FromRoute] string deploymentId,
+    [HttpPost("{deploymentNumber}/cancel")]
+    public async Task<IResult> CancelDeployment([FromRoute] string deploymentNumber, [FromQuery] string? organizationId,
+        [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] DeploymentCancellationService cancellations, CancellationToken cancellationToken)
     {
-        var result = await cancellations.RequestAsync(RequirePrincipal(HttpContext), deploymentId, cancellationToken);
+        // Cancellation keeps its resource-hiding 404 for inaccessible organizations.
+        var lookup = await DeploymentNumberResolver.ResolveAsync(HttpContext, authorization, db.Deployments.AsNoTracking(),
+            organizationId, deploymentNumber, OrganizationAction.CreateDeployments, cancellationToken, hideUnauthorized: true);
+        if (lookup.Error is not null)
+        {
+            return lookup.Error;
+        }
+
+        var deployment = lookup.Deployment!;
+        var result = await cancellations.RequestAsync(RequirePrincipal(HttpContext), deployment.Id, cancellationToken);
         return result.Code is not null
             ? EndpointResults.Problem(result.Code, result.Status == 404 ? "Deployment was not found." : "Deployment has already finished.", result.Status)
-            : Results.Json(new DeploymentCancellationResponse(deploymentId, true), statusCode: result.Status);
+            : Results.Json(new DeploymentCancellationResponse(deployment.Id, deployment.Number, true), statusCode: result.Status);
     }
 
-    [HttpPost("{deploymentId}/refresh")]
-    public async Task<IResult> RefreshDeployment([FromRoute] string deploymentId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] IConsoleUrlProvider consoleUrls, CancellationToken cancellationToken)
+    [HttpPost("{deploymentNumber}/refresh")]
+    public async Task<IResult> RefreshDeployment([FromRoute] string deploymentNumber, [FromQuery] string? organizationId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, [FromServices] IConsoleUrlProvider consoleUrls, CancellationToken cancellationToken)
     {
-        var principal = RequirePrincipal(HttpContext);
-        var deployment = await db.Deployments
+        var lookup = await DeploymentNumberResolver.ResolveAsync(HttpContext, authorization, db.Deployments
             .Include(x => x.App)
             .ThenInclude(x => x.Organization)
             .Include(x => x.App)
             .ThenInclude(x => x.Domains)
             .Include(x => x.Services)
-            .Include(x => x.Events.Where(e => e.Message == DeploymentLifecycleService.ManuallyQueuedMessage))
-            .SingleOrDefaultAsync(x => x.Id == deploymentId, cancellationToken);
-        if (deployment is null)
+            .Include(x => x.Events.Where(e => e.Message == DeploymentLifecycleService.ManuallyQueuedMessage)),
+            organizationId, deploymentNumber, OrganizationAction.ReadDeployments, cancellationToken);
+        if (lookup.Error is not null)
         {
-            return EndpointResults.NotFound("deployment_not_found", "Deployment was not found.");
-        }
-
-        if (!await authorization.CanAccessOrganizationAsync(principal.ToActorIdentity(), deployment.OrganizationId, OrganizationAction.ReadDeployments, cancellationToken))
-        {
-            return EndpointResults.Forbidden();
+            return lookup.Error;
         }
 
         // T50: minicloud-worker owns lifecycle transitions; refresh reads current state.
-        return Results.Ok(deployment.ToResponse(consoleUrls.GetConsoleBaseUrl()));
+        return Results.Ok(lookup.Deployment!.ToResponse(consoleUrls.GetConsoleBaseUrl()));
     }
 
     [HttpPost("{deploymentId}/resolve-secrets")]
@@ -501,22 +514,19 @@ public sealed class DeploymentsController : ControllerBase
         }
     }
 
-    [HttpGet("{deploymentId}/events")]
-    public async Task<IResult> GetDeploymentEvents([FromRoute] string deploymentId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, CancellationToken cancellationToken)
+    [HttpGet("{deploymentNumber}/events")]
+    public async Task<IResult> GetDeploymentEvents([FromRoute] string deploymentNumber, [FromQuery] string? organizationId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, CancellationToken cancellationToken)
     {
-        var principal = RequirePrincipal(HttpContext);
-        var deployment = await db.Deployments.AsNoTracking().Include(x => x.App).SingleOrDefaultAsync(x => x.Id == deploymentId, cancellationToken);
-        if (deployment is null)
+        var lookup = await DeploymentNumberResolver.ResolveAsync(HttpContext, authorization, db.Deployments.AsNoTracking().Include(x => x.App),
+            organizationId, deploymentNumber, OrganizationAction.ReadDeployments, cancellationToken);
+        if (lookup.Error is not null)
         {
-            return EndpointResults.NotFound("deployment_not_found", "Deployment was not found.");
-        }
-        if (!await authorization.CanAccessOrganizationAsync(principal.ToActorIdentity(), deployment.OrganizationId, OrganizationAction.ReadDeployments, cancellationToken))
-        {
-            return EndpointResults.Forbidden();
+            return lookup.Error;
         }
 
+        var deployment = lookup.Deployment!;
         var eventRows = await db.DeploymentEvents
-            .Where(x => x.DeploymentId == deploymentId)
+            .Where(x => x.DeploymentId == deployment.Id)
             .ToDateTimeOffsetOrderedListAsync(db, x => x.CreatedAt, x => x.CreatedAt, descending: false, take: null, cancellationToken);
         var events = eventRows
             .Select(x => new DeploymentEventResponse(x.Id, ControlPlaneValidation.ToWireValue(x.Level), x.Message, x.MetadataJson, x.CreatedAt, deployment.App.ApplicationId, deployment.AppId))
@@ -525,18 +535,14 @@ public sealed class DeploymentsController : ControllerBase
         return Results.Ok(events);
     }
 
-    [HttpGet("{deploymentId}/activities")]
-    public async Task<IResult> GetDeploymentActivities([FromRoute] string deploymentId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, CancellationToken cancellationToken)
+    [HttpGet("{deploymentNumber}/activities")]
+    public async Task<IResult> GetDeploymentActivities([FromRoute] string deploymentNumber, [FromQuery] string? organizationId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, CancellationToken cancellationToken)
     {
-        var principal = RequirePrincipal(HttpContext);
-        var deployment = await db.Deployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deploymentId, cancellationToken);
-        if (deployment is null)
+        var lookup = await DeploymentNumberResolver.ResolveAsync(HttpContext, authorization, db.Deployments.AsNoTracking(),
+            organizationId, deploymentNumber, OrganizationAction.ReadDeployments, cancellationToken);
+        if (lookup.Error is not null)
         {
-            return EndpointResults.NotFound("deployment_not_found", "Deployment was not found.");
-        }
-        if (!await authorization.CanAccessOrganizationAsync(principal.ToActorIdentity(), deployment.OrganizationId, OrganizationAction.ReadDeployments, cancellationToken))
-        {
-            return EndpointResults.Forbidden();
+            return lookup.Error;
         }
 
         // T90: GitHub workflow polling was decommissioned. minicloud-worker owns
@@ -545,22 +551,19 @@ public sealed class DeploymentsController : ControllerBase
         return Results.Ok(Array.Empty<DeploymentActivityResponse>());
     }
 
-    [HttpGet("{deploymentId}/logs")]
-    public async Task<IResult> GetDeploymentLogs([FromRoute] string deploymentId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, CancellationToken cancellationToken)
+    [HttpGet("{deploymentNumber}/logs")]
+    public async Task<IResult> GetDeploymentLogs([FromRoute] string deploymentNumber, [FromQuery] string? organizationId, [FromServices] MinicloudDbContext db, [FromServices] ControlPlaneAuthorization authorization, CancellationToken cancellationToken)
     {
-        var principal = RequirePrincipal(HttpContext);
-        var deployment = await db.Deployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deploymentId, cancellationToken);
-        if (deployment is null)
+        var lookup = await DeploymentNumberResolver.ResolveAsync(HttpContext, authorization, db.Deployments.AsNoTracking(),
+            organizationId, deploymentNumber, OrganizationAction.ReadDeployments, cancellationToken);
+        if (lookup.Error is not null)
         {
-            return EndpointResults.NotFound("deployment_not_found", "Deployment was not found.");
-        }
-        if (!await authorization.CanAccessOrganizationAsync(principal.ToActorIdentity(), deployment.OrganizationId, OrganizationAction.ReadDeployments, cancellationToken))
-        {
-            return EndpointResults.Forbidden();
+            return lookup.Error;
         }
 
+        var deployment = lookup.Deployment!;
         var logRows = await db.DeploymentLogs
-            .Where(x => x.DeploymentId == deploymentId)
+            .Where(x => x.DeploymentId == deployment.Id)
             .ToDateTimeOffsetOrderedListAsync(db, x => x.CreatedAt, x => x.CreatedAt, descending: false, take: null, cancellationToken);
         var logs = logRows
             .Select(x => new DeploymentLogResponse(x.Id, x.Source, x.Content, x.CreatedAt))
