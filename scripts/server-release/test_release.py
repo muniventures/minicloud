@@ -62,7 +62,9 @@ class ReleaseTests(unittest.TestCase):
             path = self.root / f"modules/{component}"
             path.mkdir(parents=True)
         (self.root / "modules/worker/Dockerfile").write_text(
-            'FROM example\nARG MINICLOUD_AGENT_RID\nRUN dotnet publish -r "$MINICLOUD_AGENT_RID"\n')
+            'FROM example\nARG MINICLOUD_AGENT_RID\nRUN dotnet publish -r "$MINICLOUD_AGENT_RID"\n'
+            'COPY --from=runtime-agent /agent/linux-x64/Minicloud.RuntimeAgent /app/runtime-agent/linux-x64/minicloud-agent\n'
+            'COPY --from=runtime-agent /agent/linux-arm64/Minicloud.RuntimeAgent /app/runtime-agent/linux-arm64/minicloud-agent\n')
         (self.root / "modules/dashboard/Dockerfile").write_text("FROM example\n")
         migrations = self.root / "modules/common/Migrations"
         migrations.mkdir(parents=True)
@@ -206,6 +208,10 @@ class ReleaseTests(unittest.TestCase):
         worker.write_text("RUN dotnet publish -r linux-x64\n")
         with self.assertRaisesRegex(release.ReleaseError, "T41 handoff"):
             release.preflight(self.root, self.config, self.payload, TAG, SOURCE)
+        worker.write_text(original.replace(
+            'COPY --from=runtime-agent /agent/linux-arm64/Minicloud.RuntimeAgent /app/runtime-agent/linux-arm64/minicloud-agent\n', ''))
+        with self.assertRaisesRegex(release.ReleaseError, "both linux-x64 and linux-arm64"):
+            release.preflight(self.root, self.config, self.payload, TAG, SOURCE)
         worker.write_text(original)
         dashboard = self.root / "modules/dashboard/Dockerfile"
         dashboard.write_text("ARG VITE_FIREBASE_API_KEY\n")
@@ -310,20 +316,29 @@ class ReleaseTests(unittest.TestCase):
             if call.args[0][0] == "cosign":
                 self.assertIn(release.identity(TAG), call.args[0])
 
-    def test_embedded_agent_checks_actual_elf_architecture_and_removes_container_on_failure(self):
+    def test_each_worker_platform_checks_both_target_agents_and_removes_container_on_failure(self):
         output = self.root / ".local/artifacts/agent"
         output.parent.mkdir(parents=True)
-        data = bytearray(20)
-        data[:6] = b"\x7fELF\x02\x01"
-        data[18:20] = (62).to_bytes(2, "little")
-        output.write_bytes(data)
+        for rid, machine in (("linux-x64", 62), ("linux-arm64", 183)):
+            data = bytearray(20)
+            data[:6] = b"\x7fELF\x02\x01"
+            data[18:20] = machine.to_bytes(2, "little")
+            output.with_name(f"{output.name}-{rid}").write_bytes(data)
+        for architecture in ("amd64", "arm64"):
+            with self.subTest(worker=architecture), patch.object(release, "run", return_value="c" * 64) as command:
+                release.verify_agent(images()["worker"], architecture, output)
+                copies = [call.args[0][2] for call in command.call_args_list if call.args[0][:2] == ["docker", "cp"]]
+                self.assertEqual([f"{'c' * 64}:/app/runtime-agent/{rid}/minicloud-agent"
+                                  for rid in ("linux-x64", "linux-arm64")], copies)
+                self.assertEqual(["docker", "rm", "c" * 64], command.call_args.args[0])
+        output.with_name(f"{output.name}-linux-arm64").write_bytes(
+            output.with_name(f"{output.name}-linux-x64").read_bytes())
         with patch.object(release, "run", return_value="c" * 64) as command:
-            release.verify_agent(images()["worker"], "amd64", output)
-            with self.assertRaisesRegex(release.ReleaseError, "linux/arm64"):
-                release.verify_agent(images()["worker"], "arm64", output)
-        self.assertEqual(["docker", "rm", "c" * 64], command.call_args.args[0])
+            with self.assertRaisesRegex(release.ReleaseError, "linux-arm64"):
+                release.verify_agent(images()["worker"], "amd64", output)
+            self.assertEqual(["docker", "rm", "c" * 64], command.call_args.args[0])
 
-    def test_build_wires_both_platforms_worker_rids_and_immutable_index_references(self):
+    def test_build_wires_both_platforms_and_verifies_all_worker_payloads_without_host_derived_rids(self):
         commands = []
 
         def command(args, **kwargs):
@@ -341,10 +356,10 @@ class ReleaseTests(unittest.TestCase):
         builds = [args for args in commands if args[:3] == ["docker", "buildx", "build"]]
         self.assertEqual(6, len(builds))
         self.assertEqual(2, agents.call_count)
+        self.assertEqual(["amd64", "arm64"], [call.args[1] for call in agents.call_args_list])
         for platform in release.ARCHITECTURES:
             self.assertEqual(3, sum(args[args.index("--platform") + 1] == platform for args in builds))
-        for rid in ("linux-x64", "linux-arm64"):
-            self.assertEqual(1, sum(f"MINICLOUD_AGENT_RID={rid}" in args for args in builds))
+        self.assertFalse(any(arg.startswith("MINICLOUD_AGENT_RID=") for args in builds for arg in args))
         self.assertEqual(images(), release.read_json(self.root / ".local/artifacts/build/images.json"))
 
     def test_workflow_remains_server_only_and_publication_follows_verification(self):

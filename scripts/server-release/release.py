@@ -201,8 +201,10 @@ def preflight(root, config, payload, tag, source):
             "applicationMigration must be the latest migration in the release source.")
     worker = (root / "modules/worker/Dockerfile").read_text()
     require(re.search(r"^ARG MINICLOUD_AGENT_RID(?:=linux-x64)?\s*$", worker, re.M)
-            and re.search(r"-r\s+[\"']?\$(?:MINICLOUD_AGENT_RID|\{MINICLOUD_AGENT_RID\})", worker),
-            "T41 handoff missing: worker must publish using ARG MINICLOUD_AGENT_RID.")
+            and re.search(r"-r\s+[\"']?\$(?:MINICLOUD_AGENT_RID|\{MINICLOUD_AGENT_RID\})", worker)
+            and all(f"/agent/{rid}/Minicloud.RuntimeAgent /app/runtime-agent/{rid}/minicloud-agent" in worker
+                    for rid in ("linux-x64", "linux-arm64")),
+            "T41 handoff missing: worker must publish and package both linux-x64 and linux-arm64 agents.")
     dashboard = (root / "modules/dashboard/Dockerfile").read_text()
     require(not re.search(r"^\s*ARG\s+VITE_", dashboard, re.M),
             "T41 handoff missing: dashboard must use public startup configuration, not VITE build arguments.")
@@ -380,7 +382,7 @@ def build_images(root, tag, source, output):
     for component in COMPONENTS:
         repository = f"ghcr.io/{REPOSITORY}-{component}"
         references = []
-        for architecture, rid in (("amd64", "linux-x64"), ("arm64", "linux-arm64")):
+        for architecture in ("amd64", "arm64"):
             metadata = output / f"{component}-{architecture}.json"
             command = [
                 "docker", "buildx", "build", "--platform", f"linux/{architecture}",
@@ -391,8 +393,6 @@ def build_images(root, tag, source, output):
                 "--label", f"org.opencontainers.image.version={version}",
                 "--metadata-file", str(metadata), "--push",
             ]
-            if component == "worker":
-                command.extend(["--build-arg", f"MINICLOUD_AGENT_RID={rid}"])
             run([*command, str(root)])
             digest = read_json(metadata).get("containerimage.digest")
             require(matches(DIGEST, digest), f"Missing build digest for {component}/{architecture}.")
@@ -413,12 +413,13 @@ def verify_agent(reference, architecture, output):
     container = run(["docker", "create", "--platform", f"linux/{architecture}", reference]).strip()
     require(matches(r"[0-9a-f]{64}", container), "Docker did not return a container ID for agent inspection.")
     try:
-        run(["docker", "cp", f"{container}:/app/runtime-agent/minicloud-agent", str(output)])
-        data = output.read_bytes()
-        machine = {"amd64": 62, "arm64": 183}[architecture]
-        require(len(data) >= 20 and data[:6] == b"\x7fELF\x02\x01"
-                and int.from_bytes(data[18:20], "little") == machine,
-                f"Embedded worker agent is not a linux/{architecture} ELF executable.")
+        for rid, machine in (("linux-x64", 62), ("linux-arm64", 183)):
+            binary = output.with_name(f"{output.name}-{rid}")
+            run(["docker", "cp", f"{container}:/app/runtime-agent/{rid}/minicloud-agent", str(binary)])
+            data = binary.read_bytes()
+            require(len(data) >= 20 and data[:6] == b"\x7fELF\x02\x01"
+                    and int.from_bytes(data[18:20], "little") == machine,
+                    f"Embedded worker agent {rid} in linux/{architecture} image is not a matching ELF executable.")
     finally:
         run(["docker", "rm", container])
 

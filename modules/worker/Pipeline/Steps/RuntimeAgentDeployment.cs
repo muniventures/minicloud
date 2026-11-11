@@ -54,16 +54,11 @@ public sealed class RuntimeAgentDeployment(
             throw new PipelineStepException("runtime_agent_install_failed", "Runtime agent requires a public HTTPS control API URL.");
         }
 
-        var uploads = BundleFiles.Select(name =>
+        if (probe is null)
         {
-            var path = Path.Combine(options.Value.BundlePath, name);
-            if (!File.Exists(path))
-            {
-                throw new PipelineStepException("runtime_agent_install_failed", $"Runtime agent bundle is missing {name}.");
-            }
-            return new SshDeploymentArtifactUpload("runtime-agent", name,
-                _ => Task.FromResult<Stream>(File.OpenRead(path)), new FileInfo(path).Length);
-        }).ToArray();
+            throw new PipelineStepException("runtime_agent_install_failed",
+                "Runtime agent deployment requires a remote target architecture probe.");
+        }
 
         RuntimeAgentPackage? package = null;
         await PipelineDb.ExecuteInTransactionAsync(scopeFactory, async (db, ct) =>
@@ -87,6 +82,18 @@ public sealed class RuntimeAgentDeployment(
             {
                 throw new PipelineStepException("runtime_agent_install_failed", "Runtime server belongs to another app.");
             }
+            var binaryPath = await RuntimeAgentBundle.SelectBinaryAsync(options.Value.BundlePath, probe);
+            var uploads = BundleFiles.Select(name =>
+            {
+                var path = name == "minicloud-agent" ? binaryPath : Path.Combine(options.Value.BundlePath, name);
+                if (!File.Exists(path))
+                {
+                    throw new PipelineStepException("runtime_agent_install_failed", $"Runtime agent bundle is missing {name}.");
+                }
+                return new SshDeploymentArtifactUpload("runtime-agent", name,
+                    _ => Task.FromResult<Stream>(File.OpenRead(path)), new FileInfo(path).Length);
+            }).ToArray();
+            var fingerprints = RuntimeAgentVerification.Fingerprints(options.Value.BundlePath, binaryPath);
             var now = timeProvider.GetUtcNow();
             var runtime = await db.RuntimeServers.SingleOrDefaultAsync(s => s.AppId == context.AppId &&
                 s.ProviderAccountId == server.ProviderAccountId && s.Provider.ToLower() == server.Provider.ToLower() && s.ProviderServerId == server.ProviderServerId, ct);
@@ -119,9 +126,8 @@ public sealed class RuntimeAgentDeployment(
             };
             var candidates = await db.RuntimeTokens.Where(t => t.RuntimeServerId == runtime.Id && t.RevokedAt == null).ToListAsync(ct);
             var previous = candidates.OrderByDescending(t => t.LastUsedAt).FirstOrDefault();
-            var fingerprints = RuntimeAgentVerification.Fingerprints(options.Value.BundlePath);
             var verification = RuntimeAgentVerification.Encode(configuration, fingerprints, previous?.TokenHash);
-            var observation = probe is null ? 12 : await probe(RuntimeAgentVerification.Command(verification));
+            var observation = await probe(RuntimeAgentVerification.Command(verification));
             if (observation is not (0 or 10 or 11 or 12 or 13))
             {
                 throw new PipelineStepException("runtime_agent_install_failed", "Runtime agent host observation failed.");

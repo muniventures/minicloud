@@ -59,10 +59,10 @@ except (OSError, ValueError, KeyError):
 sys.exit(0)
 """;
 
-    internal static IReadOnlyDictionary<string, string> Fingerprints(string bundlePath) =>
+    internal static IReadOnlyDictionary<string, string> Fingerprints(string bundlePath, string binaryPath) =>
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["minicloud-agent"] = Digest(bundlePath, "minicloud-agent"),
+            ["minicloud-agent"] = Digest(Path.GetDirectoryName(binaryPath)!, Path.GetFileName(binaryPath)),
             ["apply-minicloud-routing"] = Digest(bundlePath, "apply-minicloud-routing.py"),
             ["minicloud-agent.service"] = Digest(bundlePath, "minicloud-agent.service"),
             ["install-minicloud-agent.sh"] = Digest(bundlePath, "install-minicloud-agent.sh")
