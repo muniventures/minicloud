@@ -202,6 +202,12 @@ public sealed partial class DatabaseOperationProcessor
             await strategy.ExecuteAsync(async () =>
             {
                 await using var transaction = await db.Database.BeginTransactionAsync(ct);
+                // Scheduling originates new work, so it pauses while maintenance holds the fence.
+                if (!(await maintenanceAuthority.CheckAsync(db, requireOpen: true, ct)).IsAdmitted)
+                {
+                    await transaction.RollbackAsync(ct);
+                    return;
+                }
                 var claim = db.DatabaseBackupPolicies.Where(x => x.Id == policy.Id && x.Revision == policy.Revision && x.UpdatedAt == policy.UpdatedAt);
                 var count = backup
                     ? await claim.ExecuteUpdateAsync(setters => setters.SetProperty(x => x.UpdatedAt, now).SetProperty(x => x.NextDueAt, now.AddMinutes(15)), ct)

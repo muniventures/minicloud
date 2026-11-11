@@ -63,9 +63,50 @@ public sealed class MinicloudDbContext(DbContextOptions<MinicloudDbContext> opti
 
     public DbSet<ManagedDatabaseBinding> ManagedDatabaseBindings => Set<ManagedDatabaseBinding>();
     public DbSet<ManagedDatabaseNetwork> ManagedDatabaseNetworks => Set<ManagedDatabaseNetwork>();
+    public DbSet<MaintenanceAuthorityRecord> MaintenanceAuthorities => Set<MaintenanceAuthorityRecord>();
+    public DbSet<MaintenanceActivity> MaintenanceActivities => Set<MaintenanceActivity>();
+    public DbSet<MaintenanceParticipantRecord> MaintenanceParticipants => Set<MaintenanceParticipantRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<MaintenanceAuthorityRecord>(entity =>
+        {
+            entity.ToTable("maintenance_authority", table => table.HasCheckConstraint(
+                "ck_maintenance_authority_singleton", "id = 1 AND epoch >= 1 AND state IN ('open', 'fenced')"));
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.InstallationId).HasMaxLength(128);
+            entity.Property(x => x.State).HasMaxLength(16);
+            entity.Property(x => x.HolderOperationId).HasMaxLength(128);
+            entity.Property(x => x.HostId).HasMaxLength(128);
+            entity.Property(x => x.TransferOperationId).HasMaxLength(128);
+            entity.HasData(new MaintenanceAuthorityRecord
+            {
+                Id = MaintenanceAuthorityRecord.SingletonId,
+                Epoch = 1,
+                State = MaintenanceAuthorityStates.Open,
+                UpdatedAt = new DateTimeOffset(2026, 11, 11, 0, 0, 0, TimeSpan.Zero)
+            });
+        });
+        modelBuilder.Entity<MaintenanceActivity>(entity =>
+        {
+            entity.ToTable("maintenance_activities");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasMaxLength(64);
+            entity.Property(x => x.Kind).HasMaxLength(64);
+            entity.Property(x => x.ParticipantId).HasMaxLength(64);
+            entity.Property(x => x.Detail).HasMaxLength(256);
+            entity.HasIndex(x => x.ExpiresAt);
+        });
+        modelBuilder.Entity<MaintenanceParticipantRecord>(entity =>
+        {
+            entity.ToTable("maintenance_participants");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasMaxLength(64);
+            entity.Property(x => x.Role).HasMaxLength(32);
+            entity.Property(x => x.HostId).HasMaxLength(128);
+            entity.HasIndex(x => x.LastSeenAt);
+        });
         modelBuilder.Entity<ManagedDatabaseNetwork>(entity =>
         {
             entity.ToTable("managed_database_networks");

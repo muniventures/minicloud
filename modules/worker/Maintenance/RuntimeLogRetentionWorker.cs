@@ -10,7 +10,8 @@ namespace Minicloud.Worker.Maintenance;
 public sealed class RuntimeLogRetentionWorker(
     IServiceScopeFactory scopes,
     TimeProvider clock,
-    ILogger<RuntimeLogRetentionWorker> logger) : BackgroundService
+    ILogger<RuntimeLogRetentionWorker> logger,
+    MaintenanceParticipant? maintenance = null) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -19,7 +20,8 @@ public sealed class RuntimeLogRetentionWorker(
         {
             try
             {
-                await PruneAsync(stoppingToken);
+                if (maintenance is null) await PruneAsync(stoppingToken);
+                else await maintenance.RunActivityAsync("runtime_log_retention", requireOpen: true, PruneAsync, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
