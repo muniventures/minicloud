@@ -149,10 +149,19 @@ public sealed class EnvironmentSshAccessService(
         }
 
         var now = clock.GetUtcNow();
-        var result = new List<ProviderSshKeyResponse>();
+        var result = new Dictionary<string, ProviderSshKey>();
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         if (db.Database.IsNpgsql())
             await db.ProviderAccounts.FromSqlInterpolated($"SELECT * FROM provider_accounts WHERE id = {providerAccountId} AND organization_id = {organizationId} FOR UPDATE").AsNoTracking().SingleAsync(ct);
+
+        await db.ProviderSshKeys.Where(x =>
+            x.OrganizationId == organizationId && x.ProviderAccountId == providerAccountId).LoadAsync(ct);
+        // Keep the account-scoped uniqueness lookup current as unsaved inventory rows are added.
+        var localKeys = db.ProviderSshKeys.Local.Where(x =>
+            x.OrganizationId == organizationId && x.ProviderAccountId == providerAccountId).ToArray();
+        var byFingerprint = localKeys.ToDictionary(x => x.Fingerprint, StringComparer.Ordinal);
+        var byProviderId = localKeys.Where(x => x.ProviderKeyId is not null)
+            .ToDictionary(x => x.ProviderKeyId!, StringComparer.Ordinal);
 
         foreach (var providerKey in providerKeys)
         {
@@ -160,9 +169,9 @@ public sealed class EnvironmentSshAccessService(
                 !SshPublicKeyParser.TryParse(providerKey.PublicKey, out var validated))
                 continue;
 
-            var local = await db.ProviderSshKeys.SingleOrDefaultAsync(x =>
-                x.OrganizationId == organizationId && x.ProviderAccountId == providerAccountId &&
-                (x.ProviderKeyId == providerKey.Id || x.Fingerprint == validated!.Fingerprint), ct);
+            // A changed provider reference must fail closed, not rebind to another fingerprint.
+            if (!byProviderId.TryGetValue(providerKey.Id, out var local))
+                byFingerprint.TryGetValue(validated!.Fingerprint, out local);
             if (local is null)
             {
                 local = new ProviderSshKey
@@ -180,6 +189,8 @@ public sealed class EnvironmentSshAccessService(
                     UpdatedAt = now
                 };
                 db.ProviderSshKeys.Add(local);
+                byFingerprint.Add(local.Fingerprint, local);
+                byProviderId.Add(providerKey.Id, local);
             }
             else if (!string.Equals(local.Fingerprint, validated!.Fingerprint, StringComparison.Ordinal))
             {
@@ -188,7 +199,10 @@ public sealed class EnvironmentSshAccessService(
             }
             else
             {
+                if (local.ProviderKeyId is not null)
+                    byProviderId.Remove(local.ProviderKeyId);
                 local.ProviderKeyId = providerKey.Id;
+                byProviderId[providerKey.Id] = local;
                 local.Name = string.IsNullOrWhiteSpace(providerKey.Name) ? local.Name : providerKey.Name;
                 local.PublicKey = validated.PublicKey;
                 if (local.RegistrationState is "pending" or "registering" or "unknown" or "failed")
@@ -199,13 +213,14 @@ public sealed class EnvironmentSshAccessService(
                 local.UpdatedAt = now;
             }
 
-            result.Add(new ProviderSshKeyResponse(local.Id, local.ProviderAccountId, local.Name,
-                local.Fingerprint, local.KeyType, local.RegistrationState));
+            result[local.Id] = local;
         }
 
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
-        return result.OrderBy(x => x.Name, StringComparer.Ordinal).ThenBy(x => x.Fingerprint, StringComparer.Ordinal).ToArray();
+        return result.Values.Select(local => new ProviderSshKeyResponse(local.Id, local.ProviderAccountId, local.Name,
+                local.Fingerprint, local.KeyType, local.RegistrationState))
+            .OrderBy(x => x.Name, StringComparer.Ordinal).ThenBy(x => x.Fingerprint, StringComparer.Ordinal).ToArray();
     }
 
     private Task<bool> CanAsync(ActorIdentity actor, string organizationId, OrganizationAction action, CancellationToken ct) =>
