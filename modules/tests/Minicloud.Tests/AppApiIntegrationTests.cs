@@ -939,6 +939,7 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["Database:Provider"] = "Sqlite",
+                    ["Secrets:EncryptionKey"] = "synthetic-app-api-test-key",
                     ["Providers:AllowLegacyConfiguration"] = "true",
                     ["ManagedDomains:Suffix"] = appDomain,
                     ["ServerRelease:ManifestPath"] = releaseMetadataPath,

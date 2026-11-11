@@ -35,6 +35,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       Database__Provider: Postgres
       Database__RunMigrationsOnStartup: "true"
+      Secrets__EncryptionKey: ${TEST_SECRET_ENCRYPTION_KEY:?}
       # This fixture deliberately seeds the pre-catalog schema/plan contract.
       # Account-aware admission is qualified by ProviderCatalogApi/PostgresTests.
       Providers__AllowLegacyConfiguration: "true"
@@ -50,6 +51,7 @@ services:
       api: {condition: service_started}
     environment:
       Database__Provider: Postgres
+      Secrets__EncryptionKey: ${TEST_SECRET_ENCRYPTION_KEY:?}
       ConnectionStrings__Minicloud: Host=postgres;Port=5432;Database=minicloud_test;Username=minicloud;Password=${TEST_POSTGRES_PASSWORD:?}
       Worker__PollingInterval: 00:00:01
       Providers__AllowLegacyConfiguration: "true"
