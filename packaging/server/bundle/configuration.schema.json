@@ -12,6 +12,22 @@
     "apiHostname": { "$ref": "#/$defs/hostname" },
     "consoleHostname": { "$ref": "#/$defs/hostname" },
     "manageDnsRecords": { "type": "boolean", "default": false },
+    "googleOidc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "credentialsFile": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Absolute protected operator input path, never a credential value."
+        }
+      },
+      "if": { "properties": { "enabled": { "const": true } } },
+      "then": { "required": ["credentialsFile"] },
+      "else": { "not": { "required": ["credentialsFile"] } }
+    },
     "sourceUrl": { "type": "string", "format": "uri", "pattern": "^https://[^/@\\s]+(?:/[^\\s]*)?$" },
     "recovery": {
       "type": "object",

@@ -32,6 +32,7 @@ x-api-environment: &api-environment
   Kratos__PublicBaseUrl: http://kratos:4433/
   Kratos__AdminBaseUrl: http://kratos:4434/
   Kratos__DashboardOrigin: ${CONSOLE_URL:?set CONSOLE_URL}
+  Kratos__GoogleEnabled: ${MINICLOUD_GOOGLE_OIDC_ENABLED:-false}
   Bootstrap__InstallationId: ${MINICLOUD_INSTALLATION_ID:?set the persistent MINICLOUD_INSTALLATION_ID}
 
 services:
@@ -167,6 +168,8 @@ services:
     restart: "no"
     command: ["migrate", "sql", "-e", "--yes", "--config", "/etc/config/kratos.yml"]
     environment: &kratos-environment
+      SELFSERVICE_METHODS_OIDC_ENABLED: ${MINICLOUD_GOOGLE_OIDC_ENABLED:-false}
+      SELFSERVICE_METHODS_OIDC_CONFIG_BASE_REDIRECT_URI: ${API_URL:?set API_URL}/api/account/oidc
       SELFSERVICE_DEFAULT_BROWSER_RETURN_URL: ${CONSOLE_URL:?set CONSOLE_URL}/
       SELFSERVICE_ALLOWED_RETURN_URLS: ${CONSOLE_URL:?set CONSOLE_URL}
       SELFSERVICE_FLOWS_ERROR_UI_URL: ${CONSOLE_URL:?set CONSOLE_URL}/sign-in
@@ -178,6 +181,7 @@ services:
     volumes:
       - ./kratos.yml:/etc/config/kratos.yml:ro
       - ./identity.schema.json:/etc/config/identity.schema.json:ro
+      - ./google-oidc.mapper.jsonnet:/etc/config/google-oidc.mapper.jsonnet:ro
     depends_on:
       database-initialize:
         condition: service_completed_successfully
@@ -193,6 +197,7 @@ services:
     volumes:
       - ./kratos.yml:/etc/config/kratos.yml:ro
       - ./identity.schema.json:/etc/config/identity.schema.json:ro
+      - ./google-oidc.mapper.jsonnet:/etc/config/google-oidc.mapper.jsonnet:ro
     depends_on:
       kratos-migrate:
         condition: service_completed_successfully

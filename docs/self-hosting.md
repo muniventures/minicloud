@@ -72,6 +72,7 @@ references (`MINICLOUD_*_IMAGE`) come from the generated, digest-pinned
 | `APP_DOMAIN` | The managed application domain suffix. |
 | `MANAGE_DNS_RECORDS` | Optional. Defaults to `false`. |
 | `MINICLOUD_SOURCE_URL` | Optional. The public source link shown in the dashboard. |
+| `MINICLOUD_GOOGLE_OIDC_ENABLED` | Defaults to `false`; the installer derives it only from explicit `googleOidc.enabled`. Shared API/Kratos switch, not a qualification assertion. |
 | `MINICLOUD_SECRETS_DIR` | Root-owned directory (`0700`) holding the files below. |
 | `MINICLOUD_INSTALLATION_ID` | Persistent non-secret installation identity from host metadata, shared by API and bootstrap inputs. Never regenerate it on restart. |
 | `MINICLOUD_HOST_ID` | Optional non-secret host-local maintenance identity from `<root>/host-id`, written by the packaged maintenance tooling and never backed up. Leave empty for manual Compose; `transfer` binds the maintenance authority to it. |
@@ -89,7 +90,9 @@ independent random values:
 - `postgres-admin-password`, `app-db-password`, `kratos-db-password`
 - `secret-encryption-key`
 - `kratos.env`: credentials only. See `secrets.env.example`. The `DSN`
-  password must match `kratos-db-password`, URL-encoded.
+  password must match `kratos-db-password`, URL-encoded. Explicit Google opt-in
+  also imports the single fixed Google provider JSON here; never dump this file
+  or a rendered Compose environment into logs.
 - `openbao-server.crt`, `openbao-server.key` and `openbao-ca.crt`: a private CA
   and a server certificate whose SAN includes `openbao`. The API and worker
   trust this CA only for OpenBao, and public HTTPS keeps the system trust store.
@@ -98,6 +101,78 @@ independent random values:
 - `deploy-ssh-public-key`, plus `ssh/deploy-key` and `ssh/host-pins`. Each
   `host-pins` line is `<host> SHA256:<fingerprint>`, and the worker refuses
   unpinned hosts.
+
+### Optional packaged Google OIDC
+
+Password-only installation remains the default. Omitting `googleOidc`, or
+setting it to `{"enabled":false}`, needs no Google input. Do not put Google
+credentials in public configuration, dashboard runtime config, release assets,
+shell arguments or issue/PR bodies.
+
+For an explicitly opted-in **new installation**, before `preflight`/`prepare`,
+add this non-secret object to the protected configuration:
+
+```json
+"googleOidc": {
+  "enabled": true,
+  "credentialsFile": "/etc/minicloud-operator/google-oidc.json"
+}
+```
+
+The credential input must be a canonical absolute, nonsymlink root-owned
+`0600`/`0400` JSON file in a root-owned `0700` directory, with protected
+ancestors. Keep it outside installation, recovery and release-asset directories.
+Use `google-oidc.credentials.example.json` only as a **synthetic shape example**;
+replace its values privately with an operator-provided Google **web** client:
+
+```json
+{
+  "clientId": "synthetic-client.apps.googleusercontent.com",
+  "clientSecret": "synthetic-not-a-google-secret"
+}
+```
+
+Only these two unique fields are accepted. Client IDs must end in
+`.apps.googleusercontent.com`; secrets must contain only ASCII letters, digits,
+`-` and `_` (1–256 characters), preventing dotenv interpolation/injection.
+The installer imports the credentials into protected `secrets/kratos.env`,
+alongside the original DSN/cookie/cipher secrets. It does not put credential
+values in host metadata or process arguments. Both Kratos services consume this
+protected file; neither API nor dashboard receives the provider secret.
+
+The shared opt-in switch enables API Google navigation and Kratos OIDC
+together. Compose derives the callback base from the validated API origin.
+The only Google redirect URI is:
+
+```text
+<apiUrl>/api/account/oidc/self-service/methods/oidc/callback/google
+```
+
+The fixed, read-only `google-oidc.mapper.jsonnet` maps a verified Google email
+to `traits.email`; arbitrary providers/mappers/redirect overrides are not
+accepted. Keep password login enabled, public registration disabled and
+Kratos private. Sign in with a password first and link Google in account
+settings; Google login only admits identities already bound to Minicloud.
+The reverse proxy must preserve the public API Host for callback validation.
+
+Keep the original configuration **and** credential input available unchanged
+for staged commands, resume, upgrade and restore. Completed credentials are
+validated, never silently rewritten or regenerated; duplicate/unknown
+`kratos.env` keys and provider mismatches fail closed. Back up the input
+independently in protected operator custody; encrypted installation backups
+also contain the imported provider secret. Restore that external input at its
+original path before invoking the helper. Existing password-only configurations
+remain valid unchanged. The installer still requires exact original
+configuration matching: this option does **not** add an in-place enable/disable
+or credential-rotation workflow for an established installation. Never edit
+installation metadata to bypass that boundary.
+
+Enabling this operator option does **not** claim live qualification. The current
+API contract has `GoogleEnabled`, not a separate `GoogleQualified` setting.
+Live Google sign-in/link/422 behavior, separate-origin HTTPS/CORS/CSRF, proxy
+Host handling, SMTP recovery and browser/Grafana recovery revocation remain
+deferred in [#44](https://github.com/muniventures/minicloud/issues/44).
+The prior disposable Kratos v1.3.1 checks are not a live Google qualification.
 
 ### Startup order
 

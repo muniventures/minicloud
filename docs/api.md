@@ -79,8 +79,12 @@ either optional method.
 
 ### Optional Google sign-in
 
-Google is off by default (`Kratos:GoogleEnabled=false`) and the packaged bundle
-does not enable it. Live Google and separate-origin HTTPS qualification remain
+Google is off by default (`Kratos:GoogleEnabled=false`). The packaged installer
+supports deliberate opt-in through `googleOidc.enabled` and a protected
+credential-input file; see [packaged setup](self-hosting.md#optional-packaged-google-oidc).
+Configuration enables the option, not a live qualification claim. The current
+API has no separate `GoogleQualified` setting. Live Google and separate-origin
+HTTPS qualification remain
 tracked in [the authentication follow-up](https://github.com/muniventures/minicloud/issues/44).
 
 - **Discovery.** `ui.providers` is present only when Google is enabled and the
@@ -112,14 +116,17 @@ tracked in [the authentication follow-up](https://github.com/muniventures/minicl
   dashboard then re-reads it, or after success returns to the safe path, such
   as explicit CLI consent.
 
-Enabling Google for a qualification run needs `Kratos__GoogleEnabled=true` on
-the API. Kratos also needs `SELFSERVICE_METHODS_OIDC_ENABLED=true`, and
-`SELFSERVICE_METHODS_OIDC_CONFIG_BASE_REDIRECT_URI=<API_URL>/api/account/oidc`
-in operator-owned configuration. The resulting Google redirect URI is
-`<API_URL>/api/account/oidc/self-service/methods/oidc/callback/google`. Put the
-Google client secret only in the protected `kratos.env`, as
-`SELFSERVICE_METHODS_OIDC_CONFIG_PROVIDERS` JSON for provider `google`, with
-an operator-supplied `base64://` Jsonnet mapper for `traits.email`. Minicloud
-ships no default client or secret. Google login admits only identities already
-bound to a Minicloud user. An operator first links Google from account
-settings; public registration stays disabled.
+The installer derives `MINICLOUD_GOOGLE_OIDC_ENABLED` from the explicit
+configuration and Compose passes it to both `Kratos__GoogleEnabled` on the API
+and `SELFSERVICE_METHODS_OIDC_ENABLED` on Kratos (both default false).
+`SELFSERVICE_METHODS_OIDC_CONFIG_BASE_REDIRECT_URI` is always derived as
+`<API_URL>/api/account/oidc`; the resulting Google redirect URI is
+`<API_URL>/api/account/oidc/self-service/methods/oidc/callback/google`.
+The installer imports only the fixed `google` provider into the protected
+`kratos.env` as `SELFSERVICE_METHODS_OIDC_CONFIG_PROVIDERS`, using the bundled
+read-only verified-email Jsonnet mapper. Unknown environment/configuration
+fields still fail validation; manually adding enable/callback overrides to
+`kratos.env` is not supported. Minicloud ships no default client or secret.
+Google login admits only identities already bound to a Minicloud user. An
+operator first links Google from account settings; public registration stays
+disabled. Keep the public API Host intact through the reverse proxy.

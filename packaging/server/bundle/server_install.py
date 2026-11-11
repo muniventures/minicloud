@@ -160,7 +160,7 @@ def configuration(path):
     value = read_json(path)
     required = {"apiUrl", "consoleUrl", "apiHostname", "consoleHostname", "appDomain"}
     require(isinstance(value, dict) and required <= value.keys()
-            and value.keys() <= required | {"manageDnsRecords", "sourceUrl", "recovery"},
+            and value.keys() <= required | {"manageDnsRecords", "sourceUrl", "recovery", "googleOidc"},
             "Unknown/missing configuration fields.")
     for key in ("apiHostname", "consoleHostname", "appDomain"):
         hostname(value[key])
@@ -171,6 +171,17 @@ def configuration(path):
     for key, host in (("apiUrl", "apiHostname"), ("consoleUrl", "consoleHostname")):
         require(value[key] == "https://" + value[host], "Public URLs must be exact HTTPS origins without paths/ports.")
     require(type(value.get("manageDnsRecords", False)) is bool, "manageDnsRecords must be boolean.")
+    if "googleOidc" in value:
+        google = value["googleOidc"]
+        require(isinstance(google, dict) and "enabled" in google
+                and google.keys() <= {"enabled", "credentialsFile"}
+                and type(google["enabled"]) is bool, "Invalid Google OIDC configuration.")
+        require(google.keys() == ({"enabled", "credentialsFile"} if google["enabled"] else {"enabled"}),
+                "Google OIDC requires credentialsFile only when explicitly enabled.")
+        if google["enabled"]:
+            require(isinstance(google["credentialsFile"], str) and google["credentialsFile"]
+                    and Path(google["credentialsFile"]).is_absolute(),
+                    "Google OIDC credentialsFile must be an absolute protected path.")
     if "sourceUrl" in value:
         require(isinstance(value["sourceUrl"], str), "sourceUrl must be an HTTPS string.")
         source = urllib.parse.urlsplit(value["sourceUrl"])
@@ -183,6 +194,34 @@ def configuration(path):
                 and all(isinstance(item, str) and item for item in recovery.values()),
                 "Invalid recovery configuration.")
     return value
+
+
+def google_provider(config, root, recovery_dir, assets_dir):
+    if not config.get("googleOidc", {}).get("enabled", False):
+        return None
+    path = Path(config["googleOidc"]["credentialsFile"])
+    require(path == path.resolve() and not any(path.is_relative_to(directory)
+            for directory in (root, recovery_dir, assets_dir)),
+            "Keep Google credentials at a canonical operator input path outside installation, recovery and release assets.")
+    protected(path.parent, True)
+    protected(path)
+    require(path.stat().st_size <= 4096, "Google credential input exceeds 4 KiB.")
+    try:
+        value = read_json(path)
+    except (ValueError, InstallError):
+        raise InstallError("Invalid Google credential input; expected unique clientId/clientSecret fields.") from None
+    require(isinstance(value, dict) and value.keys() == {"clientId", "clientSecret"}
+            and isinstance(value["clientId"], str) and len(value["clientId"]) <= 256
+            and re.fullmatch(r"[A-Za-z0-9_-]+\.apps\.googleusercontent\.com", value["clientId"])
+            and isinstance(value["clientSecret"], str)
+            and re.fullmatch(r"[A-Za-z0-9_-]{1,256}", value["clientSecret"]),
+            "Invalid Google credential input; use a Google web client ID and a single-line URL-safe secret.")
+    return json.dumps([{
+        "id": "google", "provider": "google",
+        "client_id": value["clientId"], "client_secret": value["clientSecret"],
+        "mapper_url": "file:///etc/config/google-oidc.mapper.jsonnet",
+        "scope": ["openid", "email", "profile"],
+    }], separators=(",", ":"))
 
 
 def version_at_least(text, minimum):
@@ -327,6 +366,7 @@ class Installer:
                     "Installation, asset and independent recovery paths must not overlap.")
         require(not args.config.is_relative_to(self.root)
                 and not args.config.is_relative_to(args.recovery_dir), "Keep operator input outside installation/recovery output.")
+        self.google_provider = google_provider(self.config, self.root, args.recovery_dir, args.assets_dir)
         self.manifest = read_json(args.assets_dir / "server-manifest.json")
         require(self.manifest["releaseTag"] == args.tag, "Selected release differs from manifest.")
         self.manifest["bundleBytes"] = (args.assets_dir / self.manifest["bundle"]["name"]).stat().st_size
@@ -375,6 +415,7 @@ class Installer:
                 require(all((self.root / "secrets" / name).is_file() for name in required)
                         and (recovery / "openbao-ca.key").is_file(),
                         "Established credential missing; restore it, never regenerate.")
+                self.validate_kratos_credentials()
                 request = read_json(self.root / "secrets/bootstrap/input/request.json")
                 require(request == {key: state[key] for key in ("installationId", "operationId")},
                         "Protected bootstrap input differs from the original operation.")
@@ -512,14 +553,10 @@ class Installer:
         self.ensure_secret(directory / "kratos.env", lambda: (
             "DSN=postgres://kratos:" + urllib.parse.quote((directory / "kratos-db-password").read_text(), safe="")
             + "@postgres:5432/kratos?sslmode=disable\nSECRETS_COOKIE=" + secrets.token_urlsafe(48)
-            + "\nSECRETS_CIPHER=" + secrets.token_hex(16) + "\n").encode())
-        kratos = dict(line.split("=", 1) for line in (directory / "kratos.env").read_text().splitlines() if "=" in line)
-        expected_dsn = ("postgres://kratos:" + urllib.parse.quote((directory / "kratos-db-password").read_text(), safe="")
-                        + "@postgres:5432/kratos?sslmode=disable")
-        require(kratos.keys() == {"DSN", "SECRETS_COOKIE", "SECRETS_CIPHER"}
-                and kratos["DSN"] == expected_dsn and len(kratos["SECRETS_COOKIE"]) >= 32
-                and len(kratos["SECRETS_CIPHER"]) == 32,
-                "Incomplete/inconsistent Kratos credentials; preserve and reconcile.")
+            + "\nSECRETS_CIPHER=" + secrets.token_hex(16) + "\n"
+            + ("SELFSERVICE_METHODS_OIDC_CONFIG_PROVIDERS=" + self.google_provider + "\n"
+               if self.google_provider is not None else "")).encode())
+        self.validate_kratos_credentials()
         key = directory / "ssh/deploy-key"
         if not key.exists():
             require(not self.state["credentialsComplete"], "Established SSH key missing; restore it.")
@@ -597,13 +634,37 @@ class Installer:
             "MINICLOUD_INSTALLATION_ID": self.state["installationId"],
             "MINICLOUD_SECRETS_DIR": str(self.root / "secrets"),
             "MINICLOUD_HOST_ID": self.host_id(),
+            "MINICLOUD_GOOGLE_OIDC_ENABLED": str(self.google_provider is not None).lower(),
         })
         for component, reference in (self.installed["images"] | self.installed["dependencies"]).items():
             env[f"MINICLOUD_{component.upper()}_IMAGE"] = reference
         return env
 
+    def validate_kratos_credentials(self):
+        directory = self.root / "secrets"
+        path = directory / "kratos.env"
+        protected(path)
+        require(path.stat().st_size <= 65536, "Kratos credentials exceed 64 KiB.")
+        lines = path.read_text().splitlines()
+        require(all("=" in line for line in lines), "Invalid Kratos credential entry.")
+        kratos = no_duplicates(line.split("=", 1) for line in lines)
+        keys = {"DSN", "SECRETS_COOKIE", "SECRETS_CIPHER"}
+        if self.google_provider is not None:
+            keys.add("SELFSERVICE_METHODS_OIDC_CONFIG_PROVIDERS")
+        protected(directory / "kratos-db-password")
+        expected_dsn = ("postgres://kratos:" + urllib.parse.quote((directory / "kratos-db-password").read_text(), safe="")
+                        + "@postgres:5432/kratos?sslmode=disable")
+        require(kratos.keys() == keys
+                and kratos["DSN"] == expected_dsn and len(kratos["SECRETS_COOKIE"]) >= 32
+                and len(kratos["SECRETS_CIPHER"]) == 32
+                and (self.google_provider is None
+                     or kratos["SELFSERVICE_METHODS_OIDC_CONFIG_PROVIDERS"] == self.google_provider),
+                "Incomplete/inconsistent Kratos credentials; preserve and reconcile.")
+
     def compose_invocation(self, *arguments, root_token=None):
         self.verify_installed_bundle()
+        if self.state["credentialsComplete"]:
+            self.validate_kratos_credentials()
         bundle = self.root / "bundle"
         env = self.environment()
         if root_token:
