@@ -20,8 +20,11 @@ public sealed partial class DatabaseOperationProcessor(
     IAppSecretService appSecrets, SecretEncryptionService encryption,
     IIdGenerator ids, TimeProvider clock, ISshDeploymentClient ssh,
     IOptions<SshDeploymentOptions> sshOptions, IOptions<DatabasePlatformOptions> databaseOptions,
-    DatabaseNetworkService privateNetworks, ILogger<DatabaseOperationProcessor>? logger = null)
+    DatabaseNetworkService privateNetworks, ILogger<DatabaseOperationProcessor>? logger = null,
+    MaintenanceParticipant? maintenance = null)
 {
+    private readonly MaintenanceParticipant maintenanceAuthority = maintenance ?? MaintenanceParticipant.CreateLocal("worker", clock);
+
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
 
     private Task<bool> DispatchOperationAsync(DatabaseOperation operation, CancellationToken ct) => operation.Kind switch
@@ -106,6 +109,12 @@ public sealed partial class DatabaseOperationProcessor(
         await strategy.ExecuteAsync(async () =>
         {
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            // Accepted (queued/retrying) operations still run while fenced; a superseded epoch claims nothing.
+            if (!await maintenanceAuthority.CanClaimAsync(db, ct))
+            {
+                await transaction.RollbackAsync(ct);
+                return;
+            }
             var now = clock.GetUtcNow();
             var abandoned = db.Database.IsNpgsql()
                 ? await db.DatabaseOperations.FromSqlInterpolated($"SELECT * FROM database_operations WHERE status IN ('running','cancelling') AND (lease_expires_at IS NULL OR lease_expires_at <= {now}) ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 1").FirstOrDefaultAsync(ct)
