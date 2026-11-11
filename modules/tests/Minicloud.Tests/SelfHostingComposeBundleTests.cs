@@ -99,11 +99,16 @@ public sealed class SelfHostingComposeBundleTests
         // Kratos rejects its whole config at startup when log.level is outside its schema enum.
         Assert.Contains(Text(((YamlMappingNode)kratos["log"])["level"]), new[] { "trace", "debug", "info", "warning", "error", "fatal", "panic" });
         Assert.Equal("http://kratos:4434/", api["Kratos__AdminBaseUrl"]);
+        Assert.Equal("${MINICLOUD_GOOGLE_OIDC_ENABLED:-false}", api["Kratos__GoogleEnabled"]);
         Assert.Equal("false", api["Database__RunMigrationsOnStartup"]);
         Assert.DoesNotContain("kratos\", \"healthcheck", string.Join("\", \"", Sequence((YamlMappingNode)Service("kratos")["healthcheck"], "test")));
         var kratosEnvironment = Environment(Service("kratos"));
+        Assert.Equal(api["Kratos__GoogleEnabled"], kratosEnvironment["SELFSERVICE_METHODS_OIDC_ENABLED"]);
+        Assert.Equal("${API_URL:?set API_URL}/api/account/oidc", kratosEnvironment["SELFSERVICE_METHODS_OIDC_CONFIG_BASE_REDIRECT_URI"]);
         Assert.Equal("${CONSOLE_URL:?set CONSOLE_URL}/sign-in", kratosEnvironment["SELFSERVICE_FLOWS_LOGIN_UI_URL"]);
         Assert.Equal(kratosEnvironment, Environment(Service("kratos-migrate")));
+        foreach (var service in new[] { "kratos", "kratos-migrate" })
+            Assert.Contains(Mounts(Service(service)), m => m == ("./google-oidc.mapper.jsonnet", "/etc/config/google-oidc.mapper.jsonnet", true));
         Assert.DoesNotMatch("(?m)^(SERVE|SELFSERVICE)_", File.ReadAllText(Path.Combine(Bundle, "secrets.env.example")));
 
         var dashboard = Service("dashboard");
@@ -127,7 +132,8 @@ public sealed class SelfHostingComposeBundleTests
             .Select(match => match.Groups[1].Value).Where(name => !Regex.IsMatch(name, "^MINICLOUD_[A-Z]+_IMAGE$")).ToHashSet();
         Assert.Equal(
             ["API_HOSTNAME", "API_URL", "APP_DOMAIN", "CONSOLE_HOSTNAME", "CONSOLE_URL", "MANAGE_DNS_RECORDS",
-             "MINICLOUD_HOST_ID", "MINICLOUD_INSTALLATION_ID", "MINICLOUD_SECRETS_DIR", "MINICLOUD_SOURCE_URL", "OPENBAO_ROOT_TOKEN_FILE"],
+             "MINICLOUD_GOOGLE_OIDC_ENABLED", "MINICLOUD_HOST_ID", "MINICLOUD_INSTALLATION_ID", "MINICLOUD_SECRETS_DIR",
+             "MINICLOUD_SOURCE_URL", "OPENBAO_ROOT_TOKEN_FILE"],
             variables.Order());
         var guide = File.ReadAllText(Path.Combine(FindRepository(), "docs", "self-hosting.md"));
         Assert.All(variables, variable => Assert.Contains(variable, guide));
