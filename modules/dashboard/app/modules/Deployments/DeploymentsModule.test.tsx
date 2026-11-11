@@ -19,6 +19,7 @@ vi.mock("@/core/auth/AuthProvider", () => ({
 
 const deployment: DeploymentResponse = {
   id: "dep_duration",
+  number: "20261027.1",
   appId: "app_duration",
   organizationId: "org_duration",
   database: "sqlite",
@@ -112,8 +113,9 @@ it("ticks active rows without refetching and freezes after completion", async ()
   expect(screen.getByText("2m elapsed")).toBeInTheDocument();
   expect(listDeployments).toHaveBeenCalledTimes(1);
   await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Refresh dep_duration" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh deployment 20261027.1" }));
   });
+  expect(refreshDeployment).toHaveBeenCalledWith({ organizationId: "org_duration", number: "20261027.1" });
   expect(screen.getByText("2m")).toBeInTheDocument();
   await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
   expect(screen.getByText("2m")).toBeInTheDocument();
@@ -196,9 +198,27 @@ it("automatically discovers a new CLI build while the old failure history is ope
   vi.mocked(listDeployments).mockResolvedValue([{ ...deployment, status: "failed" }]);
   await act(async () => { render(<MemoryRouter><DeploymentsModule /></MemoryRouter>); });
   expect(screen.getByText("failed")).toBeInTheDocument();
-  vi.mocked(listDeployments).mockResolvedValue([{ ...deployment, id: "new-build", status: "waiting_for_build" }]);
+  vi.mocked(listDeployments).mockResolvedValue([{ ...deployment, id: "new-build", number: "20261027.2", status: "waiting_for_build" }]);
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
   expect(screen.getByText("Waiting for build")).toBeInTheDocument();
-  expect(screen.getByText("new-build")).toBeInTheDocument();
+  expect(screen.getByText("20261027.2")).toBeInTheDocument();
   expect(listApplications).toHaveBeenCalledTimes(1);
+});
+
+it("links, labels, copies and searches deployments by number instead of opaque ID", async () => {
+  vi.mocked(listApplications).mockResolvedValue([]);
+  vi.mocked(listDeployments).mockResolvedValue([
+    { ...deployment, status: "succeeded", completedAt: deployment.startedAt },
+    { ...deployment, id: "dep_other", number: "20261027.12", status: "failed", completedAt: deployment.startedAt },
+  ]);
+  await act(async () => { render(<MemoryRouter><DeploymentsModule /></MemoryRouter>); });
+  expect(screen.getByRole("link", { name: "Open deployment 20261027.1" }))
+    .toHaveAttribute("href", "/deployments/20261027.1?organizationId=org_duration");
+  expect(screen.getByRole("button", { name: "Copy deployment number 20261027.12" })).toBeInTheDocument();
+  expect(screen.queryByText("dep_duration")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Search deployments"), { target: { value: "20261027.12" } });
+  expect(screen.queryByRole("link", { name: "Open deployment 20261027.1" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open deployment 20261027.12" })).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Search deployments"), { target: { value: "dep_other" } });
+  expect(screen.queryByRole("link", { name: "Open deployment 20261027.12" })).not.toBeInTheDocument();
 });

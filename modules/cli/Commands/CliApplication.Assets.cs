@@ -34,9 +34,9 @@ public sealed partial class CliApplication
             var artifact = await _apiClient.CreateDeploymentArtifactAsync(new(app.Id, args[1], Path.GetFileName(bundle.ZipPath), "application/zip", bundle.SizeBytes, bundle.Sha256, bundle.Manifest), ct);
             await _apiClient.UploadDeploymentArtifactContentAsync(artifact.Id, artifact.UploadUrl, bundle.ZipPath, bundle.Sha256, bundle.SizeBytes, ct);
             var release = await _apiClient.PublishAssetAsync(new(app.Id, args[1], artifact.Id, fingerprint, asset.OutputPath), ct);
-            _console.WriteLine($"Publishing asset {release.Name}: {release.Id} (deployment {release.DeploymentId}).");
-            if (release.DeploymentId is null) { throw new CliCommandException(CliExitCodes.ValidationError, "Asset publication did not return a queued deployment."); }
-            await PollDeploymentAsync(release.DeploymentId, release.Status, ct);
+            if (release.DeploymentNumber is null) { throw new CliCommandException(CliExitCodes.ValidationError, "Asset publication did not return a queued deployment."); }
+            _console.WriteLine($"Publishing asset {release.Name}: {release.Id} (deployment {release.DeploymentNumber}).");
+            await PollDeploymentAsync(app.OrganizationId, release.DeploymentNumber, release.Status, ct);
             release = await _apiClient.GetAssetAsync(release.Id, ct);
             if (release.Status != "succeeded") { throw new CliCommandException(CliExitCodes.ValidationError, $"Asset publication {release.Id} {release.Status}."); }
             _console.WriteLine($"Asset ready: releaseId={release.Id} input_sha256={release.InputSha256} manifest_sha256={release.ManifestSha256}");

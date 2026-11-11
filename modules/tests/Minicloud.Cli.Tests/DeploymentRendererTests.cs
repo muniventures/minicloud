@@ -232,8 +232,8 @@ public sealed class DeploymentRendererTests
         renderer.ArtifactUploadCompleted("web", 1024 * 500);
 
         renderer.DeploymentCreationStarted();
-        renderer.DeploymentCreated("dep_123", "dispatching");
-        renderer.DeploymentStatusUpdated("dep_123", "deploying");
+        renderer.DeploymentCreated("20261110.109", "dispatching");
+        renderer.DeploymentStatusUpdated("20261110.109", "deploying");
         renderer.DeploymentSucceeded(new DeploymentSuccessResult(
             ServicesCount: 1,
             ConsoleUrl: "https://console.example",
@@ -254,7 +254,7 @@ public sealed class DeploymentRendererTests
         Assert.Contains("Artifacts: bundled web", output);
         Assert.Contains("Artifacts: uploaded web (500.0 KB)", output);
         Assert.Contains("Artifacts: 1 uploaded", output);
-        Assert.Contains("Deploy: created deployment dep_123 (status: dispatching)", output);
+        Assert.Contains("Deploy: created deployment 20261110.109 (status: dispatching)", output);
         Assert.Contains("Deploy: status deploying", output);
         Assert.Contains("Deploy: succeeded", output);
         Assert.Contains("Overall: 100% (12s)", output);
@@ -280,9 +280,9 @@ public sealed class DeploymentRendererTests
 
         renderer.Initialize(plan);
         renderer.DeploymentCreationStarted();
-        renderer.DeploymentCreated("dep_failed_1", "deploying");
+        renderer.DeploymentCreated("20261110.100", "deploying");
         renderer.DeploymentFailed(new DeploymentFailureResult(
-            DeploymentId: "dep_failed_1",
+            DeploymentNumber: "20261110.100",
             FailureCode: "build_failed",
             FailureMessage: "Docker build failed with code 1",
             ConsoleUrl: "https://console.example"));
@@ -294,7 +294,7 @@ public sealed class DeploymentRendererTests
         Assert.Contains("Deployment failed", output);
         Assert.Contains("build_failed", output);
         Assert.Contains("Docker build failed with code 1", output);
-        Assert.Contains("Logs: minicloud logs dep_failed_1", output);
+        Assert.Contains("Logs: minicloud logs 20261110.100", output);
         Assert.Contains("Console: https://console.example", output);
         Assert.DoesNotContain("100%", output);
     }
@@ -346,7 +346,7 @@ public sealed class DeploymentRendererTests
         renderer.ArtifactUploadCompleted("web", 1024 * 1024);
 
         renderer.DeploymentCreationStarted();
-        renderer.DeploymentCreated("dep_succ", "deploying");
+        renderer.DeploymentCreated("20261110.105", "deploying");
         renderer.DeploymentSucceeded(new DeploymentSuccessResult(
             ServicesCount: 1,
             ConsoleUrl: "https://console.example",
@@ -391,9 +391,9 @@ public sealed class DeploymentRendererTests
         renderer.ArtifactUploadCompleted("web", 2048);
 
         renderer.DeploymentCreationStarted();
-        renderer.DeploymentCreated("dep_fail", "deploying");
+        renderer.DeploymentCreated("20261110.106", "deploying");
         renderer.DeploymentFailed(new DeploymentFailureResult(
-            DeploymentId: "dep_fail",
+            DeploymentNumber: "20261110.106",
             FailureCode: "healthcheck_timeout",
             FailureMessage: "Container did not respond to /health within 60s",
             ConsoleUrl: "https://console.example"));
@@ -406,7 +406,7 @@ public sealed class DeploymentRendererTests
         Assert.Contains("Deployment failed", stripped);
         Assert.Contains("healthcheck_timeout", stripped);
         Assert.Contains("Container did not respond to /health within 60s", stripped);
-        Assert.Contains("Logs: minicloud logs dep_fail", stripped);
+        Assert.Contains("Logs: minicloud logs 20261110.106", stripped);
         // Red box border ANSI
         Assert.Contains("\x1b[31m┌", output);
         Assert.Contains("\x1b[31m└", output);
@@ -429,7 +429,7 @@ public sealed class DeploymentRendererTests
 
         renderer.Initialize(plan);
         renderer.DeploymentCreationStarted();
-        renderer.DeploymentCreated("dep_rec", "deploying");
+        renderer.DeploymentCreated("20261110.110", "deploying");
         renderer.DeploymentReconnecting();
 
         var output = console.Output;
@@ -437,9 +437,9 @@ public sealed class DeploymentRendererTests
         // Amber ANSI
         Assert.Contains("\x1b[33mNetwork connection lost", output);
 
-        renderer.DeploymentReconnected("dep_rec", "deploying");
+        renderer.DeploymentReconnected("20261110.110", "deploying");
         var restoredOutput = console.Output;
-        Assert.Contains("dep_rec  deploying", restoredOutput);
+        Assert.Contains("20261110.110  deploying", restoredOutput);
     }
 
     [Fact]
@@ -459,7 +459,7 @@ public sealed class DeploymentRendererTests
 
         renderer.Initialize(plan);
         renderer.DeploymentCreationStarted();
-        renderer.DeploymentCreated("dep_nc", "deploying");
+        renderer.DeploymentCreated("20261110.111", "deploying");
         renderer.DeploymentSucceeded(new DeploymentSuccessResult(
             ServicesCount: 1,
             ConsoleUrl: null,
@@ -497,9 +497,9 @@ public sealed class DeploymentRendererTests
 
         renderer.Initialize(plan);
         renderer.DeploymentCreationStarted();
-        renderer.DeploymentCreated("dep_narrow", "failed");
+        renderer.DeploymentCreated("20261110.104", "failed");
         renderer.DeploymentFailed(new DeploymentFailureResult(
-            DeploymentId: "dep_narrow",
+            DeploymentNumber: "20261110.104",
             FailureCode: "very_long_failure_code_that_exceeds_normal_line_length",
             FailureMessage: "This is a very long error message that will definitely wrap multiple times within forty columns without breaking the box border.",
             ConsoleUrl: null));
@@ -527,10 +527,10 @@ public sealed class DeploymentRendererTests
 
         renderer.Initialize(plan);
         renderer.DeploymentCreationStarted();
-        renderer.DeploymentCreated("dep_long", "deploying");
+        renderer.DeploymentCreated("20261110.107", "deploying");
         renderer.DeploymentSucceeded(new DeploymentSuccessResult(
             ServicesCount: 1,
-            ConsoleUrl: "https://console.example.com/organizations/my-org/apps/my-app/deployments/dep_long_long_long_identifier",
+            ConsoleUrl: "https://console.example.com/deployments/20261110.9223372036854775807?organizationId=org_long_long_long_identifier",
             ServiceUrls: [("very-long-service-name-exceeding-width", "https://very-long-service-name-exceeding-width.example.com/subpath/to/app")]));
 
         var output = console.Output;
@@ -538,7 +538,7 @@ public sealed class DeploymentRendererTests
         Assert.Contains("┌", output);
         Assert.Contains("└", output);
         // Verify URLs are preserved intact without being sliced
-        Assert.Contains("https://console.example.com/organizations/my-org/apps/my-app/deployments/dep_long_long_long_identifier", output);
+        Assert.Contains("https://console.example.com/deployments/20261110.9223372036854775807?organizationId=org_long_long_long_identifier", output);
         Assert.Contains("https://very-long-service-name-exceeding-width.example.com/subpath/to/app", output);
         // No OSC 8 escape sequence leakage
         Assert.DoesNotContain("]8;;", output);
@@ -577,7 +577,7 @@ public sealed class DeploymentRendererTests
         await Task.WhenAll(tasks);
 
         renderer.DeploymentCreationStarted();
-        renderer.DeploymentCreated("dep_conc", "deploying");
+        renderer.DeploymentCreated("20261110.108", "deploying");
         renderer.DeploymentSucceeded(new DeploymentSuccessResult(
             ServicesCount: services.Length,
             ConsoleUrl: "https://console.example",
@@ -641,7 +641,7 @@ public sealed class DeploymentRendererTests
 
         renderer.Initialize(plan);
         renderer.DeploymentCreationStarted();
-        renderer.DeploymentCreated("dep_test_123", "deploying");
+        renderer.DeploymentCreated("20261110.101", "deploying");
 
         var output = console.Output;
         var stripped = TerminalTextHelper.StripAnsi(output);
@@ -653,7 +653,7 @@ public sealed class DeploymentRendererTests
 
         // Stage row shows service count and deployment ID
         Assert.Contains("Deploy  (6 services)", stripped);
-        Assert.Contains("dep_test_123", stripped);
+        Assert.Contains("20261110.101", stripped);
     }
 
     [Fact]
@@ -672,8 +672,8 @@ public sealed class DeploymentRendererTests
             SelectedServicesCount: 6);
 
         renderer.Initialize(plan);
-        renderer.DeploymentCreated("dep_test_456", "deploying");
-        renderer.DeploymentActivityUpdated("dep_test_456", "Building Docker images (2/6)", "agency-ui: Step 4/8 RUN npm run build");
+        renderer.DeploymentCreated("20261110.102", "deploying");
+        renderer.DeploymentActivityUpdated("20261110.102", "Building Docker images (2/6)", "agency-ui: Step 4/8 RUN npm run build");
 
         var output = console.Output;
         var stripped = TerminalTextHelper.StripAnsi(output);
@@ -700,12 +700,12 @@ public sealed class DeploymentRendererTests
             SelectedServicesCount: 2);
 
         renderer.Initialize(plan);
-        renderer.DeploymentCreated("dep_plain_1", "deploying");
-        renderer.DeploymentActivityUpdated("dep_plain_1", "Preparing host environment");
-        renderer.DeploymentActivityUpdated("dep_plain_1", "Building Docker images (1/2)", "web: Step 1/5");
+        renderer.DeploymentCreated("20261110.103", "deploying");
+        renderer.DeploymentActivityUpdated("20261110.103", "Preparing host environment");
+        renderer.DeploymentActivityUpdated("20261110.103", "Building Docker images (1/2)", "web: Step 1/5");
         // Repeating same phase should not duplicate milestone output
-        renderer.DeploymentActivityUpdated("dep_plain_1", "Building Docker images (1/2)", "web: Step 2/5");
-        renderer.DeploymentActivityUpdated("dep_plain_1", "Starting application services");
+        renderer.DeploymentActivityUpdated("20261110.103", "Building Docker images (1/2)", "web: Step 2/5");
+        renderer.DeploymentActivityUpdated("20261110.103", "Starting application services");
 
         var output = console.Output;
         Assert.Contains("Deploy: Preparing host environment", output);

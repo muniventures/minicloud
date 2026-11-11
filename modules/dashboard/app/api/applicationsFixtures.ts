@@ -48,7 +48,7 @@ export function appsFixtureApplications(): Application[] {
           domains: [
             { id: "dom_1", hostname: "app.example.com", url: "https://app.example.com", sslStatus: "active", reserved: false },
           ],
-          latestDeployment: { id: "dep_1", status: "succeeded", websiteUrl: "https://app.example.com", completedAt: "2026-11-09T08:12:00Z" },
+          latestDeployment: { id: "dep_1", number: "20261109.3", status: "succeeded", websiteUrl: "https://app.example.com", completedAt: "2026-11-09T08:12:00Z" },
           runtimeObservation: { state: "running", connected: true, stale: false, observedAt: "2026-11-09T09:00:00Z", lastSeenAt: "2026-11-09T09:00:00Z", totalServices: 4, healthyServices: 4 },
           createdAt: "2026-09-01T12:00:00Z",
           updatedAt: "2026-11-09T08:12:00Z",
@@ -71,7 +71,7 @@ export function appsFixtureApplications(): Application[] {
           domains: [
             { id: "dom_2", hostname: "staging.app.example.com", url: "https://staging.app.example.com", sslStatus: "pending", reserved: false },
           ],
-          latestDeployment: { id: "dep_2", status: "failed", websiteUrl: null, completedAt: "2026-11-09T07:40:00Z" },
+          latestDeployment: { id: "dep_2", number: "20261109.2", status: "failed", websiteUrl: null, completedAt: "2026-11-09T07:40:00Z" },
           runtimeObservation: { state: "stopped", connected: false, stale: true, observedAt: "2026-11-09T06:00:00Z", lastSeenAt: "2026-11-09T06:00:00Z", totalServices: 4, healthyServices: 0 },
           createdAt: "2026-09-02T12:00:00Z",
           updatedAt: "2026-11-09T07:40:00Z",
@@ -92,7 +92,7 @@ export function appsFixtureApplications(): Application[] {
           deletionError: null,
           placementLocked: false,
           domains: [],
-          latestDeployment: { id: "dep_3", status: "succeeded", websiteUrl: "https://feat-checkout.munipages.example.com", completedAt: "2026-11-09T06:05:00Z" },
+          latestDeployment: { id: "dep_3", number: "20261109.1", status: "succeeded", websiteUrl: "https://feat-checkout.munipages.example.com", completedAt: "2026-11-09T06:05:00Z" },
           runtimeObservation: { state: "running", connected: true, stale: false, observedAt: "2026-11-09T09:00:00Z", lastSeenAt: "2026-11-09T09:00:00Z", totalServices: 2, healthyServices: 2 },
           createdAt: "2026-11-08T10:00:00Z",
           updatedAt: "2026-11-09T06:05:00Z",

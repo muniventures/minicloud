@@ -83,7 +83,7 @@ public sealed class CliDeploymentSecretTests
             tokens.SaveToken("mc_test");
             var handler = new SecretHandler("failure");
             var app = new CliApplication(console, environment, tokens, new MinicloudApiClient(environment, tokens, new HttpClient(handler)));
-            var args = command is "status" or "logs" ? new[] { command, "dep_test" } : new[] { "deploy", "api", "--no-publish", "--config", config };
+            var args = command is "status" or "logs" ? new[] { command, "20261110.1" } : new[] { "deploy", "api", "--no-publish", "--config", config };
             var result = await app.RunAsync(args, default);
             Assert.Equal(command == "logs" ? CliExitCodes.Success : CliExitCodes.DeploymentFailed, result);
             Assert.Contains("missing_service_secret", console.Output);
@@ -116,9 +116,9 @@ public sealed class CliDeploymentSecretTests
                     ? new[] { new { id = "sec_test", appId = "app_test", serviceName = source == "app" ? "" : source == "other-service" ? "worker" : "api", name = "INSTAGRAM_APP_SECRET", status = source == "deleted" ? "deleted" : "active" } }
                     : Array.Empty<object>(),
                 "/api/secrets" => new { id = "sec_synced", appId = "app_test", serviceName = "api", name = "INSTAGRAM_APP_SECRET", status = "active" },
-                "/api/deployments/dep_test/logs" => Array.Empty<object>(),
-                "/api/deployments" => new { id = "dep_test", appId = "app_test", status = "queued" },
-                "/api/deployments/dep_test" or "/api/deployments/dep_test/refresh" => new { id = "dep_test", appId = "app_test", organizationId = "org_test", database = "none", status = source == "failure" ? "failed" : "succeeded", failureCode = "missing_service_secret", failureMessage = "Service 'api' references missing secret 'INSTAGRAM_APP_SECRET' for environment variable 'Instagram__AppSecret'.", services = Array.Empty<object>() },
+                "/api/deployments/20261110.1/logs" => Array.Empty<object>(),
+                "/api/deployments" => new { id = "dep_test", number = "20261110.1", appId = "app_test", status = "queued" },
+                "/api/deployments/20261110.1" or "/api/deployments/20261110.1/refresh" => new { id = "dep_test", number = "20261110.1", appId = "app_test", organizationId = "org_test", database = "none", status = source == "failure" ? "failed" : "succeeded", failureCode = "missing_service_secret", failureMessage = "Service 'api' references missing secret 'INSTAGRAM_APP_SECRET' for environment variable 'Instagram__AppSecret'.", services = Array.Empty<object>() },
                 _ => throw new InvalidOperationException("Unexpected request: " + request.Method + " " + path)
             };
             if (path == "/api/deployments" && request.Method == HttpMethod.Post) { DeploymentCreated = true; }

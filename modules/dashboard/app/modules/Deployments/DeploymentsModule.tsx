@@ -26,7 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { RotateCw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { refreshDeployment } from "../../api/deploymentsApi";
 import { useAuth } from "../../core/auth/AuthProvider";
@@ -41,6 +41,7 @@ import type {
   DeploymentStatus,
 } from "../../models/controlPlane";
 import { useDeploymentFeed } from "./useDeploymentFeed";
+import { deploymentDetailPath, deploymentKey } from "./deploymentRoutes";
 import { isActiveDeployment } from "./deploymentDetailPresentation";
 import {
   deploymentCreatedTime,
@@ -50,6 +51,8 @@ import {
 
 export function DeploymentsModule() {
   const { selectedOrganization } = useAuth();
+  const selectedOrganizationId = useRef(selectedOrganization?.id);
+  selectedOrganizationId.current = selectedOrganization?.id;
   const { deployments, error: feedError, loading: isLoading, refresh: refreshFeed } =
     useDeploymentFeed(selectedOrganization?.id);
   const [now, setNow] = useState(Date.now);
@@ -72,7 +75,7 @@ export function DeploymentsModule() {
   );
   const [appNames, setAppNames] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
-  const [refreshingDeploymentId, setRefreshingDeploymentId] = useState<string | null>(null);
+  const [refreshingDeployments, setRefreshingDeployments] = useState<ReadonlySet<string>>(() => new Set());
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -98,7 +101,7 @@ export function DeploymentsModule() {
         .filter((deployment) => {
           const f = query.filters;
           return (
-            `${deployment.id} ${appNames[deployment.appId] ?? ""}`
+            `${deployment.number} ${appNames[deployment.appId] ?? ""}`
               .toLowerCase()
               .includes(query.search.trim().toLowerCase()) &&
             (!f.status || deployment.status === f.status) &&
@@ -113,26 +116,35 @@ export function DeploymentsModule() {
             query.sort === "status" ? a.status : a.createdAt,
             query.sort === "status" ? b.status : b.createdAt,
             query.direction,
-            a.id,
-            b.id,
+            a.number,
+            b.number,
           ),
         ),
     [deployments, query, appNames],
   );
 
-  async function refreshRow(deploymentId: string) {
-    setRefreshingDeploymentId(deploymentId);
+  // Pending row refreshes are keyed by organization+number and target the organization captured at click time.
+  async function refreshRow(organizationId: string, number: string) {
+    const key = deploymentKey({ organizationId, number });
+    const update = (pending: boolean) => setRefreshingDeployments((current) => {
+      const next = new Set(current);
+      if (pending) next.add(key); else next.delete(key);
+      return next;
+    });
+    update(true);
     setError(null);
     try {
-      await refreshFeed(() => refreshDeployment(deploymentId));
+      await refreshFeed(() => refreshDeployment({ organizationId, number }));
     } catch (refreshError) {
-      setError(
-        refreshError instanceof Error
-          ? refreshError.message
-          : "Unable to refresh deployment.",
-      );
+      if (organizationId === selectedOrganizationId.current) {
+        setError(
+          refreshError instanceof Error
+            ? refreshError.message
+            : "Unable to refresh deployment.",
+        );
+      }
     } finally {
-      setRefreshingDeploymentId(null);
+      update(false);
     }
   }
 
@@ -205,23 +217,26 @@ export function DeploymentsModule() {
               <TableBody>
                 {filteredDeployments.map((deployment) => {
                   const created = deploymentCreatedTime(deployment.createdAt, now);
+                  const href = deploymentDetailPath(deployment.organizationId, deployment.number);
+                  const refreshing = refreshingDeployments.has(deploymentKey(deployment));
                   return (
                   <NavigableTableRow
                     key={deployment.id}
-                    href={`/deployments/${deployment.id}`}
+                    href={href}
                   >
                     <TableCell data-label="App">
                       <Link
+                        aria-label={`Deployment ${deployment.number}, ${appNames[deployment.appId] ?? "App unavailable"}`}
                         className="text-primary"
-                        to={`/deployments/${deployment.id}`}
+                        to={href}
                       >
                         {appNames[deployment.appId] ?? "App unavailable"}
                       </Link>
                       <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <span className="max-w-32 truncate">
-                          {deployment.id}
+                        <span className="font-mono">
+                          {deployment.number}
                         </span>
-                        <CopyButton value={deployment.id} />
+                        <CopyButton value={deployment.number} ariaLabel={`Copy deployment number ${deployment.number}`} />
                       </div>
                     </TableCell>
                     <TableCell data-label="Status">
@@ -245,26 +260,22 @@ export function DeploymentsModule() {
                     <TableCell data-label="Actions" className="text-right">
                       <div className="flex justify-end gap-2">
                         <Button
-                          aria-label={`Refresh ${deployment.id}`}
-                          disabled={refreshingDeploymentId === deployment.id}
-                          onClick={() => void refreshRow(deployment.id)}
+                          aria-label={`Refresh deployment ${deployment.number}`}
+                          disabled={refreshing}
+                          onClick={() => void refreshRow(deployment.organizationId, deployment.number)}
                           size="icon"
                           variant="outline"
                         >
                           <RotateCw
                             className={
-                              refreshingDeploymentId === deployment.id
+                              refreshing
                                 ? "h-4 w-4 animate-spin"
                                 : "h-4 w-4"
                             }
                           />
                         </Button>
                         <Button asChild size="sm" variant="outline">
-                          <Link
-                            to={
-                              `/deployments/${deployment.id}`
-                            }
-                          >
+                          <Link aria-label={`Open deployment ${deployment.number}`} to={href}>
                             Open
                           </Link>
                         </Button>

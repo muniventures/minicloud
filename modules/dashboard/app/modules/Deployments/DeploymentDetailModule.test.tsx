@@ -5,7 +5,10 @@ import {
   screen,
   within,
 } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { useCallback, useState, type PropsWithChildren } from "react";
+import { AuthContext } from "../../core/auth/AuthProvider";
+import { accountProfile, authFixture } from "../../test/accountFixtures";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getEnvironmentDetail } from "../../api/environmentsApi";
 import {
@@ -30,12 +33,49 @@ vi.mock("../../api/deploymentsApi", () => ({
   listDeploymentLogs: vi.fn(),
   refreshDeployment: vi.fn(),
 }));
-vi.mock("../../core/auth/AuthProvider", () => ({
-  useAuth: () => ({ selectedOrganization: { id: "org_123", name: "Org" } }),
-}));
+
+const memberships = [
+  { id: "org_123", name: "Org", slug: "org", role: "owner" },
+  { id: "org_456", name: "Other", slug: "other", role: "member" },
+];
+let locationSearch = "";
+function LocationProbe() {
+  locationSearch = useLocation().search;
+  return null;
+}
+function TestAuth({ children }: PropsWithChildren) {
+  const [selectedId, setSelectedId] = useState("org_123");
+  const selectOrganization = useCallback((id: string) => {
+    if (!memberships.some((organization) => organization.id === id)) return false;
+    setSelectedId(id);
+    return true;
+  }, []);
+  return (
+    <AuthContext.Provider value={authFixture({
+      profile: { ...accountProfile, organizations: memberships },
+      selectedOrganization: memberships.find((organization) => organization.id === selectedId)!,
+      selectOrganization,
+    })}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+function renderDetail(path = "/deployments/20261110.1?organizationId=org_123") {
+  return render(
+    <TestAuth>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/deployments/:deploymentNumber" element={<><DeploymentDetailModule /><LocationProbe /></>} />
+        </Routes>
+      </MemoryRouter>
+    </TestAuth>,
+  );
+}
+const org123 = { organizationId: "org_123", number: "20261110.1" };
 
 const deployment = {
   id: "dep_123456789",
+  number: "20261110.1",
   appId: "app_123",
   organizationId: "org_123",
   database: "sqlite" as const,
@@ -61,6 +101,7 @@ describe("DeploymentDetailModule", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(getEnvironmentDetail).mockResolvedValue({
       id: "app_123",
       name: "Demo",
@@ -88,15 +129,13 @@ describe("DeploymentDetailModule", () => {
   });
 
   it("cancels the deployment and disables repeated requests while stopping", async () => {
-    vi.mocked(cancelDeployment).mockResolvedValue({ id: deployment.id, cancellationRequested: true });
-    render(<MemoryRouter initialEntries={["/apps/app_123/deployments/dep_123"]}>
-      <Routes><Route path="/apps/:appId/deployments/:deploymentId" element={<DeploymentDetailModule />} /></Routes>
-    </MemoryRouter>);
+    vi.mocked(cancelDeployment).mockResolvedValue({ id: deployment.id, number: deployment.number, cancellationRequested: true });
+    renderDetail();
     const cancel = await screen.findByRole("button", { name: "Cancel deployment" });
     vi.mocked(getDeployment).mockResolvedValue({ ...deployment, cancellationRequestedAt: "2026-10-27T12:00:00Z" });
     fireEvent.click(cancel);
     expect(await screen.findByRole("button", { name: "Canceling..." })).toBeDisabled();
-    expect(cancelDeployment).toHaveBeenCalledWith("dep_123");
+    expect(cancelDeployment).toHaveBeenCalledWith(org123);
     expect(await screen.findByText(/Waiting for execution to stop/)).toBeInTheDocument();
   });
 
@@ -127,19 +166,8 @@ describe("DeploymentDetailModule", () => {
         createdAt: "2026-09-25T12:03:02Z",
       },
     ]);
-    render(
-      <MemoryRouter
-        initialEntries={["/apps/app_123/deployments/dep_123456789"]}
-      >
-        <Routes>
-          <Route
-            path="/apps/:appId/deployments/:deploymentId"
-            element={<DeploymentDetailModule />}
-          />
-        </Routes>
-      </MemoryRouter>,
-    );
-    await screen.findByRole("heading", { name: "Demo" });
+    renderDetail();
+    await screen.findByRole("heading", { name: "Deployment 20261110.1" });
     expect(
       screen.getByRole("heading", { name: "Starting application containers" }),
     ).toBeInTheDocument();
@@ -191,19 +219,8 @@ describe("DeploymentDetailModule", () => {
         { ...deployment.services[0], name: "worker", public: false, urls: [] },
       ],
     });
-    render(
-      <MemoryRouter
-        initialEntries={["/apps/app_123/deployments/dep_123456789"]}
-      >
-        <Routes>
-          <Route
-            path="/apps/:appId/deployments/:deploymentId"
-            element={<DeploymentDetailModule />}
-          />
-        </Routes>
-      </MemoryRouter>,
-    );
-    await screen.findByRole("heading", { name: "Demo" });
+    renderDetail();
+    await screen.findByRole("heading", { name: "Deployment 20261110.1" });
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Services" }));
     fireEvent.click(screen.getByRole("tab", { name: "Services" }));
     const table = await screen.findByRole("table", {
@@ -261,17 +278,52 @@ describe("DeploymentDetailModule", () => {
       { id: "queue", level: "info", message: "Deployment queued.", createdAt: "2026-09-25T12:00:59Z" },
       ...(redispatched ? [{ id: "retry", level: "info" as const, message: "Deployment manually queued.", createdAt: requeuedAt }] : []),
     ]);
-    render(
-      <MemoryRouter initialEntries={["/apps/app_123/deployments/dep_123456789"]}>
-        <Routes>
-          <Route path="/apps/:appId/deployments/:deploymentId" element={<DeploymentDetailModule />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-    await screen.findByRole("heading", { name: "Demo" });
+    renderDetail();
+    await screen.findByRole("heading", { name: "Deployment 20261110.1" });
     const expectedStart = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
       .format(new Date(redispatched ? requeuedAt : deployment.createdAt));
     expect(screen.getByText(`Started ${expectedStart}`)).toBeInTheDocument();
+  });
+
+  it("shows the number in heading, breadcrumb, refresh and copy controls", async () => {
+    renderDetail();
+    await screen.findByRole("heading", { name: "Deployment 20261110.1" });
+    expect(await screen.findByText("Demo")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh deployment 20261110.1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy deployment number 20261110.1" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: /breadcrumb/i })).toHaveTextContent("Deployment 20261110.1");
+    expect(screen.queryByText(deployment.id)).not.toBeInTheDocument();
+    for (const call of [getDeployment, listDeploymentEvents, listDeploymentActivities, listDeploymentLogs]) {
+      expect(vi.mocked(call).mock.calls[0][0]).toEqual(org123);
+    }
+  });
+
+  it("selects a valid organization hint before fetching the deep link", async () => {
+    vi.mocked(getDeployment).mockResolvedValue({ ...deployment, organizationId: "org_456" });
+    renderDetail("/deployments/20261110.1?organizationId=org_456&tab=logs");
+    await screen.findByRole("heading", { name: "Deployment 20261110.1" });
+    expect(getDeployment).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(getDeployment).mock.calls[0][0]).toEqual({ organizationId: "org_456", number: "20261110.1" });
+    expect(locationSearch).toBe("?organizationId=org_456&tab=logs");
+  });
+
+  it("uses the selected organization without a hint and records it in the URL", async () => {
+    renderDetail("/deployments/20261110.1");
+    await screen.findByRole("heading", { name: "Deployment 20261110.1" });
+    expect(vi.mocked(getDeployment).mock.calls[0][0]).toEqual(org123);
+    expect(locationSearch).toBe("?organizationId=org_123");
+  });
+
+  it.each([
+    ["/deployments/20261110.1?organizationId=org_unknown"],
+    ["/deployments/dep_123456789?organizationId=org_123"],
+    ["/deployments/20261310.1?organizationId=org_123"],
+    ["/deployments/20261110.01?organizationId=org_123"],
+  ])("shows not found without any request for %s", async (path) => {
+    renderDetail(path);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Deployment not found.");
+    expect(getDeployment).not.toHaveBeenCalled();
+    expect(listDeploymentEvents).not.toHaveBeenCalled();
   });
 
   it("creates concise summaries without claiming unreported success", () => {

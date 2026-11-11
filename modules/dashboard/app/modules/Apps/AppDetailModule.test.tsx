@@ -211,7 +211,7 @@ describe("AppDetailModule", () => {
   it("discovers CLI builds on an open app history page and updates its summary without reloading secrets", async () => {
     vi.useFakeTimers();
     const deployment = {
-      id: "previous", appId: "app_123", organizationId: "org_123", database: "sqlite" as const,
+      id: "previous", number: "20261027.1", appId: "app_123", organizationId: "org_123", database: "sqlite" as const,
       status: "failed" as const, services: [], consoleUrl: "https://console.example.test",
       createdAt: "2026-10-27T12:00:00Z",
     };
@@ -226,10 +226,12 @@ describe("AppDetailModule", () => {
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Deployments" }), { button: 0 });
     fireEvent.click(screen.getByRole("tab", { name: "Deployments" }));
     for (const status of ["waiting_for_build", "queued", "succeeded"] as const) {
-      vi.mocked(listDeployments).mockResolvedValue([{ ...deployment, id: "new-build", status }]);
+      vi.mocked(listDeployments).mockResolvedValue([{ ...deployment, id: "new-build", number: "20261027.2", status }]);
       await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
       expect(screen.getAllByText(status === "waiting_for_build" ? "Waiting for build" : status).length).toBeGreaterThanOrEqual(1);
-      expect(screen.getByText("new-build")).toBeInTheDocument();
+      expect(screen.getByText("20261027.2")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Open deployment 20261027.2" })).toHaveAttribute("href", "/deployments/20261027.2?organizationId=org_123");
+      expect(screen.queryByText("new-build")).not.toBeInTheDocument();
     }
     expect(listAppServiceSecretServices).toHaveBeenCalledTimes(secretReads);
     expect(getEnvironmentDetail).toHaveBeenCalledTimes(appReads);

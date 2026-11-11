@@ -206,20 +206,36 @@ public sealed class MinicloudApiClient
         return uploadUrl.StartsWith("/", StringComparison.Ordinal) ? uploadUrl : "/" + uploadUrl;
     }
 
-    public Task<DeploymentResponse> GetDeploymentAsync(string deploymentId, CancellationToken cancellationToken) =>
-        SendAsync<DeploymentResponse>(HttpMethod.Get, $"/api/deployments/{Uri.EscapeDataString(deploymentId)}", null, cancellationToken);
+    public Task<DeploymentResponse> GetDeploymentAsync(string organizationId, string deploymentNumber, CancellationToken cancellationToken) =>
+        SendAsync<DeploymentResponse>(HttpMethod.Get, DeploymentPath(organizationId, deploymentNumber), null, cancellationToken);
 
-    public Task<DeploymentCancellationResponse> CancelDeploymentAsync(string deploymentId, CancellationToken cancellationToken) =>
-        SendAsync<DeploymentCancellationResponse>(HttpMethod.Post, $"/api/deployments/{Uri.EscapeDataString(deploymentId)}/cancel", null, cancellationToken);
+    public Task<DeploymentCancellationResponse> CancelDeploymentAsync(string organizationId, string deploymentNumber, CancellationToken cancellationToken) =>
+        SendAsync<DeploymentCancellationResponse>(HttpMethod.Post, DeploymentPath(organizationId, deploymentNumber, "cancel"), null, cancellationToken);
 
-    public Task<DeploymentResponse> RefreshDeploymentAsync(string deploymentId, CancellationToken cancellationToken) =>
-        SendAsync<DeploymentResponse>(HttpMethod.Post, $"/api/deployments/{Uri.EscapeDataString(deploymentId)}/refresh", null, cancellationToken);
+    public Task<DeploymentResponse> RefreshDeploymentAsync(string organizationId, string deploymentNumber, CancellationToken cancellationToken) =>
+        SendAsync<DeploymentResponse>(HttpMethod.Post, DeploymentPath(organizationId, deploymentNumber, "refresh"), null, cancellationToken);
 
-    public Task<IReadOnlyList<DeploymentEventResponse>> GetDeploymentEventsAsync(string deploymentId, CancellationToken cancellationToken) =>
-        SendAsync<IReadOnlyList<DeploymentEventResponse>>(HttpMethod.Get, $"/api/deployments/{Uri.EscapeDataString(deploymentId)}/events", null, cancellationToken);
+    public Task<IReadOnlyList<DeploymentEventResponse>> GetDeploymentEventsAsync(string organizationId, string deploymentNumber, CancellationToken cancellationToken) =>
+        SendAsync<IReadOnlyList<DeploymentEventResponse>>(HttpMethod.Get, DeploymentPath(organizationId, deploymentNumber, "events"), null, cancellationToken);
 
-    public Task<IReadOnlyList<DeploymentLogResponse>> GetDeploymentLogsAsync(string deploymentId, CancellationToken cancellationToken) =>
-        SendAsync<IReadOnlyList<DeploymentLogResponse>>(HttpMethod.Get, $"/api/deployments/{Uri.EscapeDataString(deploymentId)}/logs", null, cancellationToken);
+    public Task<IReadOnlyList<DeploymentLogResponse>> GetDeploymentLogsAsync(string organizationId, string deploymentNumber, CancellationToken cancellationToken) =>
+        SendAsync<IReadOnlyList<DeploymentLogResponse>>(HttpMethod.Get, DeploymentPath(organizationId, deploymentNumber, "logs"), null, cancellationToken);
+
+    // Customer deployment routes are addressed by (organization, number); opaque IDs are not accepted.
+    internal static string DeploymentPath(string organizationId, string deploymentNumber, string? action = null)
+    {
+        if (string.IsNullOrWhiteSpace(organizationId))
+        {
+            throw new ArgumentException("An organization is required for deployment requests.", nameof(organizationId));
+        }
+        if (!DeploymentNumber.IsValid(deploymentNumber))
+        {
+            throw new ArgumentException($"'{deploymentNumber}' is not a deployment number.", nameof(deploymentNumber));
+        }
+
+        var suffix = action is null ? string.Empty : "/" + action;
+        return $"/api/deployments/{deploymentNumber}{suffix}?organizationId={Uri.EscapeDataString(organizationId)}";
+    }
 
     public Task<IReadOnlyList<RuntimeLogResponse>> GetRuntimeLogsAsync(
         string appId,

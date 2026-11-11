@@ -135,10 +135,10 @@ public sealed class CliEnvironmentDeploymentTests
                 SubmittedApplication = json.RootElement.GetProperty("applicationId").GetString();
                 SubmittedEnvironment = json.RootElement.GetProperty("environmentId").GetString();
                 Assert.Equal(SubmittedEnvironment, json.RootElement.GetProperty("appId").GetString());
-                response = new { id = "dep_env", appId = SubmittedEnvironment, status = "queued" };
+                response = new { id = "dep_env", number = "20261110.2", appId = SubmittedEnvironment, status = "queued" };
             }
-            else if (path.StartsWith("/api/deployments/dep_env"))
-                response = path.EndsWith("/logs") ? Array.Empty<object>() : new { id = "dep_env", appId = SubmittedEnvironment, organizationId = "org", database = "sqlite", status = "succeeded", services = Array.Empty<object>() };
+            else if (path.StartsWith("/api/deployments/20261110.2"))
+                response = path.EndsWith("/logs") ? Array.Empty<object>() : new { id = "dep_env", number = "20261110.2", appId = SubmittedEnvironment, organizationId = "org", database = "sqlite", status = "succeeded", services = Array.Empty<object>() };
             else throw new InvalidOperationException(request.Method + " " + path);
             return new(HttpStatusCode.OK) { Content = JsonContent.Create(response) };
         }

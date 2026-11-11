@@ -18,13 +18,23 @@ public sealed partial class CliApplication
     {
         if (args.FirstOrDefault() == "cancel")
         {
-            if (args.Length != 2 || args[1].StartsWith("-", StringComparison.Ordinal))
+            var cancelPositionals = new List<string>();
+            for (var i = 1; i < args.Length; i++)
             {
-                _console.WriteError("Usage: minicloud deploy cancel <deployment-id>");
+                if (args[i] is "--organization" or "--config") { i++; continue; }
+                if (args[i].StartsWith("--organization=", StringComparison.Ordinal) || args[i].StartsWith("--config=", StringComparison.Ordinal)) { continue; }
+                cancelPositionals.Add(args[i]);
+            }
+            var cancelNumber = cancelPositionals.Count == 1 && !cancelPositionals[0].StartsWith("-", StringComparison.Ordinal) ? cancelPositionals[0] : null;
+            if (cancelNumber is null)
+            {
+                _console.WriteError("Usage: minicloud deploy cancel <deployment-number> [--organization <id>]");
                 return CliExitCodes.ValidationError;
             }
-            await _apiClient.CancelDeploymentAsync(args[1], cancellationToken);
-            _console.WriteLine($"Cancellation requested for {args[1]}. Use 'minicloud status {args[1]} --watch' to follow completion. Changes already applied are not restored.");
+            ValidateDeploymentNumberArgument(cancelNumber);
+            var cancelOrganization = await ResolveDeploymentOrganizationAsync(args, cancellationToken);
+            await _apiClient.CancelDeploymentAsync(cancelOrganization.Id, cancelNumber, cancellationToken);
+            _console.WriteLine($"Cancellation requested for deployment {cancelNumber}. Use 'minicloud status {cancelNumber} --watch' to follow completion. Changes already applied are not restored.");
             return CliExitCodes.Success;
         }
         var branchDeploy = args.FirstOrDefault() == "branch";
@@ -319,9 +329,9 @@ public sealed partial class CliApplication
             }
             var created = await _apiClient.CreateDeploymentAsync(request, cancellationToken);
             preparation?.Submitted();
-            renderer.DeploymentCreated(created.Id, created.Status);
+            renderer.DeploymentCreated(created.Number, created.Status);
 
-            var finalDeployment = await PollDeploymentAsync(created.Id, created.Status, cancellationToken, renderer, plan.SelectedServicesCount);
+            var finalDeployment = await PollDeploymentAsync(organization.Id, created.Number, created.Status, cancellationToken, renderer, plan.SelectedServicesCount);
             if (finalDeployment.Status == "succeeded")
             {
                 var publicUrls = new List<(string ServiceName, string Url)>();
@@ -342,7 +352,7 @@ public sealed partial class CliApplication
             }
 
             renderer.DeploymentFailed(new Rendering.DeploymentFailureResult(
-                finalDeployment.Id,
+                finalDeployment.Number,
                 finalDeployment.FailureCode ?? finalDeployment.Status,
                 finalDeployment.FailureMessage,
                 finalDeployment.ConsoleUrl));

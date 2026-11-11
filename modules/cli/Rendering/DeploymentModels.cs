@@ -16,7 +16,7 @@ public sealed record DeploymentSuccessResult(
     IReadOnlyList<(string ServiceName, string Url)> ServiceUrls);
 
 public sealed record DeploymentFailureResult(
-    string? DeploymentId,
+    string? DeploymentNumber,
     string? FailureCode,
     string? FailureMessage,
     string? ConsoleUrl);

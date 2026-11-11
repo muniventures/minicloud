@@ -59,7 +59,7 @@ public sealed partial class CliApplication
         WriteSshAccessDetails(app.SshAccess, app.SshConnection);
         if (app.LatestDeployment is not null)
         {
-            _console.WriteLine($"Latest deployment: {app.LatestDeployment.Id} ({app.LatestDeployment.Status})");
+            _console.WriteLine($"Latest deployment: {app.LatestDeployment.Number} ({app.LatestDeployment.Status})");
         }
         if (app.Branches.Count > 0)
         {

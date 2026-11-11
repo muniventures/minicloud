@@ -1,5 +1,6 @@
 import { getEnvironmentDetail } from "@/api/environmentsApi";
 import { CollectionToolbar } from "@/core/components/CollectionToolbar";
+import { CopyButton } from "@/core/components/CopyButton";
 import { RecordToolbar } from "@/core/components/RecordToolbar";
 import { useRecordCollection } from "@/core/components/useRecordCollection";
 import { options } from "@/core/components/collectionQuery";
@@ -7,7 +8,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RotateCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
 import { PageScaffold } from "../../core/components/PageScaffold";
 import {
   dashboardRoutes,
@@ -20,12 +20,15 @@ import type {
   DeploymentResponse,
 } from "@/models/controlPlane";
 import { useDeploymentDetail } from "./useDeploymentDetail";
+import { useDeploymentScope } from "./useDeploymentScope";
+import { deploymentKey } from "./deploymentRoutes";
 import { DeploymentProgressPanel } from "./components/DeploymentProgressPanel";
 import { DeploymentServicesTable } from "./components/DeploymentServicesTable";
 
 export function DeploymentDetailModule() {
-  const { deploymentId } = useParams();
-  const [appName, setAppName] = useState("Deployment");
+  const scope = useDeploymentScope();
+  const scopeKey = scope.ref ? deploymentKey(scope.ref) : "";
+  const [appName, setAppName] = useState<string | null>(null);
   const {
     snapshot,
     error,
@@ -35,12 +38,13 @@ export function DeploymentDetailModule() {
     cancel: handleCancel,
     refresh: handleRefresh,
     dispatch: handleManualDispatch,
-  } = useDeploymentDetail(deploymentId);
+  } = useDeploymentDetail(scope.ref);
   const deployment = snapshot?.deployment;
   const events = snapshot?.events ?? [];
   const activities = snapshot?.activities ?? [];
   const logs = snapshot?.logs ?? [];
   useEffect(() => {
+    setAppName(null);
     if (!deployment?.appId) return;
     let canceled = false;
     void getEnvironmentDetail(deployment.appId)
@@ -53,14 +57,14 @@ export function DeploymentDetailModule() {
     return () => {
       canceled = true;
     };
-  }, [deployment?.appId]);
+  }, [scopeKey, deployment?.appId]);
 
   const sources = useMemo(
     () => ["all", ...Array.from(new Set(logs.map((log) => log.source)))],
     [logs],
   );
   const logCollection = useRecordCollection(
-    `${deploymentId}:logs`,
+    `${scopeKey}:logs`,
     logs,
     {
       createdAt: (item) => item.createdAt,
@@ -70,13 +74,17 @@ export function DeploymentDetailModule() {
     (item) => item.id,
   );
   const activityCollection = useRecordCollection(
-    `${deploymentId}:activities`,
+    `${scopeKey}:activities`,
     activities,
     { name: (item) => item.name, status: (item) => item.status },
     (item) => item.id,
   );
   const filteredLogs = logCollection.records;
   const activeDeployment = isActiveDeployment(deployment?.status);
+
+  if (scope.status === "not_found") {
+    return <p role="alert" className="text-sm text-destructive">Deployment not found.</p>;
+  }
 
   if (error && !deployment) {
     return <p className="text-sm text-destructive">{error}</p>;
@@ -92,19 +100,24 @@ export function DeploymentDetailModule() {
     <PageScaffold
       breadcrumbs={[
         { label: "Deployments", to: dashboardRoutes.deployments.path },
-        { label: "Deployment details" },
+        { label: `Deployment ${deployment.number}` },
       ]}
       header={
         <RecordToolbar
-          title={appName}
+          title={`Deployment ${deployment.number}`}
           back={{ to: dashboardRoutes.deployments.path, label: "Back to deployments" }}
           status={<StatusBadge status={activeDeployment && deployment.cancellationRequestedAt ? "canceling" : deployment.status} />}
           metadata={
             <>
+              <span>{appName ?? "Loading app..."}</span>
+              <span className="inline-flex items-center gap-1">
+                <span className="font-mono">{deployment.number}</span>
+                <CopyButton value={deployment.number} label="Copy number" ariaLabel={`Copy deployment number ${deployment.number}`} />
+              </span>
               <span>{formatTiming(deployment, events)}</span>
             </>
           }
-          refreshLabel={`Refresh deployment ${deployment.id}`}
+          refreshLabel={`Refresh deployment ${deployment.number}`}
           onRefresh={handleRefresh}
           loading={isRefreshing}
           secondary={activeDeployment ? {
@@ -123,7 +136,7 @@ export function DeploymentDetailModule() {
           }}
         />
       }
-      title={appName}
+      title={`Deployment ${deployment.number}`}
     >
       {activeDeployment && deployment.cancellationRequestedAt ? (
         <p role="status" className="text-sm text-muted-foreground">Cancellation requested. Waiting for execution to stop. Changes already applied are not restored.</p>
