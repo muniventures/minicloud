@@ -103,6 +103,132 @@ public sealed class SshAccessApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task InventoryCoalescesNewDuplicateFingerprintsAndRepeatedEntries()
+    {
+        using var owner = Client(_ownerToken);
+        var account = await CreateAccountAsync(owner, "Duplicates", "synthetic-a1");
+        _factory.Cloud.Keys["synthetic-a1"] =
+        [
+            (42, "Laptop", LaptopKey),
+            (44, "Laptop alias", LaptopKey),
+            (44, "Laptop alias", LaptopKey)
+        ];
+
+        var key = Assert.Single(await SuccessAsync<ProviderSshKeyResponse[]>(await owner.GetAsync(KeysUrl(account.Id))));
+        Assert.Equal("Laptop alias", key.Name);
+        Assert.Equal("discovered", key.RegistrationState);
+        var refreshed = Assert.Single(await SuccessAsync<ProviderSshKeyResponse[]>(await owner.GetAsync(KeysUrl(account.Id))));
+        Assert.Equal(key, refreshed);
+
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+        var stored = Assert.Single(await db.ProviderSshKeys.ToListAsync());
+        Assert.Equal(key.Id, stored.Id);
+        Assert.Equal(key.Fingerprint, stored.Fingerprint);
+        Assert.Equal("44", stored.ProviderKeyId);
+        Assert.Equal(0, _factory.Cloud.Posts);
+    }
+
+    [Fact]
+    public async Task InventoryCoalescesExistingAndNewKeysWithoutChangingSelectionIdentity()
+    {
+        using var owner = Client(_ownerToken);
+        var account = await CreateAccountAsync(owner, "Mixed", "synthetic-a1");
+        var initial = await SuccessAsync<ProviderSshKeyResponse[]>(await owner.GetAsync(KeysUrl(account.Id)));
+        var laptop = initial.Single(x => x.Name == "Laptop");
+        var plan = await CreatePlanAsync(owner, account.Id, "Mixed small");
+        var env = await CreateAppAsync(owner, "duplicate-selection", plan.Name,
+            new SshAccessRequest("existing", KeyId: laptop.Id));
+        _factory.Cloud.Keys["synthetic-a1"] =
+        [
+            (44, "Laptop alias", LaptopKey),
+            (42, "Laptop", LaptopKey),
+            (50, "New", NewKey),
+            (51, "New alias", NewKey),
+            (51, "New alias", NewKey)
+        ];
+
+        var refreshed = await SuccessAsync<ProviderSshKeyResponse[]>(await owner.GetAsync(KeysUrl(account.Id)));
+        Assert.Equal(2, refreshed.Length);
+        Assert.Equal(laptop, refreshed.Single(x => x.Id == laptop.Id));
+        var added = refreshed.Single(x => x.Id != laptop.Id);
+        Assert.Equal("New alias", added.Name);
+        Assert.NotEqual(laptop.Fingerprint, added.Fingerprint);
+        var unchanged = await SuccessAsync<ApplicationEnvironmentResponse>(await owner.GetAsync(EnvUrl(env)));
+        Assert.Equal(laptop.Id, unchanged.SshAccess!.KeyId);
+        Assert.Equal(laptop.Fingerprint, unchanged.SshAccess.Fingerprint);
+        Assert.Equal(env.SshAccess!.Revision, unchanged.SshAccess.Revision);
+
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+        var stored = await db.ProviderSshKeys.ToListAsync();
+        Assert.Equal(3, stored.Count);
+        Assert.Equal("42", stored.Single(x => x.Id == laptop.Id).ProviderKeyId);
+        Assert.Equal("51", stored.Single(x => x.Id == added.Id).ProviderKeyId);
+        Assert.Equal(0, _factory.Cloud.Posts);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InventoryQuarantinesChangedReferencesDespiteAliasesAndLaterCorrectDuplicates(bool aliasFirst)
+    {
+        using var owner = Client(_ownerToken);
+        var account = await CreateAccountAsync(owner, "Changed", "synthetic-a1");
+        var initial = await SuccessAsync<ProviderSshKeyResponse[]>(await owner.GetAsync(KeysUrl(account.Id)));
+        var laptop = initial.Single(x => x.Name == "Laptop");
+        var shared = initial.Single(x => x.Name == "Shared");
+        _factory.Cloud.Keys["synthetic-a1"] = aliasFirst
+            ? [(44, "Laptop alias", LaptopKey), (42, "Changed laptop", SharedKey),
+                (42, "Laptop", LaptopKey), (43, "Shared", SharedKey)]
+            : [(42, "Changed laptop", SharedKey), (43, "Shared", SharedKey),
+                (42, "Laptop", LaptopKey), (44, "Laptop alias", LaptopKey)];
+
+        var refreshed = await SuccessAsync<ProviderSshKeyResponse[]>(await owner.GetAsync(KeysUrl(account.Id)));
+        Assert.Equal(2, refreshed.Length);
+        Assert.Equal("unknown", refreshed.Single(x => x.Id == laptop.Id).RegistrationState);
+        Assert.Equal(shared with { RegistrationState = "unknown" }, refreshed.Single(x => x.Id == shared.Id));
+        var plan = await CreatePlanAsync(owner, account.Id, "Changed small");
+        var env = await CreateAppAsync(owner, "changed-reference", plan.Name);
+        await ErrorAsync(await owner.PatchAsJsonAsync(EnvUrl(env),
+            new UpdateEnvironmentRequest(SshAccess: new SshAccessRequest("existing", KeyId: laptop.Id, ExpectedRevision: 0))),
+            "ssh_key_not_found", HttpStatusCode.NotFound);
+
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+        var stored = await db.ProviderSshKeys.SingleAsync(x => x.Id == laptop.Id);
+        Assert.Equal("42", stored.ProviderKeyId);
+        Assert.Equal(laptop.Fingerprint, stored.Fingerprint);
+        Assert.Equal(LaptopKey, stored.PublicKey);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InventoryDoesNotMaterializeContradictoryNewIdsEvenWithCorrectDuplicatesAndAliases(bool reversed)
+    {
+        using var owner = Client(_ownerToken);
+        var account = await CreateAccountAsync(owner, "Contradictory", "synthetic-a1");
+        _factory.Cloud.Keys["synthetic-a1"] = reversed
+            ? [(42, "Shared", SharedKey), (42, "Laptop", LaptopKey),
+                (42, "Shared", SharedKey), (44, "Laptop alias", LaptopKey), (99, "New", NewKey)]
+            : [(42, "Laptop", LaptopKey), (42, "Shared", SharedKey),
+                (42, "Laptop", LaptopKey), (44, "Laptop alias", LaptopKey), (99, "New", NewKey)];
+
+        var key = Assert.Single(await SuccessAsync<ProviderSshKeyResponse[]>(await owner.GetAsync(KeysUrl(account.Id))));
+        Assert.Equal("New", key.Name);
+        Assert.Equal("discovered", key.RegistrationState);
+
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+        var stored = Assert.Single(await db.ProviderSshKeys.ToListAsync());
+        Assert.Equal(key.Id, stored.Id);
+        Assert.Equal("99", stored.ProviderKeyId);
+        Assert.Equal(NewKey, stored.PublicKey);
+        Assert.Equal(0, _factory.Cloud.Posts);
+    }
+
+    [Fact]
     public async Task InventoryDenialIsForbiddenAndOutageIsUnavailableNeverAnEmptyList()
     {
         using var owner = Client(_ownerToken);

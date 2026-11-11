@@ -149,20 +149,53 @@ public sealed class EnvironmentSshAccessService(
         }
 
         var now = clock.GetUtcNow();
-        var result = new List<ProviderSshKeyResponse>();
+        var result = new Dictionary<string, ProviderSshKey>();
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         if (db.Database.IsNpgsql())
             await db.ProviderAccounts.FromSqlInterpolated($"SELECT * FROM provider_accounts WHERE id = {providerAccountId} AND organization_id = {organizationId} FOR UPDATE").AsNoTracking().SingleAsync(ct);
 
+        await db.ProviderSshKeys.Where(x =>
+            x.OrganizationId == organizationId && x.ProviderAccountId == providerAccountId).LoadAsync(ct);
+        // Keep the account-scoped uniqueness lookup current as unsaved inventory rows are added.
+        var localKeys = db.ProviderSshKeys.Local.Where(x =>
+            x.OrganizationId == organizationId && x.ProviderAccountId == providerAccountId).ToArray();
+        var byFingerprint = localKeys.ToDictionary(x => x.Fingerprint, StringComparer.Ordinal);
+        var observedFingerprints = localKeys.Where(x => x.ProviderKeyId is not null)
+            .ToDictionary(x => x.ProviderKeyId!, x => x.Fingerprint, StringComparer.Ordinal);
+        var inventory = new List<(ProviderSshKeyInfo Key, ValidatedSshPublicKey Validated)>();
+        var inconsistentFingerprints = new HashSet<string>(StringComparer.Ordinal);
         foreach (var providerKey in providerKeys)
         {
             if (string.IsNullOrWhiteSpace(providerKey.Id) ||
                 !SshPublicKeyParser.TryParse(providerKey.PublicKey, out var validated))
                 continue;
 
-            var local = await db.ProviderSshKeys.SingleOrDefaultAsync(x =>
-                x.OrganizationId == organizationId && x.ProviderAccountId == providerAccountId &&
-                (x.ProviderKeyId == providerKey.Id || x.Fingerprint == validated!.Fingerprint), ct);
+            inventory.Add((providerKey, validated!));
+            if (observedFingerprints.TryGetValue(providerKey.Id, out var observed) &&
+                !string.Equals(observed, validated!.Fingerprint, StringComparison.Ordinal))
+            {
+                inconsistentFingerprints.Add(observed);
+                inconsistentFingerprints.Add(validated.Fingerprint);
+            }
+            else
+                observedFingerprints.TryAdd(providerKey.Id, validated!.Fingerprint);
+        }
+
+        // Quarantine every fingerprint implicated by a contradictory ID for this entire response.
+        // Do not let an alias rebound or a later correct duplicate erase the inconsistency.
+        foreach (var local in localKeys.Where(x => inconsistentFingerprints.Contains(x.Fingerprint)))
+        {
+            local.RegistrationState = "unknown";
+            local.UpdatedAt = now;
+            result[local.Id] = local;
+        }
+
+        foreach (var (providerKey, validated) in inventory)
+        {
+            if (inconsistentFingerprints.Contains(validated.Fingerprint))
+                continue;
+
+            byFingerprint.TryGetValue(validated.Fingerprint, out var local);
             if (local is null)
             {
                 local = new ProviderSshKey
@@ -172,7 +205,7 @@ public sealed class EnvironmentSshAccessService(
                     ProviderAccountId = providerAccountId,
                     ProviderKeyId = providerKey.Id,
                     Name = string.IsNullOrWhiteSpace(providerKey.Name) ? "SSH key" : providerKey.Name,
-                    PublicKey = validated!.PublicKey,
+                    PublicKey = validated.PublicKey,
                     Fingerprint = validated.Fingerprint,
                     KeyType = validated.KeyType,
                     RegistrationState = "discovered",
@@ -180,11 +213,7 @@ public sealed class EnvironmentSshAccessService(
                     UpdatedAt = now
                 };
                 db.ProviderSshKeys.Add(local);
-            }
-            else if (!string.Equals(local.Fingerprint, validated!.Fingerprint, StringComparison.Ordinal))
-            {
-                local.RegistrationState = "unknown";
-                local.UpdatedAt = now;
+                byFingerprint.Add(local.Fingerprint, local);
             }
             else
             {
@@ -199,13 +228,14 @@ public sealed class EnvironmentSshAccessService(
                 local.UpdatedAt = now;
             }
 
-            result.Add(new ProviderSshKeyResponse(local.Id, local.ProviderAccountId, local.Name,
-                local.Fingerprint, local.KeyType, local.RegistrationState));
+            result[local.Id] = local;
         }
 
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
-        return result.OrderBy(x => x.Name, StringComparer.Ordinal).ThenBy(x => x.Fingerprint, StringComparer.Ordinal).ToArray();
+        return result.Values.Select(local => new ProviderSshKeyResponse(local.Id, local.ProviderAccountId, local.Name,
+                local.Fingerprint, local.KeyType, local.RegistrationState))
+            .OrderBy(x => x.Name, StringComparer.Ordinal).ThenBy(x => x.Fingerprint, StringComparer.Ordinal).ToArray();
     }
 
     private Task<bool> CanAsync(ActorIdentity actor, string organizationId, OrganizationAction action, CancellationToken ct) =>
