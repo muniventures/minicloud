@@ -58,6 +58,7 @@ public sealed record AppDomainResponse(
 
 public sealed record LatestDeploymentResponse(
     string Id,
+    string Number,
     string Status,
     string? WebsiteUrl,
     DateTimeOffset? CompletedAt);

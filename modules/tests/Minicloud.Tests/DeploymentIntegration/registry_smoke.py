@@ -201,8 +201,9 @@ networks:
             assert sql("SELECT count(*) FROM deployment_artifacts") == "0"
             status, queued = request("/api/deployments", "POST", {"appId": app, "database": "none", "services": [{"name": "api", "imagePublicationId": identity, "port": 8080, "public": True, "path": "/", "healthPath": "/"}]}, token)
             assert status == 201, (status, queued)
+            assert queued["statusUrl"] == f"/api/deployments/{queued['number']}?organizationId=org_{component.RUN_ID}", queued
             assert sql(f"SELECT image FROM deployment_services WHERE deployment_id='{queued['id']}'").endswith("@" + evidence[1]["digest"])
-            assert request(f"/api/deployments/{queued['id']}/dispatch", "POST", token=token)[0] == 200
+            assert request(queued["statusUrl"].replace("?", "/dispatch?", 1), "POST", token=token)[0] == 200
             sql(f"UPDATE deployments SET status='Canceled',completed_at=now() WHERE id='{queued['id']}'")
             # Keep the real build visible long enough to observe waiting before queue admission.
             with (source / "Dockerfile").open("a") as build_file:
@@ -301,7 +302,7 @@ services:
             assert request("/api/registry/token?" + scope, headers={"Authorization": basic})[0] == 401
             sql(f"UPDATE registry_sessions SET server_id='srv_{component.RUN_ID}' WHERE id='{pull_session}'")
 
-            assert request(f"/api/deployments/{queued['id']}/dispatch", "POST", token=token)[0] == 409
+            assert request(queued["statusUrl"].replace("?", "/dispatch?", 1), "POST", token=token)[0] == 409
 
             operator = hashlib.sha256((directory / "auth/key.pem").read_bytes()).hexdigest()
             assert request("/internal/registry/maintenance", "POST", {"action": "begin"}, token)[0] == 401

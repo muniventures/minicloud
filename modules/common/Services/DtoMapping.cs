@@ -17,6 +17,7 @@ public static class DtoMapping
             .OrderByDescending(x => x.CreatedAt)
             .Select(x => new LatestDeploymentResponse(
                 x.Id,
+                RequireNumber(x),
                 ControlPlaneValidation.ToWireValue(x.Status),
                 x.WebsiteUrl,
                 x.CompletedAt))
@@ -96,6 +97,7 @@ public static class DtoMapping
             .ThenByDescending(x => x.Id, StringComparer.Ordinal)
             .Select(x => new LatestDeploymentResponse(
                 x.Id,
+                RequireNumber(x),
                 ControlPlaneValidation.ToWireValue(x.Status),
                 x.WebsiteUrl,
                 x.CompletedAt))
@@ -220,12 +222,13 @@ public static class DtoMapping
 
         return new(
             deployment.Id,
+            RequireNumber(deployment),
             deployment.AppId,
             deployment.OrganizationId,
             ControlPlaneValidation.ToWireValue(deployment.Database),
             ControlPlaneValidation.ToWireValue(deployment.Status),
             deployment.WebsiteUrl,
-            $"{consoleBaseUrl.TrimEnd('/')}/apps/{Uri.EscapeDataString(deployment.AppId)}/deployments/{Uri.EscapeDataString(deployment.Id)}",
+            DeploymentLinks.ConsoleUrl(consoleBaseUrl, deployment.OrganizationId, RequireNumber(deployment)),
             deployment.FailureCode,
             deployment.FailureMessage,
             deployment.Services.Select(x => new DeploymentServiceResponse(
@@ -248,4 +251,9 @@ public static class DtoMapping
             deployment.App.ApplicationId,
             deployment.AppId);
     }
+
+    // Projections must load the persisted number; an empty value means a detached projection missed it.
+    private static string RequireNumber(Deployment deployment) => string.IsNullOrEmpty(deployment.Number)
+        ? throw new InvalidOperationException($"Deployment '{deployment.Id}' was projected without its number.")
+        : deployment.Number;
 }

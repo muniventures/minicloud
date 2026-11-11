@@ -101,5 +101,6 @@ public sealed class AssetReleaseService(MinicloudDbContext db, DeploymentLifecyc
 
     public static AssetReleaseResponse Response(AssetRelease release, Deployment? deployment) => new(release.Id, release.AppId, release.Name,
         release.InputSha256, deployment?.Id, deployment?.Status.ToString().ToLowerInvariant() ?? "unknown", release.ManifestSha256,
-        release.ManifestJson is null ? null : JsonSerializer.Deserialize<JsonElement>(release.ManifestJson), release.CreatedAt);
+        release.ManifestJson is null ? null : JsonSerializer.Deserialize<JsonElement>(release.ManifestJson), release.CreatedAt,
+        DeploymentNumber: string.IsNullOrEmpty(deployment?.Number) ? null : deployment.Number);
 }
