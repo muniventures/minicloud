@@ -100,6 +100,28 @@ describe("account browser forms", () => {
     expect(JSON.parse(fetcher.mock.calls[2][1].body).code).toBe("123456");
   });
 
+  it("renders and submits both profile name parts from the real Kratos settings shape", async () => {
+    const flow = browserFlow("settings");
+    flow.ui.nodes = [
+      flow.ui.nodes[0],
+      { group: "profile", type: "text", name: "traits.name.first", value: "Synthetic", required: false, messages: [] },
+      { group: "profile", type: "text", name: "traits.name.last", value: "Operator", required: false, messages: [] },
+      { group: "profile", type: "submit", name: "method", value: "profile", required: false, messages: [] }
+    ];
+    const fetcher = vi.fn().mockResolvedValueOnce(jsonResponse({ flow, session: null }))
+      .mockResolvedValueOnce(jsonResponse({ flow: null, session: accountSession }));
+    vi.stubGlobal("fetch", fetcher);
+    setCsrfToken("synthetic-csrf");
+    mount("settings");
+    expect(await screen.findByLabelText("First name")).toHaveValue("Synthetic");
+    fireEvent.change(screen.getByLabelText("Last name"), { target: { value: "Lovelace" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual({
+      csrf_token: "upstream-csrf", "traits.name.first": "Synthetic", "traits.name.last": "Lovelace", method: "profile"
+    });
+  });
+
   it("renders enabled recovery nodes safely and sends session CSRF for password settings", async () => {
     const flow = browserFlow("settings");
     flow.ui.nodes[2].value = "must-not-render";

@@ -171,6 +171,62 @@ public sealed class AccountBrowserFlowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SettingsProfileExposesAndMergesFirstAndLastNameIntoOneTraitsObject()
+    {
+        var (cookie, csrf) = await Login();
+        using (var read = new HttpRequestMessage(HttpMethod.Get, "/api/account/flows/settings/browser"))
+        {
+            read.Headers.Add("Cookie", cookie + "; ory_kratos_session=synthetic-ory-session");
+            var flow = (await (await _client.SendAsync(read)).Content.ReadFromJsonAsync<AccountFlowResponse>())!.Flow!;
+            Assert.Equal("Synthetic", Assert.Single(flow.Ui.Nodes, node => node.Name == "traits.name.first").Value);
+            Assert.Equal("Operator", Assert.Single(flow.Ui.Nodes, node => node.Name == "traits.name.last").Value);
+        }
+        using var request = Submit("settings", new Dictionary<string, string>
+        {
+            ["csrf_token"] = "flow-csrf", ["method"] = "profile", ["traits.email"] = "operator@example.test",
+            ["traits.name.first"] = "Ada", ["traits.name.last"] = "Lovelace"
+        }, cookie);
+        request.Headers.Add("X-Minicloud-CSRF", csrf);
+        Assert.Equal(HttpStatusCode.OK, (await _client.SendAsync(request)).StatusCode);
+        var traits = JsonDocument.Parse(_factory.Upstream.Requests.First(x => x.Body.Length > 0 && x.Uri.AbsolutePath == "/self-service/settings").Body)
+            .RootElement.GetProperty("traits");
+        Assert.Equal("operator@example.test", traits.GetProperty("email").GetString());
+        Assert.Equal("""{"first":"Ada","last":"Lovelace"}""", traits.GetProperty("name").GetRawText());
+    }
+
+    [Fact]
+    public async Task SettingsProfileForwardsLastNameAlone()
+    {
+        var (cookie, csrf) = await Login();
+        _factory.Upstream.Requests.Clear();
+        using var request = Submit("settings", new Dictionary<string, string>
+        {
+            ["csrf_token"] = "flow-csrf", ["method"] = "profile", ["traits.name.last"] = "Lovelace"
+        }, cookie);
+        request.Headers.Add("X-Minicloud-CSRF", csrf);
+        Assert.Equal(HttpStatusCode.OK, (await _client.SendAsync(request)).StatusCode);
+        var traits = JsonDocument.Parse(_factory.Upstream.Requests[0].Body).RootElement.GetProperty("traits");
+        Assert.Equal("""{"name":{"last":"Lovelace"}}""", traits.GetRawText());
+    }
+
+    [Theory]
+    [InlineData("traits.name.middle", null)]
+    [InlineData("traits.nickname", null)]
+    [InlineData("traits.name", "traits.name.last")]
+    [InlineData("traits.name.last", "traits.name")]
+    public async Task SettingsProfileRejectsUnknownOrConflictingNameTraits(string field, string? second)
+    {
+        var (cookie, csrf) = await Login();
+        _factory.Upstream.Requests.Clear();
+        var fields = new Dictionary<string, string> { ["csrf_token"] = "flow-csrf", ["method"] = "profile", [field] = "Lovelace" };
+        if (second is not null) fields[second] = "Ada";
+        using var request = Submit("settings", fields, cookie);
+        request.Headers.Add("X-Minicloud-CSRF", csrf);
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(request)).StatusCode);
+        Assert.Empty(_factory.Upstream.Requests);
+    }
+
+    [Fact]
     public async Task LogoutUsesTheReconstructedBrowserSessionAndRevokesIt()
     {
         var (cookie, csrf) = await Login();
@@ -605,7 +661,15 @@ public sealed class AccountBrowserFlowTests : IAsyncLifetime
                         {
                             new { group = "default", attributes = new { name = "csrf_token", type = "hidden", value = "synthetic-csrf", required = true } },
                             new { group = "default", attributes = new { name = "evil", type = "script", value = "private upstream diagnostic", required = false } }
-                        }.Concat(Google
+                        }.Concat(kind == "settings"
+                            ? [
+                                // Profile nodes captured from Kratos v1.3.1 with the packaged identity schema.
+                                new { group = "profile", attributes = new { name = "traits.email", type = "email", value = "operator@example.test", required = true } },
+                                new { group = "profile", attributes = new { name = "traits.name.first", type = "text", value = "Synthetic", required = false } },
+                                new { group = "profile", attributes = new { name = "traits.name.last", type = "text", value = "Operator", required = false } },
+                                new { group = "profile", attributes = new { name = "method", type = "submit", value = "profile", required = false } }
+                            ]
+                            : []).Concat(Google
                             ? [new { group = "oidc", attributes = new { name = kind == "settings" ? "link" : "provider", type = "submit", value = "google", required = false } }]
                             : []),
                         messages = new[] { new { id = 1, type = "error", text = "private upstream diagnostic" } }

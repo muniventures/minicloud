@@ -46,7 +46,7 @@ public sealed class KratosBrowserFlowClient(HttpClient client, IOptions<KratosOp
     private static readonly HashSet<string> Fields = new(StringComparer.Ordinal)
     {
         "csrf_token", "identifier", "password", "method", "email", "code",
-        "traits.email", "traits.name", "traits.name.first"
+        "traits.email", "traits.name", "traits.name.first", "traits.name.last"
     };
 
     public static bool IsFlowCookie(string name) =>
@@ -384,9 +384,11 @@ public sealed class KratosBrowserFlowClient(HttpClient client, IOptions<KratosOp
                 throw InvalidFlow();
             if (field.Name.StartsWith("traits.", StringComparison.Ordinal))
             {
-                if (field.Name == "traits.name.first")
+                if (field.Name is "traits.name.first" or "traits.name.last")
                 {
-                    if (!traits.TryAdd("name", new Dictionary<string, string> { ["first"] = value }))
+                    // Both name parts share one schema object; a flat "traits.name" string cannot be mixed in.
+                    if (!traits.TryGetValue("name", out var existing)) traits["name"] = existing = new Dictionary<string, string>(StringComparer.Ordinal);
+                    if (existing is not Dictionary<string, string> name || !name.TryAdd(field.Name[12..], value))
                         throw InvalidFlow();
                 }
                 else if (!traits.TryAdd(field.Name[7..], value)) throw InvalidFlow();

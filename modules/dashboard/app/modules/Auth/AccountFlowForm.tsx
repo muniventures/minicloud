@@ -17,7 +17,9 @@ function fieldLabel(name: string) {
     case "identifier": case "traits.email": case "email": return "Email";
     case "password": return "Password";
     case "code": return "Recovery code";
-    case "traits.name": case "traits.name.first": return "Display name";
+    case "traits.name": return "Display name";
+    case "traits.name.first": return "First name";
+    case "traits.name.last": return "Last name";
     default: return "Account detail";
   }
 }
@@ -27,7 +29,7 @@ function supportedNode(node: FlowNode) {
       node.name === "csrf_token" && node.type !== "hidden") return false;
   return ["default", "password", "profile", "code", "recovery"].includes(node.group) &&
     ["hidden", "text", "email", "password", "submit"].includes(node.type) &&
-    ["csrf_token", "identifier", "password", "method", "email", "code", "traits.email", "traits.name", "traits.name.first"].includes(node.name);
+    ["csrf_token", "identifier", "password", "method", "email", "code", "traits.email", "traits.name", "traits.name.first", "traits.name.last"].includes(node.name);
 }
 
 export function AccountFlowForm({ kind, returnTo = "/apps", flowId, notice }: {
@@ -162,14 +164,15 @@ export function AccountFlowForm({ kind, returnTo = "/apps", flowId, notice }: {
               if (node.type === "hidden") return <input key={key} type="hidden" name={node.name} value={node.value ?? ""} />;
               if (node.type === "submit") return (
                 <Button key={key} type="submit" name={node.name} value={node.value ?? ""} disabled={busy || restartRequired}>
-                  {kind === "login" ? "Sign in" : kind === "settings" ? "Save password" : "Continue recovery"}
+                  {kind === "login" ? "Sign in" : kind === "settings" ? node.value === "profile" ? "Save profile" : "Save password" : "Continue recovery"}
                 </Button>
               );
               return (
                 <div key={key} className="space-y-2">
                   <Label htmlFor={id}>{fieldLabel(node.name)}</Label>
                   <Input id={id} name={node.name} type={node.name === "password" ? "password" : node.type}
-                    autoComplete={node.name === "password" ? kind === "settings" ? "new-password" : "current-password" : node.name === "code" ? "one-time-code" : "username"}
+                    autoComplete={node.name === "password" ? kind === "settings" ? "new-password" : "current-password" : node.name === "code" ? "one-time-code" :
+                      node.name === "traits.name.first" ? "given-name" : node.name === "traits.name.last" ? "family-name" : "username"}
                     defaultValue={node.name === "password" || node.name === "code" ? "" : node.value ?? ""}
                     required={node.required} disabled={busy || restartRequired} aria-invalid={node.messages.length > 0} />
                   {node.messages.length > 0 ? <p className="text-sm text-destructive">Check this field.</p> : null}
