@@ -180,10 +180,10 @@ public sealed class ProviderSshKeyService(
         if (recorded.StartsWith("api_key:", StringComparison.Ordinal))
         {
             var id = recorded["api_key:".Length..];
+            // Expiry is checked in memory because Sqlite cannot translate DateTimeOffset comparisons.
             var apiKey = await db.ApiKeys.AsNoTracking().SingleOrDefaultAsync(x =>
-                x.Id == id && x.OrganizationId == organizationId && x.RevokedAt == null &&
-                (x.ExpiresAt == null || x.ExpiresAt > clock.GetUtcNow()), ct);
-            if (apiKey is null)
+                x.Id == id && x.OrganizationId == organizationId && x.RevokedAt == null, ct);
+            if (apiKey is null || (apiKey.ExpiresAt is not null && apiKey.ExpiresAt <= clock.GetUtcNow()))
                 throw new ProviderSshKeyException("ssh_key_changed", "The API key that selected SSH access is no longer active.");
             return new ActorIdentity("api_key", null, id, organizationId,
                 (JsonSerializer.Deserialize<string[]>(apiKey.ScopesJson) ?? []).ToHashSet(StringComparer.Ordinal));
