@@ -96,9 +96,10 @@ independent random values:
 Each `docker compose up` re-runs initialization and migrations idempotently,
 so upgrades do not depend on first-volume scripts.
 
-First-operator seeding is not part of this stack yet. It must call T30's
-shared bootstrap host entry point, which is not available in this source
-revision.
+First-operator seeding uses the API executable's shared
+[`bootstrap` host entry point](bootstrap.md), after migrations. The packaged
+installer and browser setup transport are still separate follow-up work;
+this command does not make the source bundle a qualified installation.
 
 ### OpenBao lifecycle
 
