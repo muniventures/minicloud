@@ -1,6 +1,6 @@
 # T40–T44 — Packaged self-hosting
 
-Repository: `muniventures/minicloud`. Status: T40 merged (#45); T41 in review on `feat/t41-self-hosting-stack`; T42–T44 not started.
+Repository: `muniventures/minicloud`. Code status: T40 foundation #45, T41 #47/#51/#53, shared bootstrap #52, T42 #54 and T43 #55 are merged. T44 is blocked on required maintenance producer #56 and actual T50 merge/explicit narrow ownership handoff; draft #57 preserves only independent recovery dependencies, not full backup/restore/upgrade. Required stack/host/release acceptance remains open. See [execution plan](../0.execution-plan.md) and coordinator #19 for current claims, exact merges and qualification gates.
 Authority: [packaged self-hosting specification](../../v1.0-self-hosted-installation.md). Its original T00–T90 IDs are local to that document; the IDs below are the umbrella assignments. Implement the stated scope without adding installation modes or rewriting deployment behavior.
 
 | Task | Deliverable | Hard dependencies | Parallel work |
@@ -9,7 +9,7 @@ Authority: [packaged self-hosting specification](../../v1.0-self-hosted-installa
 | T41 | Persistent dependency stack and runtime dashboard configuration | T00, T30 schema/bootstrap contract | T40; T30 implementation and T31 with separate files |
 | T42 | First-operator browser setup and provider onboarding | T30, T31, T41 merged | T43 preparation; SSH/number work outside setup/auth files |
 | T43 | Server installer and manual Compose parity | T40, T41, T42 merged | T51/T52/T61/T62 outside installer files |
-| T44 | Upgrade, coordinated backup/restore and recovery | T43 merged | Remaining independent customer-surface tasks |
+| T44 | Upgrade, coordinated backup/restore and recovery | T43 and maintenance producer #56 merged | Remaining independent customer-surface tasks |
 
 Each row is a separate Copilot issue/PR. Agents run focused checks with synthetic fixtures. Codex owns final combined and disposable-host validation after implementation merges. Preparing a release workflow does not authorize publishing images/releases or using protected-environment credentials.
 
