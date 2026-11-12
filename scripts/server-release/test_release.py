@@ -94,7 +94,12 @@ class ReleaseTests(unittest.TestCase):
             root, config, root / "packaging/server/bundle",
             f"server-v{selected['serverVersion']}", source,
         )
-        self.assertEqual(candidate["cliCompatibility"]["sourceRevisions"], [source])
+        revisions = candidate["cliCompatibility"]["sourceRevisions"]
+        self.assertIn(source, revisions)
+        self.assertIn("4fa46a46e0d492d0e9ae41e1cd9b8a8188170443", revisions)
+        self.assertEqual(len(revisions), len(set(revisions)))
+        for revision in revisions:
+            self.assertRegex(revision, r"^[0-9a-f]{40}$")
         self.assertIsNone(candidate["cliCompatibility"]["minimumVersion"])
         self.assertIsNone(candidate["cliCompatibility"]["maximumExclusiveVersion"])
 
@@ -204,6 +209,8 @@ class ReleaseTests(unittest.TestCase):
                 with self.assertRaises(release.ReleaseError):
                     release.load_input(self.config, TAG, SOURCE)
         for change in ({"protocolVersion": 2}, {"sourceRevisions": []}, {"sourceRevisions": ["latest"]},
+                       {"sourceRevisions": [SOURCE, SOURCE]}, {"sourceRevisions": [SOURCE[:7]]},
+                       {"sourceRevisions": [SOURCE.upper()]},
                        {"minimumVersion": "1.0.0"}, {"minimumVersion": "2.0.0", "maximumExclusiveVersion": "1.0.0"},
                        {"minimumVersion": "1.0.0-01", "maximumExclusiveVersion": "2.0.0"}):
             with self.subTest(change=change):
