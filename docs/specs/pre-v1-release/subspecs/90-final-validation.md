@@ -5,9 +5,9 @@ Status: not started. Cloud-agent focused checks and GitHub CI do not replace thi
 
 ## T90 — Local combined integration
 
-Depends on: all T00–T80 implementation/handoff tasks merged in their owning repositories, with explicit no-defect/evidence-gap results where applicable. Verify actual PR merge SHAs and fresh source; do not use merely submitted branches, unpushed private changes or stale build artifacts.
+Depends on: required public T00–T62 implementation and public T80 handoff merged, with explicit no-defect/evidence-gap results where applicable. T70 private integration is backlog outside current scope, not a T90 prerequisite. Verify actual public PR merge SHAs and fresh source; do not use merely submitted branches, unpushed private changes or stale build artifacts.
 
-1. Record the selected public/private commits and complete task/CI status. Inspect file integration and migration ordering; stop on missing contracts or implementation rather than silently coding a replacement.
+1. Record the selected public candidate commits and complete task/CI status; identify private T70 as deferred backlog, not completed integration. Inspect file integration and migration ordering; stop on missing required public contracts or implementation rather than silently coding a replacement.
 2. Run combined affected .NET/API/worker/CLI, runtime Python and dashboard checks, production builds/typechecks and existing integration fixtures. Exercise populated PostgreSQL and SQLite upgrades with all new migrations together, not just independent empty-schema tests.
 3. Verify Kratos/browser sessions, exact-origin cookies/CORS/CSRF, outage versus unauthenticated behavior, source-built CLI consent/login and unchanged scoped machine authentication. Exercise concurrent/interrupted operator setup and recovery with synthetic identities.
 4. Verify SSH selection/account isolation and reservation snapshots together with initial deployment, existing DB bindings, secrets, domains and storage. Test unknown allocation outcomes without real provider purchase.
