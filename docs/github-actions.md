@@ -136,7 +136,12 @@ jobs:
 | `database` | No | `sqlite` | `sqlite` or `postgres`. |
 | `minicloud_environment` | No | `prod` | `prod` or `staging`. `prod` uses the production Minicloud API. `staging` uses `https://api.cloud-dev.muni.dev`. |
 | `services` | Yes | | YAML service array. Uses the same service fields as `minicloud.yml`, with `name` added because a workflow input cannot receive the keyed `services` map directly. |
-| `minicloud_version` | No | `7416e1408ecd9d11f58c638f0caf1c28e5fa6e3f` | Full lowercase CLI source commit SHA or exact CLI version tag (for example `v3.1.0`). Branches, `latest`, and `server-v*` tags are rejected. The workflow builds this source using Git and the .NET 10 SDK. |
+| `minicloud_version` | No | `2a5ae0ccea6c3dd680b4146586ec0668c60c8b93` | Full lowercase CLI source commit SHA or exact CLI version tag (for example `v3.1.0`). Branches, `latest`, and `server-v*` tags are rejected. The workflow builds this source using Git and the .NET 10 SDK. |
+
+This default selects the merged public authentication, SSH and numbered-deployment
+client for the [unpublished public candidate](public-candidate-handoff.md).
+It is a source/protocol selection, not evidence of tested runtime compatibility
+or permission to deploy that candidate.
 
 ## Services
 

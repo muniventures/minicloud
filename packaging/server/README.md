@@ -40,10 +40,13 @@ until all of these are present in the selected source revision:
   `maintenance.sh`, `release-notes.md` and `upgrade-prerequisites.md`, plus any
   supporting scripts/configuration. Only regular files/directories are allowed.
   Keep operator secrets and generated execution output out of these assets.
-- The integration owner/T80 supplies `packaging/server/release.json` with real
-  tested compatibility, schema versions and resolved dependency digests. No
-  placeholder final release version, source pin, digest or compatibility range
-  is committed here.
+- T80 supplies `packaging/server/release.json` with selected candidate
+  compatibility, schema versions and resolved dependency digests. The current
+  unpublished `0.0.1-rc.1` input selects a single merged CLI source revision,
+  **not tested runtime compatibility**. See the
+  [public candidate handoff](../../docs/public-candidate-handoff.md) for registry
+  evidence, the explicit public-only scope decision and outstanding T90/T91
+  qualification. Input presence or a successful preflight is not release acceptance.
 
 Compose must reference exactly the three product images and the four dependency
 images. Each image may be a literal manifest-pinned digest or the corresponding
@@ -73,10 +76,13 @@ noncanonical product repositories and unsupported architectures are rejected.
 
 These are **all** the input fields in `release.json`. Both CLI version bounds
 may be `null` when the nonempty list of full lowercase source SHAs identifies
-tested clients. Otherwise both bounds must be semantic versions forming a
+explicitly allowed clients. Otherwise both bounds must be semantic versions forming a
 nonempty half-open interval. Source SHAs must be unique. Compatibility means
 matching protocol **and** (explicit source SHA **or** version interval), not
-matching the server's version number. T80 owns the final tested claims.
+matching the server's version number. The validator checks the declaration's
+shape, not runtime test evidence. The current candidate allowlist is a selected
+source contract pending T90 acceptance, not a measured compatibility claim.
+Do not publish this candidate as qualified without that evidence.
 
 The producer adds `releaseTag`, the exact checked-out `sourceRevision`, and
 `images: {api, dashboard, worker}` with canonical

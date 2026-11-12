@@ -4,6 +4,7 @@ import copy
 import io
 import json
 from pathlib import Path
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -77,6 +78,25 @@ class ReleaseTests(unittest.TestCase):
         with patch.object(release, "run", return_value=json.dumps(self.compose)):
             release.package(self.root, self.config, self.payload, TAG, SOURCE, self.images_path, self.output)
         return release.read_json(self.output / "server-manifest.json")
+
+    def test_checked_in_candidate_tracks_workflow_source_and_current_payload(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / ".github/workflows/customer-deploy.yml").read_text()
+        selector = re.search(
+            r"(?m)^      minicloud_version:\n(?:        .*\n)*?        default: ([0-9a-f]{40})$",
+            workflow,
+        )
+        self.assertIsNotNone(selector)
+        source = selector.group(1)
+        config = root / "packaging/server/release.json"
+        selected = release.read_json(config)
+        candidate = release.preflight(
+            root, config, root / "packaging/server/bundle",
+            f"server-v{selected['serverVersion']}", source,
+        )
+        self.assertEqual(candidate["cliCompatibility"]["sourceRevisions"], [source])
+        self.assertIsNone(candidate["cliCompatibility"]["minimumVersion"])
+        self.assertIsNone(candidate["cliCompatibility"]["maximumExclusiveVersion"])
 
     def resign_inventory(self):
         manifest = release.read_json(self.output / "server-manifest.json")
