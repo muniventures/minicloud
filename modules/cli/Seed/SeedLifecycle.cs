@@ -33,6 +33,7 @@ internal sealed class SeedLifecycle(ISeedProvider provider, ISeedHost host, Acti
     private async Task ResumeCoreAsync(SeedState state, string directory, string? approval, string? fingerprint, CancellationToken ct)
     {
         SeedGuard.Require(state.Phase != "cleaned", "This operation was explicitly cleaned up.");
+        SeedOperatorKeys.Validate(state.Plan.OperatorPublicKeys);
         if (state.Phase == "complete") { write("Seed already recorded complete (not a live health check). Use normal server maintenance, not seed rollback."); return; }
         SeedGuard.Require(provider.CredentialScope(state.Id) == state.Plan.Quote.CredentialScope
             && await provider.GetAccountIdentityAsync(ct) == state.Plan.Quote.Account,
@@ -104,6 +105,8 @@ internal sealed class SeedLifecycle(ISeedProvider provider, ISeedHost host, Acti
             await host.PrepareAsync(state, directory, ct);
             state.HostPrepared = true; save(state);
         }
+        if (state.Plan.OperatorPublicKeys.Length > 0)
+            await host.AddOperatorKeysAsync(state, directory, ct);
         state.Phase = "awaiting_dns"; save(state);
         var domain = state.Plan.Selection.Domain;
         write($"Manual DNS: {domain}. A {server.Address}\nManual DNS: api.{domain}. A {server.Address}");

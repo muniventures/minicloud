@@ -93,11 +93,17 @@ selection, invented release, source-build fallback or implicit publication.
    while waiting for DNS or after a local interruption.
 2. **Confirm.** Obtain explicit approval of that plan before creating any
    billable resource. Nothing purchases domains, credits or subscriptions.
-3. **Create.** Generate a dedicated seed SSH key or use an explicitly selected
-   existing key without modifying/deleting it. Create one tagged control-plane
+3. **Create.** Generate a dedicated seed automation SSH key, kept separate from
+   operator keys. Create one tagged control-plane
    VPS with the selected Ubuntu image. Record the operation ID and every
    resource identifier as soon as known. Do not create an app VPS, shared network
    or load balancer implicitly.
+   Planning also offers additional operator SSH access: accept public-key files
+   or generate a separate local ed25519 pair with `ssh-keygen` when available,
+   asking about passphrase protection (default yes). Only public keys join the
+   approved plan and are installed over pinned SSH after host preparation.
+   Keep the automated seed identity separate; never upload operator private
+   keys/passphrases or require an operator passphrase for automated resume.
 4. **Establish host trust.** Obtain/verify the SSH host key through a documented
    provider-authenticated mechanism or explicit independent provider-console
    fingerprint confirmation, then pin it before transmitting secrets. Blind

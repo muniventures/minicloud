@@ -197,6 +197,8 @@ internal sealed class SeedJournal : IDisposable
             && (state.Phase != "complete" || state.InstallerState == "ready" && state.RecoveryAcknowledged && state.InstallStarted),
             "Seed journal lifecycle flags conflict. Reconcile original state; do not reset ownership or creation intent.");
         state.Plan.Selection.Validate();
+        SeedGuard.Require(state.Plan.OperatorPublicKeys is not null, "Operator public-key selection is corrupt.");
+        SeedOperatorKeys.Validate(state.Plan.OperatorPublicKeys);
         return state;
     }
 

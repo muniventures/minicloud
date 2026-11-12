@@ -97,6 +97,51 @@ the old approval before creation. Provider keys stay local, absent from
 process arguments, cloud-init, journals, tags, browser state and host config.
 Provider errors and subprocess diagnostics are suppressed rather than logged.
 
+### Operator SSH keys
+
+Interactive planning offers to add existing public keys, generate an operator
+key, or skip. These keys are **additional operator access**, separate from
+seed's unencrypted, protected automation identity. They are included in the
+reviewed plan and approval digest; they cannot be changed by resuming an
+already approved operation.
+
+Use `--ssh-public-key <public-file>` (repeatable, at most 16 keys) to supply
+OpenSSH ed25519 or RSA keys of at least 3072 bits. Do not supply private keys,
+`authorized_keys` options or multiple keys in one file. Key comments are not
+uploaded. Only the canonical public key is stored in the plan.
+
+Use `--generate-ssh-key <new-private-file>` to generate an ed25519 pair with
+local `ssh-keygen`. Its parent directory must already be owner-only (`0700`
+or a protected Windows ACL); existing files are never replaced. The CLI asks
+whether to protect the key with a passphrase, default **yes**. `ssh-keygen`
+itself reads and confirms the hidden passphrase, so it never enters Minicloud's
+arguments, journal, logs or VPS. Empty passphrases are rejected when protection
+was selected; partial/generated files are retained for operator reconciliation.
+
+Explicit `--ssh-key-passphrase` selects protected generation and still requires
+an interactive terminal. `--no-ssh-key-passphrase` explicitly opts out and
+supports unattended generation; no prompt is silently answered. Neither option
+accepts a secret value. The private key remains at the selected local path
+and is never uploaded, imported to a provider, used by seed automation or
+deleted during cleanup.
+
+```sh
+# Add an existing public key (repeat the option for additional keys):
+minicloud seed <other-required-options> --ssh-public-key /home/operator/.ssh/id_ed25519.pub
+# Or generate a new operator key and answer the passphrase question:
+minicloud seed <other-required-options> --generate-ssh-key /home/operator/.ssh/minicloud_operator
+```
+
+Noninteractive planning with no SSH-key options preserves the previous behavior:
+no additional operator keys. `--no-operator-ssh-key` explicitly skips the prompt
+in a terminal. After independently pinning host identity and preparing Python,
+seed installs the approved public keys into root's `authorized_keys` over
+pinned SSH, preserving the bootstrap key and existing entries. This update is
+idempotent on resume and does not create/delete extra provider key objects.
+If installation fails, seed retains bootstrap access and reports failure;
+do not assume operator access exists until that step succeeds. Connect using
+your retained private key and the VPS address after host identity verification.
+
 `status` is local, read-only and does not prove live health. `resume` revalidates
 the signed release and account, reconciles unique operation tags/recorded IDs,
 then continues. Creation-only quota, catalog, availability and pricing checks

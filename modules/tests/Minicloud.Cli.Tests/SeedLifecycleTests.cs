@@ -41,6 +41,37 @@ public sealed class SeedLifecycleTests : IDisposable
     }
 
     [Fact]
+    public async Task Operator_keys_are_approval_bound_and_added_only_after_host_trust_and_preparation()
+    {
+        var state = State();
+        var previousApproval = state.Plan.Approval;
+        state.Plan = state.Plan with { OperatorPublicKeys = [SeedOperatorKeysTests.PublicKey()] };
+        Assert.NotEqual(previousApproval, state.Plan.Approval);
+        await Lifecycle.ResumeAsync(state, directory, previousApproval, null, default);
+        Assert.Equal(0, provider.Creates);
+        await Lifecycle.ResumeAsync(state, directory, state.Plan.Approval, null, default);
+        Assert.Equal(0, host.OperatorKeyInstalls);
+        await Lifecycle.ResumeAsync(state, directory, null, "SHA256:independent", default);
+        Assert.Equal(1, host.OperatorKeyInstalls);
+        Assert.Equal(state.Plan.OperatorPublicKeys, host.OperatorKeys);
+        await Lifecycle.ResumeAsync(state, directory, null, null, default);
+        Assert.Equal(2, host.OperatorKeyInstalls);
+        Assert.Equal(1, provider.Creates);
+    }
+
+    [Fact]
+    public void Legacy_plan_approval_is_unchanged_when_operator_access_is_skipped()
+    {
+        var plan = State().Plan;
+        var expected = SeedGuard.Hash(JsonSerializer.Serialize(new
+        {
+            plan.Selection, Quote = plan.Quote with { RetrievedAt = DateTimeOffset.UnixEpoch },
+            plan.ReleaseDigest, plan.ReleaseSource
+        }, SeedJournal.Json));
+        Assert.Equal(expected, plan.Approval);
+    }
+
+    [Fact]
     public async Task Create_intent_is_persisted_before_dispatch_and_timeout_cannot_create_again()
     {
         var state = State();
@@ -306,6 +337,8 @@ public sealed class SeedLifecycleTests : IDisposable
     private sealed class FakeHost : ISeedHost
     {
         internal bool KeyGenerated, Prepared, TrustError, HttpsError, DnsReady = true;
+        internal int OperatorKeyInstalls;
+        internal string[] OperatorKeys = [];
         internal string Result = "awaiting_operator";
         internal Action? BeforeInstall;
         public Task CheckPrerequisitesAsync(CancellationToken ct) => Task.CompletedTask;
@@ -319,6 +352,14 @@ public sealed class SeedLifecycleTests : IDisposable
             state.HostFingerprint = fingerprint ?? state.HostFingerprint; return Task.CompletedTask;
         }
         public Task PrepareAsync(SeedState state, string directory, CancellationToken ct) { Prepared = true; return Task.CompletedTask; }
+        public Task AddOperatorKeysAsync(SeedState state, string directory, CancellationToken ct)
+        {
+            Assert.True(Prepared || state.HostPrepared);
+            Assert.NotNull(state.HostFingerprint);
+            OperatorKeyInstalls++;
+            OperatorKeys = state.Plan.OperatorPublicKeys;
+            return Task.CompletedTask;
+        }
         public Task<bool> DnsReadyAsync(SeedState state, CancellationToken ct) => Task.FromResult(DnsReady);
         public Task<string> InstallAsync(SeedState state, string directory, bool statusOnly, CancellationToken ct) { BeforeInstall?.Invoke(); return Task.FromResult(Result); }
         public Task ExportAsync(SeedState state, string directory, string destination, bool token, CancellationToken ct) => Task.CompletedTask;
