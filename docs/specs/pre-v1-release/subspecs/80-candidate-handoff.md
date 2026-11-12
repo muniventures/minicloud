@@ -1,7 +1,7 @@
 # T80 — Final candidate and source-pin handoff
 
 Repository: `muniventures/minicloud`. Owner: one final metadata/integration Copilot task, triggered by the user.
-Depends on: required public T00–T62 implementation and source repairs merged. Private T70 #36 is backlog, not a prerequisite, by explicit user direction on 2026-11-12; #44 is later validation, not a code-completion blocker. Status: assigned public-only candidate metadata for `0.0.1-rc.1`. No parallel implementation writers remain in shared release files.
+Depends on: required public T00–T62 implementation and source repairs merged. Private T70 #36 is backlog, not a prerequisite, by explicit user direction on 2026-11-12; #44 is later validation, not a code-completion blocker. Status: public code complete in #78, merge `c2440df09653c9c23181322249f662fe1801de3a`, reviewed head `f81ecf3bcfa470fdd4907cf084af292354326550`. Unpublished candidate `0.0.1-rc.1`; [selected identifiers and deferred evidence](../../../public-candidate-handoff.md). No manual tests/builds or CI reruns; static inspection only, no runtime compatibility/qualification claim. No parallel implementation writers remain in shared release files.
 
 ## Deliverable
 
