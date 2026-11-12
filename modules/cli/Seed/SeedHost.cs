@@ -99,6 +99,59 @@ internal sealed class SeedHost : ISeedHost
         SeedGuard.Require(result.ExitCode == 0, "Dedicated Ubuntu host preparation failed. Preserve resources; inspect through pinned SSH. No host output was logged.");
     }
 
+    internal const string OperatorKeysScript = """
+import base64, json, os, pathlib, stat, sys, uuid
+root = pathlib.Path("/root")
+folder = root / ".ssh"
+for path in (root, folder):
+    if path == folder and not path.exists() and not path.is_symlink():
+        path.mkdir(mode=0o700)
+    info = path.lstat()
+    assert stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022
+target = folder / "authorized_keys"
+original = b""
+if target.exists() or target.is_symlink():
+    info = target.lstat()
+    assert stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022
+    assert info.st_size <= 1024 * 1024
+    original = target.read_bytes()
+keys = json.load(sys.stdin)
+assert isinstance(keys, list) and 0 < len(keys) <= 16
+existing = {tuple(line.split()[:2]) for line in original.splitlines()}
+additions = []
+for key in keys:
+    assert isinstance(key, str) and "\n" not in key and "\r" not in key
+    fields = key.encode("ascii").split()
+    assert len(fields) == 2 and fields[0] in (b"ssh-ed25519", b"ssh-rsa")
+    base64.b64decode(fields[1], validate=True)
+    if tuple(fields) not in existing:
+        additions.append(key.encode("ascii") + b"\n")
+        existing.add(tuple(fields))
+if additions:
+    data = original + (b"\n" if original and not original.endswith(b"\n") else b"") + b"".join(additions)
+    temporary = folder / (".minicloud-keys-" + uuid.uuid4().hex)
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, target)
+    fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+""";
+
+    public async Task AddOperatorKeysAsync(SeedState state, string directory, CancellationToken ct)
+    {
+        SeedOperatorKeys.Validate(state.Plan.OperatorPublicKeys);
+        var result = await SshAsync(state, directory, "python3 -c " + Quote(OperatorKeysScript),
+            JsonSerializer.SerializeToUtf8Bytes(state.Plan.OperatorPublicKeys), ct);
+        SeedGuard.Require(result.ExitCode == 0,
+            "Operator public-key installation failed. Bootstrap access is retained; inspect and resume through pinned SSH.");
+    }
+
     public async Task<bool> DnsReadyAsync(SeedState state, CancellationToken ct)
     {
         foreach (var hostname in new[] { state.Plan.Selection.Domain, "api." + state.Plan.Selection.Domain })

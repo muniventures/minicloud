@@ -10,10 +10,12 @@ namespace Minicloud.Cli.Commands;
 
 public sealed partial class CliApplication
 {
-    private static readonly HashSet<string> SeedFlags = ["--setup-token", "--rotate-setup-token", "--register-provider", "--use-existing-auth"];
+    private static readonly HashSet<string> SeedFlags = ["--setup-token", "--rotate-setup-token", "--register-provider", "--use-existing-auth",
+        "--ssh-key-passphrase", "--no-ssh-key-passphrase", "--no-operator-ssh-key"];
     private static readonly HashSet<string> SeedValues = ["--provider", "--region", "--size", "--domain", "--app-domain", "--server-version",
         "--credential-file", "--approve", "--confirm-console-fingerprint", "--confirm-cleanup", "--recovery-dir", "--ack-recovery",
-        "--instance-name", "--organization", "--provider-name", "--confirm-provider-import", "--confirm-provider-account"];
+        "--instance-name", "--organization", "--provider-name", "--confirm-provider-import", "--confirm-provider-account",
+        "--ssh-public-key", "--generate-ssh-key"];
 
     private async Task<int> RunSeedAsync(string[] args, CancellationToken ct)
     {
@@ -24,6 +26,7 @@ public sealed partial class CliApplication
             var offset = action == "plan" ? 0 : 2;
             if (action != "plan") operation = args.ElementAtOrDefault(1);
             var options = new Dictionary<string, string>(StringComparer.Ordinal);
+            var publicKeyPaths = new List<string>();
             for (var i = offset; i < args.Length; i++)
             {
                 var name = args[i];
@@ -35,11 +38,18 @@ public sealed partial class CliApplication
                     SeedGuard.Require(i + 1 < args.Length && !args[i + 1].StartsWith("--"), "Seed option requires a value.");
                     value = args[++i];
                 }
-                SeedGuard.Require(options.TryAdd(name, value), "Duplicate seed options are not allowed.");
+                if (name == "--ssh-public-key")
+                {
+                    publicKeyPaths.Add(value);
+                    SeedGuard.Require(publicKeyPaths.Count <= 16, "At most 16 operator SSH keys are supported.");
+                    options[name] = value;
+                }
+                else SeedGuard.Require(options.TryAdd(name, value), "Duplicate seed options are not allowed.");
             }
             HashSet<string> allowed = action switch
             {
-                "plan" => ["--provider", "--region", "--size", "--domain", "--app-domain", "--server-version", "--credential-file"],
+                "plan" => ["--provider", "--region", "--size", "--domain", "--app-domain", "--server-version", "--credential-file",
+                    "--ssh-public-key", "--generate-ssh-key", "--ssh-key-passphrase", "--no-ssh-key-passphrase", "--no-operator-ssh-key"],
                 "resume" => ["--approve", "--credential-file", "--confirm-console-fingerprint", "--instance-name"],
                 "cleanup" => ["--credential-file", "--confirm-cleanup"],
                 "export" => ["--recovery-dir", "--setup-token", "--rotate-setup-token", "--ack-recovery"],
@@ -54,6 +64,8 @@ public sealed partial class CliApplication
                     Option("--domain") ?? "", Option("--app-domain") ?? "", Option("--server-version") ?? "");
                 selection.Validate();
                 SeedGuard.Require(Option("--approve") is null, "First create a read-only plan, then approve its exact digest with seed resume.");
+                SeedGuard.Require(!(options.ContainsKey("--ssh-key-passphrase") && options.ContainsKey("--no-ssh-key-passphrase")),
+                    "Choose either protected or unprotected operator key generation, not both.");
                 operation = Guid.NewGuid().ToString("N");
                 using var journal = new SeedJournal(_environment.ConfigHome, operation, true);
                 _console.WriteLine("Local seed operation: " + operation);
@@ -62,7 +74,11 @@ public sealed partial class CliApplication
                 var credential = SeedFiles.Credential(Option("--credential-file"), _console);
                 using var provider = new SeedProvider(selection.Provider, credential);
                 var quote = await provider.QuoteAsync(selection, operation, ct);
-                var state = new SeedState { Id = operation, Plan = new(selection, quote, release.Digest, release.Source) };
+                var operatorKeys = await SeedOperatorKeys.SelectAsync(publicKeyPaths, Option("--generate-ssh-key"),
+                    options.ContainsKey("--ssh-key-passphrase") ? true : options.ContainsKey("--no-ssh-key-passphrase") ? false : null,
+                    options.ContainsKey("--no-operator-ssh-key"), _console, ct);
+                var state = new SeedState { Id = operation, Plan = new(selection, quote, release.Digest, release.Source)
+                    { OperatorPublicKeys = operatorKeys } };
                 journal.Save(state);
                 _console.WriteLine(JsonSerializer.Serialize(state.Plan, SeedJournal.Json));
                 _console.WriteLine("Approval digest: " + state.Plan.Approval);
@@ -241,6 +257,8 @@ public sealed partial class CliApplication
     private void PrintSeedHelp()
     {
         _console.WriteLine("Standalone seed (no instance/login): --provider hetzner|digitalocean|vultr --region ID --size ID --domain HOST --app-domain SUFFIX --server-version server-vX.Y.Z [--credential-file PATH]");
+        _console.WriteLine("Operator access: [--ssh-public-key PUBLIC_FILE ...] [--generate-ssh-key NEW_PRIVATE_PATH [--ssh-key-passphrase | --no-ssh-key-passphrase]] or --no-operator-ssh-key.");
+        _console.WriteLine("Interactive planning offers public-key input or generation and asks about passphrase protection (default yes). Only public keys reach the VPS; the bootstrap identity stays separate.");
         _console.WriteLine("minicloud seed status OP | resume OP [--approve DIGEST] [--confirm-console-fingerprint SHA256:...] [--instance-name NAME] [--credential-file PATH]");
         _console.WriteLine("minicloud seed cleanup OP [--confirm-cleanup DIGEST] [--credential-file PATH] (forbidden after installation starts)");
         _console.WriteLine("minicloud seed export OP --recovery-dir NEW_LOCAL_PATH [--setup-token [--rotate-setup-token]] [--ack-recovery INSTALLATION_ID]");

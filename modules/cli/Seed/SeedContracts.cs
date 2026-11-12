@@ -36,11 +36,20 @@ internal sealed record SeedQuote(string Account, string CredentialScope, string 
     int Cpus, int MemoryMiB, int DiskGiB, SeedCost[] Costs, DateTimeOffset RetrievedAt, string Restrictions, string? NetworkId = null);
 internal sealed record SeedPlan(SeedSelection Selection, SeedQuote Quote, string ReleaseDigest, string ReleaseSource)
 {
+    public string[] OperatorPublicKeys { get; init; } = [];
+
     [JsonIgnore]
-    public string Approval => SeedGuard.Hash(JsonSerializer.Serialize(new
+    public string Approval
     {
-        Selection, Quote = Quote with { RetrievedAt = DateTimeOffset.UnixEpoch }, ReleaseDigest, ReleaseSource
-    }, SeedJournal.Json));
+        get
+        {
+            var quote = Quote with { RetrievedAt = DateTimeOffset.UnixEpoch };
+            object payload = OperatorPublicKeys.Length == 0
+                ? new { Selection, Quote = quote, ReleaseDigest, ReleaseSource }
+                : new { Selection, Quote = quote, ReleaseDigest, ReleaseSource, OperatorPublicKeys };
+            return SeedGuard.Hash(JsonSerializer.Serialize(payload, SeedJournal.Json));
+        }
+    }
 }
 
 internal sealed record SeedResource(string Id, string Operation, string Region, string Size, string Image, string? Address, string? PrimaryIpId = null);
@@ -94,6 +103,7 @@ internal interface ISeedHost
     Task GenerateKeyAsync(string directory, CancellationToken ct);
     Task TrustAsync(SeedState state, string directory, string? independentFingerprint, CancellationToken ct);
     Task PrepareAsync(SeedState state, string directory, CancellationToken ct);
+    Task AddOperatorKeysAsync(SeedState state, string directory, CancellationToken ct);
     Task<bool> DnsReadyAsync(SeedState state, CancellationToken ct);
     Task<string> InstallAsync(SeedState state, string directory, bool statusOnly, CancellationToken ct);
     Task ExportAsync(SeedState state, string directory, string destination, bool setupToken, CancellationToken ct);
