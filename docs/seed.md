@@ -294,3 +294,36 @@ After installation starts, use the normal maintenance/decommission boundary,
 not seed rollback. IP-only access and coordinated dashboard/API domain migration
 are **explicitly deferred**. Established domains/configuration are immutable;
 editing installer metadata is not a migration.
+
+## Local seed tests
+
+The targeted tests use mocked providers; they do not create an actual VPS or
+qualify live-provider behavior. From the checkout root, with the .NET 10 SDK:
+
+```sh
+dotnet test modules/tests/Minicloud.Cli.Tests/Minicloud.Cli.Tests.csproj \
+  --configuration Release \
+  --artifacts-path .local/artifacts/seed-tests \
+  --results-directory .local/artifacts/seed-tests \
+  --filter 'FullyQualifiedName~Seed' -m:1
+```
+
+All protected-fixture tests require an owner-only checkout/worktree with safe
+ancestors. `SeedFiles` rejects group/world-writable ancestors, including those
+above the checkout; making only the fixture leaf private with `chmod` is
+insufficient. Do not weaken validation, skip tests, or change shared repository,
+home or other shared-directory permissions to get a passing run.
+
+Instead, choose an existing operator-private location whose ancestors are not
+group/world-writable, then create an isolated worktree there. Replace the
+example path below with that location; run from the source checkout:
+
+```sh
+umask 077
+git worktree add --detach /operator-private/location/minicloud-seed-tests HEAD
+cd /operator-private/location/minicloud-seed-tests
+```
+
+Run the test command from this private worktree. Keep build outputs, results and
+fixtures in its own ignored `.local/artifacts/`, not the original shared checkout
+or a shared temporary directory.
