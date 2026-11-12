@@ -2,6 +2,10 @@
 
 Current implementation is a **component smoke**, not the complete C/R/A/S suite. It builds the production API and worker images, starts isolated PostgreSQL and OpenBao containers, and migrates an empty database. Two packaged worker processes verify unique claims, independent-app admission, same-app FIFO/exclusion, deletion admission exclusion, collided provider-server refusal, stale ownership recovery without replay, and rejection of an old owner's late finalization. Probe jobs intentionally have no deployable services; their later pipeline outcome is not a successful deployment assertion.
 
+Raw SQL deployment fixtures supply organization-unique `YYYYMMDD.counter` numbers
+using each row's UTC creation date and seed the corresponding daily counters before
+workers start, because these inserts bypass the production EF number allocator.
+
 The smoke pauses PostgreSQL for three seconds while both workers hold independent
 claims, resumes it, and verifies recovery without duplicate claim events. This tests
 database connectivity interruption, not remote SSH process quiescence.

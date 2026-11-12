@@ -145,16 +145,20 @@ def main():
         local_build_id = f"localbuild{RUN_ID}"
         abandoned_build_id = f"abandonedbuild{RUN_ID}"
         local_queued_id = f"localqueued{RUN_ID}"
-        for preparation_id, preparation_app, status, updated in (
+        for number, (preparation_id, preparation_app, status, updated) in enumerate((
                 (local_build_id, local_build_app_id, "WaitingForBuild", "now()"),
                 (local_queued_id, local_build_app_id, "Queued", "now()"),
-                (abandoned_build_id, abandoned_build_app_id, "WaitingForBuild", "now()-interval '6 minutes'")):
-            sql(f"INSERT INTO deployments(id,organization_id,app_id,database,status,created_at,updated_at) "
-                f"VALUES('{preparation_id}','{org_id}','{preparation_app}','None','{status}',now()-interval '10 minutes',{updated})")
+                (abandoned_build_id, abandoned_build_app_id, "WaitingForBuild", "now()-interval '6 minutes'")), start=1):
+            sql(f"INSERT INTO deployments(id,organization_id,app_id,number,database,status,created_at,updated_at) "
+                f"VALUES('{preparation_id}','{org_id}','{preparation_app}',"
+                f"to_char((now()-interval '10 minutes') AT TIME ZONE 'UTC','YYYYMMDD') || '.{number}',"
+                f"'None','{status}',now()-interval '10 minutes',{updated})")
         sql(f"UPDATE apps SET deletion_status='queued' WHERE id='{deleting_app_id}'")
         sql(f"INSERT INTO deployments "
-            f"(id,organization_id,app_id,database,status,created_at,updated_at) "
-            f"VALUES ('{deployment_id}','{org_id}','{app_id}','None','Queued',now() - interval '10 seconds',now() - interval '10 seconds')")
+            f"(id,organization_id,app_id,number,database,status,created_at,updated_at) "
+            f"VALUES ('{deployment_id}','{org_id}','{app_id}',"
+            "to_char((now()-interval '10 seconds') AT TIME ZONE 'UTC','YYYYMMDD') || '.4',"
+            "'None','Queued',now() - interval '10 seconds',now() - interval '10 seconds')")
         second_id = f"probe2{RUN_ID}"
         ordered_first_id = f"ordered1{RUN_ID}"
         ordered_second_id = f"ordered2{RUN_ID}"
@@ -164,22 +168,27 @@ def main():
         stale_id = f"stale{RUN_ID}"
         fresh_id = f"active{RUN_ID}"
         sql(f"INSERT INTO deployments "
-            f"(id,organization_id,app_id,database,status,created_at,updated_at) "
-            f"VALUES ('{second_id}','{org_id}','{app2_id}','None','Queued',now() - interval '9 seconds',now() - interval '9 seconds')")
+            f"(id,organization_id,app_id,number,database,status,created_at,updated_at) "
+            f"VALUES ('{second_id}','{org_id}','{app2_id}',"
+            "to_char((now()-interval '9 seconds') AT TIME ZONE 'UTC','YYYYMMDD') || '.5',"
+            "'None','Queued',now() - interval '9 seconds',now() - interval '9 seconds')")
         for server_id, server_app, provider_id in (("probe-server", app_id, f"probe-provider-{RUN_ID}"),
                                                    ("probe2-server", app2_id, f"probe2-provider-{RUN_ID}")):
             sql(f"INSERT INTO server_instances "
                 f"(id,organization_id,app_id,provider,provider_server_id,ip_address,region,status,bootstrap_status,created_at,updated_at) "
                 f"VALUES ('{server_id}-{RUN_ID}','{org_id}','{server_app}','hetzner','{provider_id}',"
                 f"'192.0.2.1','nbg1','active','ready',{now},{now})")
-        for queued_id, queued_app, age in ((ordered_first_id, ordered_app_id, "2 seconds"),
-                                           (ordered_second_id, ordered_app_id, "1 second"),
-                                           (deleting_id, deleting_app_id, "0 seconds"),
-                                           (collision_a_id, collision_app_a_id, "0 seconds"),
-                                           (collision_b_id, collision_app_b_id, "0 seconds")):
+        for number, (queued_id, queued_app, age) in enumerate((
+                (ordered_first_id, ordered_app_id, "2 seconds"),
+                (ordered_second_id, ordered_app_id, "1 second"),
+                (deleting_id, deleting_app_id, "0 seconds"),
+                (collision_a_id, collision_app_a_id, "0 seconds"),
+                (collision_b_id, collision_app_b_id, "0 seconds")), start=6):
             sql(f"INSERT INTO deployments "
-                f"(id,organization_id,app_id,database,status,created_at,updated_at) "
-                f"VALUES ('{queued_id}','{org_id}','{queued_app}','None','Queued',"
+                f"(id,organization_id,app_id,number,database,status,created_at,updated_at) "
+                f"VALUES ('{queued_id}','{org_id}','{queued_app}',"
+                f"to_char((now()-interval '{age}') AT TIME ZONE 'UTC','YYYYMMDD') || '.{number}',"
+                f"'None','Queued',"
                 f"now() - interval '{age}',now() - interval '{age}')")
         for server_id, server_app in (("collision-server-a", collision_app_a_id),
                                       ("collision-server-b", collision_app_b_id)):
@@ -188,12 +197,21 @@ def main():
                 f"VALUES ('{server_id}-{RUN_ID}','{org_id}','{server_app}','hetzner','shared-{RUN_ID}',"
                 f"'nbg1','active','ready',{now},{now})")
         sql(f"INSERT INTO deployments "
-            f"(id,organization_id,app_id,database,status,worker_id,ownership_token,ownership_acquired_at,created_at,started_at,updated_at) "
-            f"VALUES ('{stale_id}','{org_id}','{stale_app_id}','None','Deploying','lost-worker','stale-token-{RUN_ID}',"
+            f"(id,organization_id,app_id,number,database,status,worker_id,ownership_token,ownership_acquired_at,created_at,started_at,updated_at) "
+            f"VALUES ('{stale_id}','{org_id}','{stale_app_id}',"
+            "to_char((now()-interval '2 hours') AT TIME ZONE 'UTC','YYYYMMDD') || '.11',"
+            f"'None','Deploying','lost-worker','stale-token-{RUN_ID}',"
             "now() - interval '2 hours',now() - interval '2 hours',now() - interval '2 hours',now() - interval '2 hours')")
         sql(f"INSERT INTO deployments "
-            f"(id,organization_id,app_id,database,status,worker_id,ownership_token,ownership_acquired_at,created_at,started_at,updated_at) "
-            f"VALUES ('{fresh_id}','{org_id}','{fresh_app_id}','None','Deploying','active-worker','fresh-token-{RUN_ID}',now(),now(),now(),now())")
+            f"(id,organization_id,app_id,number,database,status,worker_id,ownership_token,ownership_acquired_at,created_at,started_at,updated_at) "
+            f"VALUES ('{fresh_id}','{org_id}','{fresh_app_id}',"
+            "to_char(now() AT TIME ZONE 'UTC','YYYYMMDD') || '.12',"
+            f"'None','Deploying','active-worker','fresh-token-{RUN_ID}',now(),now(),now(),now())")
+        # Raw SQL bypasses EF's allocator; reserve the fixture numbers before workers start.
+        sql("INSERT INTO deployment_number_counters (organization_id,utc_date,last_value) "
+            "SELECT organization_id,(created_at AT TIME ZONE 'UTC')::date,"
+            "max(split_part(number,'.',2)::bigint) FROM deployments "
+            f"WHERE organization_id='{org_id}' GROUP BY organization_id,(created_at AT TIME ZONE 'UTC')::date")
 
         # Negative control: an absent worker must leave the queued row untouched.
         time.sleep(3)
