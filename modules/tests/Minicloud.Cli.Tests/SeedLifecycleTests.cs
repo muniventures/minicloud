@@ -48,9 +48,78 @@ public sealed class SeedLifecycleTests : IDisposable
         await Assert.ThrowsAsync<IOException>(() => Lifecycle.ResumeAsync(state, directory, state.Plan.Approval, null, default));
         Assert.Contains(snapshots, x => JsonDocument.Parse(x).RootElement.GetProperty("serverCreateStarted").GetBoolean());
         Assert.True(state.ServerCreateStarted);
+        provider.QuoteError = new CliCommandException(2, "synthetic creation capacity unavailable");
         await Lifecycle.ResumeAsync(state, directory, state.Plan.Approval, null, default);
         Assert.Equal(1, provider.Creates);
+        Assert.Equal(1, provider.Quotes);
         Assert.Equal("reconciliation_required", state.Phase);
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task Existing_DigitalOcean_server_resumes_at_quota_or_with_unavailable_catalog(bool quotaExhausted, bool responseRecorded)
+    {
+        var fixture = new SeedProviderTests.Fixture("digitalocean");
+        using var api = fixture.CreateProvider();
+        var state = State();
+        var selection = state.Plan.Selection with { Provider = "digitalocean" };
+        state.Plan = state.Plan with { Selection = selection, Quote = await api.QuoteAsync(selection, state.Id, default) };
+        var approvedPlan = state.Plan;
+        state.ServerCreateStarted = true;
+        state.SshKeyId = "7";
+        if (responseRecorded) state.Server = new("server", state.Id, "region", "size", "42", "203.0.113.1");
+        fixture.Bodies["account"] = new { account = new { uuid = "synthetic-account", status = "active", email_verified = true, droplet_limit = quotaExhausted ? 1 : 5 } };
+        fixture.Bodies["droplets"] = new { droplets = new[] { fixture.Server(true) } };
+        if (!quotaExhausted)
+        {
+            fixture.Bodies["regions"] = new { regions = Array.Empty<object>() };
+            fixture.Bodies["sizes"] = new { sizes = Array.Empty<object>() };
+        }
+        fixture.Requests.Clear();
+        var installs = 0;
+        host.BeforeInstall = () => installs++;
+        var lifecycle = new SeedLifecycle(api, host, value => snapshots.Add(JsonSerializer.Serialize(value, SeedJournal.Json)), output.Add);
+
+        await lifecycle.ResumeAsync(state, directory, null, "SHA256:independent", default);
+
+        Assert.True(host.Prepared);
+        Assert.True(state.InstallStarted);
+        Assert.Equal(1, installs);
+        Assert.Equal("awaiting_browser_setup", state.Phase);
+        Assert.Same(approvedPlan, state.Plan);
+        Assert.Equal("server", state.Server!.Id);
+        Assert.Equal(2, fixture.Requests.Count);
+        Assert.All(fixture.Requests, request => Assert.Equal("GET", request.Method));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Existing_server_resume_still_rejects_changed_account_or_credential(bool changedAccount)
+    {
+        var state = State();
+        state.ServerCreateStarted = true;
+        provider.Server = provider.NewServer(state.Id);
+        provider.Quote = changedAccount ? provider.Quote with { Account = "different-account" } : provider.Quote with { CredentialScope = "different-credential" };
+        await Assert.ThrowsAsync<CliCommandException>(() => Lifecycle.ResumeAsync(state, directory, null, "SHA256:independent", default));
+        Assert.Equal(0, provider.ServerLookups);
+        Assert.Equal(0, provider.Creates);
+        Assert.False(host.Prepared);
+    }
+
+    [Fact]
+    public async Task Initial_creation_still_requires_an_available_creation_quote()
+    {
+        var state = State();
+        provider.QuoteError = new CliCommandException(2, "synthetic creation capacity unavailable");
+        await Assert.ThrowsAsync<CliCommandException>(() => Lifecycle.ResumeAsync(state, directory, state.Plan.Approval, null, default));
+        Assert.Equal(1, provider.Quotes);
+        Assert.Equal(0, provider.Creates);
+        Assert.Equal(0, provider.KeyCreates);
+        Assert.False(host.KeyGenerated);
     }
 
     [Fact]
@@ -155,6 +224,27 @@ public sealed class SeedLifecycleTests : IDisposable
         Assert.Equal(state.Plan.Approval, (state.Plan with { Quote = state.Plan.Quote with { RetrievedAt = DateTimeOffset.UtcNow } }).Approval);
     }
 
+    [Fact]
+    public void Approval_survives_journal_serialization_without_recursive_getters_and_binds_canonical_fields()
+    {
+        var state = State();
+        var approval = state.Plan.Approval;
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(state, SeedJournal.Json);
+        using var journal = JsonDocument.Parse(bytes);
+        Assert.False(journal.RootElement.GetProperty("plan").TryGetProperty("approval", out _));
+        var restored = JsonSerializer.Deserialize<SeedState>(bytes, SeedJournal.Json)!;
+        Assert.Equal(approval, restored.Plan.Approval);
+        SeedPlan[] changedPlans = [
+            restored.Plan with { Selection = restored.Plan.Selection with { Size = "different-size" } },
+            restored.Plan with { Quote = restored.Plan.Quote with { Costs = [restored.Plan.Quote.Costs[0] with { Monthly = 24 }] } },
+            restored.Plan with { Quote = restored.Plan.Quote with { CredentialScope = "different-credential" } },
+            restored.Plan with { Quote = restored.Plan.Quote with { Account = "different-account" } },
+            restored.Plan with { ReleaseDigest = new string('d', 64) },
+            restored.Plan with { ReleaseSource = new string('e', 40) }
+        ];
+        Assert.All(changedPlans, plan => Assert.NotEqual(approval, plan.Approval));
+    }
+
     [Theory]
     [InlineData("127.0.0.1", "apps.example.com")]
     [InlineData("http://cloud.example.com", "apps.example.com")]
@@ -186,15 +276,21 @@ public sealed class SeedLifecycleTests : IDisposable
     {
         internal SeedQuote Quote = new("synthetic-account", "scope", "image", "linux/amd64", "root", 2, 2048, 40,
             [new("synthetic fixture VPS", 12, 0.02m, "USD", "synthetic monthly", "synthetic exclusions", "https://provider.invalid/pricing")], DateTimeOffset.UnixEpoch, "synthetic");
-        internal int Creates, KeyCreates, Deletes, Quotes;
-        internal Exception? CreateError;
+        internal int Creates, KeyCreates, Deletes, Quotes, ServerLookups;
+        internal Exception? CreateError, QuoteError;
         internal SeedResource? Server;
         internal SeedResource NewServer(string operation) => new("server", operation, "region", "size", "image", "203.0.113.1");
         public string CredentialScope(string operation) => Quote.CredentialScope;
-        public Task<SeedQuote> QuoteAsync(SeedSelection s, string operation, CancellationToken ct) { Quotes++; return Task.FromResult(Quote); }
+        public Task<string> GetAccountIdentityAsync(CancellationToken ct) => Task.FromResult(Quote.Account);
+        public Task<SeedQuote> QuoteAsync(SeedSelection s, string operation, CancellationToken ct)
+        {
+            Quotes++;
+            if (QuoteError is not null) throw QuoteError;
+            return Task.FromResult(Quote);
+        }
         public Task<string?> FindKeyAsync(string operation, string key, CancellationToken ct) => Task.FromResult<string?>(null);
         public Task<string> CreateKeyAsync(string operation, string key, CancellationToken ct) { KeyCreates++; return Task.FromResult("key"); }
-        public Task<SeedResource?> FindServerAsync(string operation, CancellationToken ct) => Task.FromResult(Server);
+        public Task<SeedResource?> FindServerAsync(string operation, CancellationToken ct) { ServerLookups++; return Task.FromResult(Server); }
         public Task<SeedResource> CreateServerAsync(SeedState state, CancellationToken ct)
         {
             Creates++;

@@ -34,11 +34,14 @@ internal sealed class SeedLifecycle(ISeedProvider provider, ISeedHost host, Acti
     {
         SeedGuard.Require(state.Phase != "cleaned", "This operation was explicitly cleaned up.");
         if (state.Phase == "complete") { write("Seed already recorded complete (not a live health check). Use normal server maintenance, not seed rollback."); return; }
-        var fresh = await provider.QuoteAsync(state.Plan.Selection, state.Id, ct);
-        SeedGuard.Require(fresh.CredentialScope == state.Plan.Quote.CredentialScope && fresh.Account == state.Plan.Quote.Account,
+        SeedGuard.Require(provider.CredentialScope(state.Id) == state.Plan.Quote.CredentialScope
+            && await provider.GetAccountIdentityAsync(ct) == state.Plan.Quote.Account,
             "Resume requires the original provider credential/account scope. Credential rotation needs explicit operator reconciliation.");
         if (!state.ServerCreateStarted)
         {
+            var fresh = await provider.QuoteAsync(state.Plan.Selection, state.Id, ct);
+            SeedGuard.Require(fresh.CredentialScope == state.Plan.Quote.CredentialScope && fresh.Account == state.Plan.Quote.Account,
+                "Provider identity changed while refreshing the creation plan. Reconcile the original account/credential scope.");
             var updated = state.Plan with { Quote = fresh };
             if (updated.Approval != state.Plan.Approval)
             {

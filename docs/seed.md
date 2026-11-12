@@ -99,7 +99,12 @@ Provider errors and subprocess diagnostics are suppressed rather than logged.
 
 `status` is local, read-only and does not prove live health. `resume` revalidates
 the signed release and account, reconciles unique operation tags/recorded IDs,
-then continues. An uncertain create with no conclusive match **never creates
+then continues. Creation-only quota, catalog, availability and pricing checks
+apply before the first create intent. Once creation may have begun, resume
+preserves the approved plan and reconciles the VPS without requiring another
+free quota slot or a still-orderable size/image. Original credential/account
+binding and recorded resource ownership still apply.
+An uncertain create with no conclusive match **never creates
 again**: it remains `reconciliation_required` for provider-console/support
 reconciliation. Names alone are not server ownership. Pending journal writes
 block resume; preserve both `operation.json` and `operation.pending`, never

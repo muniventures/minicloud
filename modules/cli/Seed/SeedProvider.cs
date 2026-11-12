@@ -22,6 +22,24 @@ internal sealed partial class SeedProvider : ISeedProvider
     private static string Name(string operation) => "mc-seed-" + operation;
     public string CredentialScope(string operation) => SeedGuard.Scope(credential, operation);
 
+    private string AccountIdentity(JsonElement account) => provider switch
+    {
+        "hetzner" => "Hetzner project scoped by the supplied credential (scope fingerprint binds approval)",
+        "digitalocean" => "DigitalOcean account " + Text(account, "uuid"),
+        _ => "Vultr account " + SeedGuard.Hash(Text(account, "email"))
+    };
+
+    public async Task<string> GetAccountIdentityAsync(CancellationToken ct)
+    {
+        if (provider == "hetzner")
+        {
+            // No account endpoint: authenticate the original project-scoped token without checking creation capacity.
+            await SendAsync(HttpMethod.Get, "servers?per_page=1", null, ct);
+            return AccountIdentity(default);
+        }
+        return AccountIdentity((await SendAsync(HttpMethod.Get, "account", null, ct)).GetProperty("account"));
+    }
+
     public SeedProvider(string provider, string credential, HttpMessageHandler? handler = null)
     {
         this.provider = provider;

@@ -14,6 +14,25 @@ public sealed class SeedProviderTests
     private static SeedSelection Selection(string provider) => new(provider, "region", "size", "cloud.example.com", "apps.example.com", "server-v1.2.3");
 
     [Theory]
+    [InlineData("hetzner")]
+    [InlineData("digitalocean")]
+    [InlineData("vultr")]
+    public async Task Account_identity_matches_the_quote_without_reading_creation_catalog_or_quota(string name)
+    {
+        var fixture = new Fixture(name);
+        using var provider = fixture.CreateProvider();
+        var quote = await provider.QuoteAsync(Selection(name), Operation, default);
+        var path = name == "hetzner" ? "servers" : "account";
+        var identity = fixture.Bodies[path];
+        fixture.Bodies.Clear();
+        fixture.Bodies[path] = identity;
+        fixture.Requests.Clear();
+
+        Assert.Equal(quote.Account, await provider.GetAccountIdentityAsync(default));
+        Assert.Equal("GET", Assert.Single(fixture.Requests).Method);
+    }
+
+    [Theory]
     [InlineData("hetzner", 2)]
     [InlineData("digitalocean", 1)]
     [InlineData("vultr", 1)]
@@ -101,12 +120,13 @@ public sealed class SeedProviderTests
         Assert.Single(fixture.Requests);
     }
 
-    private sealed class Fixture : HttpMessageHandler
+    internal sealed class Fixture : HttpMessageHandler
     {
         private readonly string provider;
         public readonly Dictionary<string, object> Bodies = [];
         public readonly List<(string Method, string Host, string Body)> Requests = [];
         public bool Deny;
+        internal SeedProvider CreateProvider() => new(provider, Credential, this);
         public Fixture(string provider)
         {
             this.provider = provider;

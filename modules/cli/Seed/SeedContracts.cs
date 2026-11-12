@@ -2,6 +2,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Minicloud.Cli.Commands;
 
@@ -35,7 +36,11 @@ internal sealed record SeedQuote(string Account, string CredentialScope, string 
     int Cpus, int MemoryMiB, int DiskGiB, SeedCost[] Costs, DateTimeOffset RetrievedAt, string Restrictions, string? NetworkId = null);
 internal sealed record SeedPlan(SeedSelection Selection, SeedQuote Quote, string ReleaseDigest, string ReleaseSource)
 {
-    public string Approval => SeedGuard.Hash(JsonSerializer.Serialize(this with { Quote = Quote with { RetrievedAt = DateTimeOffset.UnixEpoch } }, SeedJournal.Json));
+    [JsonIgnore]
+    public string Approval => SeedGuard.Hash(JsonSerializer.Serialize(new
+    {
+        Selection, Quote = Quote with { RetrievedAt = DateTimeOffset.UnixEpoch }, ReleaseDigest, ReleaseSource
+    }, SeedJournal.Json));
 }
 
 internal sealed record SeedResource(string Id, string Operation, string Region, string Size, string Image, string? Address, string? PrimaryIpId = null);
@@ -73,6 +78,7 @@ internal sealed class SeedState
 internal interface ISeedProvider : IDisposable
 {
     string CredentialScope(string operation);
+    Task<string> GetAccountIdentityAsync(CancellationToken ct);
     Task<SeedQuote> QuoteAsync(SeedSelection selection, string operation, CancellationToken ct);
     Task<string?> FindKeyAsync(string operation, string publicKey, CancellationToken ct);
     Task<string> CreateKeyAsync(string operation, string publicKey, CancellationToken ct);

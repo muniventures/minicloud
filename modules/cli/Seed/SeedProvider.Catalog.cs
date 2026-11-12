@@ -44,7 +44,7 @@ internal sealed partial class SeedProvider
                 + "; excess/TB net=" + Text(serverPrice.GetProperty("price_per_tb_traffic"), "net") + " " + currency + "; no backups/volumes/load balancer."),
             Cost("one auto-assigned public IPv4 (deleted with VPS)", ipPrice, "Tax/VAT excluded; IPv6 disabled.")
         };
-        return new("Hetzner project scoped by the supplied credential (scope fingerprint binds approval)", "", Text(image, "id"),
+        return new(AccountIdentity(default), "", Text(image, "id"),
             architecture == "arm" ? "linux/arm64" : "linux/amd64", "root", size.GetProperty("cores").GetInt32(),
             (int)(Money(size, "memory") * 1024), size.GetProperty("disk").GetInt32(), costs, default,
             "Project read/write API token required. Hetzner exposes no remaining server-quota preflight; availability is not a reservation. SSH key registration is nonbillable.");
@@ -73,7 +73,7 @@ internal sealed partial class SeedProvider
             "USD", "hourly, monthly cap", "Taxes excluded; included outbound transfer TB=" + Text(size, "transfer")
                 + "; excess bandwidth, backups, volumes and other optional services excluded; IPv6 disabled.",
             "https://api.digitalocean.com/v2/sizes") };
-        return new("DigitalOcean account " + Text(account, "uuid"), "", Text(image, "id"), "linux/amd64", "root",
+        return new(AccountIdentity(account), "", Text(image, "id"), "linux/amd64", "root",
             size.GetProperty("vcpus").GetInt32(), size.GetProperty("memory").GetInt32(), size.GetProperty("disk").GetInt32(), costs, default,
             "Account/droplet/region/size/image/SSH-key/VPC read, droplet create/delete and SSH-key create/delete scopes required. Attach only the recorded existing default VPC; no network/project creation. Quota check is not a reservation.",
             Text(network, "id"));
@@ -99,7 +99,7 @@ internal sealed partial class SeedProvider
             "Taxes excluded; included bandwidth GB=" + Text(size, "bandwidth")
                 + "; regional bandwidth overage, backups, volumes and optional services excluded; IPv6 disabled.",
             "https://api.vultr.com/v2/plans") };
-        return new("Vultr account " + SeedGuard.Hash(Text(account, "email")), "", Text(image, "id"), "linux/amd64", "root",
+        return new(AccountIdentity(account), "", Text(image, "id"), "linux/amd64", "root",
             size.GetProperty("vcpu_count").GetInt32(), size.GetProperty("ram").GetInt32(), size.GetProperty("disk").GetInt32(), costs, default,
             "Provision ACL, active funded account and allowed workstation IP required. Vultr exposes no remaining instance-quota preflight; availability is not a reservation. Billing terms: https://docs.vultr.com/support/platform/billing/how-am-i-billed-for-my-servers ; stopped resources remain billable.");
     }
