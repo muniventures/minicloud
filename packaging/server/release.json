@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "serverVersion": "0.0.1-rc.1",
+  "architectures": ["linux/amd64", "linux/arm64"],
+  "dependencies": {
+    "postgres": "docker.io/postgres@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139",
+    "openbao": "docker.io/openbao/openbao@sha256:62f582f85e405ef00d48f678c19863d096a2bc0c05e0e5a9bbccd676a1c7316c",
+    "kratos": "docker.io/oryd/kratos@sha256:fe2428f103a6240c064b6ea77d3088610865c55fcebccb30355857eccdc25b4b",
+    "caddy": "docker.io/caddy@sha256:25a0097607868fb05a89a5ab9fea2f2ea4cecdc89d887d7dcee8c778a21b9e1f"
+  },
+  "applicationMigration": "20261111142623_DeploymentNumbers",
+  "identitySchemaVersion": 1,
+  "configurationSchemaVersion": 1,
+  "cliCompatibility": {
+    "protocolVersion": 1,
+    "minimumVersion": null,
+    "maximumExclusiveVersion": null,
+    "sourceRevisions": ["2a5ae0ccea6c3dd680b4146586ec0668c60c8b93"]
+  }
+}

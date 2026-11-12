@@ -21,7 +21,7 @@ on:
       minicloud_version:
         required: false
         type: string
-        default: 7416e1408ecd9d11f58c638f0caf1c28e5fa6e3f
+        default: 2a5ae0ccea6c3dd680b4146586ec0668c60c8b93
       minicloud_api_url:
         description: "HTTPS API origin for a self-hosted Minicloud instance."
         required: false

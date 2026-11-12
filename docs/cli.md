@@ -20,6 +20,20 @@ build; the self-contained installed CLI does not need a separate .NET runtime.
 Historical release assets remain available but are not used by these installers
 or the reusable customer workflow.
 
+For the unpublished `0.0.1-rc.1` server candidate, explicitly select merged CLI
+source `2a5ae0ccea6c3dd680b4146586ec0668c60c8b93` instead of the historical
+installer default:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/muniventures/minicloud/main/install.sh |
+  MINICLOUD_VERSION=2a5ae0ccea6c3dd680b4146586ec0668c60c8b93 sh
+```
+
+In PowerShell, set `$env:MINICLOUD_VERSION` to that same SHA before invoking
+`install.ps1`. The reusable workflow already defaults to this source revision.
+This is a candidate source/protocol pairing, **not tested runtime compatibility**;
+see the [candidate handoff and remaining gates](public-candidate-handoff.md).
+
 ## Instances
 
 The CLI has no default hosted instance. The first command needing a connection
