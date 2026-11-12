@@ -1,8 +1,8 @@
 # T70 — Private hosted-operations integration
 
 Implementation repository: `muniventures/minicloud-services`, not this public product repository.
-Status: readiness code exists locally; remote handoff and further integration not started.
-Depends on: T20, T30, T31, T40–T44, T50–T52 and T60–T62 merged; T10's code result recorded. Read-only workflow/contract preparation may run earlier. Can run in parallel with: final documentation review, not production mutations.
+Status: **backlog, outside the current public pre-v1 completion scope**, by explicit user direction on 2026-11-12. Not performed or required for public T80; its native blocking relationship to #37 is removed.
+Future prerequisites: separately authorized private access/readiness handoff and the then-current public contracts. Earlier public implementation links remain resolved history, not a request to begin private work.
 
 ## Access and prerequisite
 
