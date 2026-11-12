@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using YamlDotNet.RepresentationModel;
 
@@ -9,6 +10,7 @@ namespace Minicloud.Cli.Tests;
 public sealed class ReusableSeedWorkflowTests : IDisposable
 {
     private const string Digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    private const string OtherDigest = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
     private const string ProviderSecret = "synthetic-provider-token-7f3c9a";
     private static readonly string Root = FindRoot();
     private static readonly YamlMappingNode Workflow = Load();
@@ -243,7 +245,7 @@ public sealed class ReusableSeedWorkflowTests : IDisposable
     {
         if (OperatingSystem.IsWindows()) return;
         var directory = Prepared("plan");
-        RunCli("plan", directory, 0, Report("new_seed", Digest));
+        RunCli("plan", directory, 0, Report("new_seed", Digest), cliDigest: OtherDigest);
         var result = RunStep("Summarize and stage the non-secret report", ReportEnv("plan", directory, "0"));
         Assert.Equal(0, result.ExitCode);
         Assert.Equal("success", result.Outputs["result"]);
@@ -251,8 +253,12 @@ public sealed class ReusableSeedWorkflowTests : IDisposable
         Assert.Equal(Digest, result.Outputs["approval_digest"]);
         var staged = JsonDocument.Parse(File.ReadAllText(Path.Combine(result.Outputs["path"], "seed-report.json")));
         Assert.Equal("new_seed", staged.RootElement.GetProperty("classification").GetString());
+        Assert.Equal(Digest, staged.RootElement.GetProperty("approval").GetString());
         Assert.Contains("| Approval digest | `" + Digest + "` |", result.Summary);
+        Assert.DoesNotContain(OtherDigest, result.Summary);
         Assert.Contains("dispatch `apply` with this digest", result.Summary);
+        Assert.Contains("### Reasons", result.Summary);
+        Assert.Contains("No provider resource matches seedId", result.Summary);
         Assert.Contains("Add target.hostFingerprint from the provider console", result.Summary);
     }
 
@@ -291,7 +297,7 @@ public sealed class ReusableSeedWorkflowTests : IDisposable
         if (OperatingSystem.IsWindows()) return;
         var directory = Prepared("plan");
         var keyLine = File.ReadAllLines(Path.Combine(directory, "ssh-key"))[1];
-        RunCli("plan", directory, 0, JsonSerializer.Serialize(new { classification = "new_seed", leaked = keyLine }));
+        RunCli("plan", directory, 0, Report("new_seed", Digest, note: keyLine));
         var result = RunStep("Summarize and stage the non-secret report", ReportEnv("plan", directory, "0"));
         Assert.NotEqual(0, result.ExitCode);
         Assert.False(result.Outputs.ContainsKey("path"));
@@ -312,7 +318,7 @@ public sealed class ReusableSeedWorkflowTests : IDisposable
         return result.Outputs["dir"];
     }
 
-    private StepResult RunCli(string operation, string directory, int exitCode, string report, string newSeed = "false")
+    private StepResult RunCli(string operation, string directory, int exitCode, string report, string newSeed = "false", string cliDigest = Digest)
     {
         var bin = Path.Combine(home, "bin");
         Directory.CreateDirectory(bin);
@@ -333,18 +339,59 @@ public sealed class ReusableSeedWorkflowTests : IDisposable
         {
             ["OPERATION"] = operation, ["APPROVE"] = operation == "apply" ? Digest : "", ["NEW_SEED"] = newSeed,
             ["SEED_DIR"] = directory, ["FAKE_ARGS"] = Path.Combine(home, "cli-args"), ["FAKE_REPORT"] = report,
-            ["FAKE_DIGEST"] = Digest, ["FAKE_EXIT"] = exitCode.ToString(),
+            ["FAKE_DIGEST"] = cliDigest, ["FAKE_EXIT"] = exitCode.ToString(),
         }, bin);
         Assert.True(result.ExitCode == 0, result.Output);
         return result;
     }
 
-    private static string Report(string classification, string? digest = null) => JsonSerializer.Serialize(new Dictionary<string, object?>
+    // Mirrors the camelCase serialization of the CLI's SeedReport record.
+    private static string Report(string classification, string? approval = null, string note = "Non-secret snapshot.") =>
+        JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["schemaVersion"] = 1,
+            ["kind"] = "minicloud-seed-report",
+            ["generatedAt"] = "2026-11-12T00:00:00+00:00",
+            ["command"] = "plan",
+            ["seedId"] = "0123456789abcdef0123456789abcdef",
+            ["provider"] = "hetzner",
+            ["region"] = "nbg1",
+            ["size"] = "cx32",
+            ["release"] = new { requested = "server-v0.0.1", installed = (string?)null, sourceRevision = (string?)null, digest = (string?)null },
+            ["classification"] = classification,
+            ["reasons"] = new[] { "No provider resource matches seedId." },
+            ["observed"] = new
+            {
+                account = "synthetic", serverId = (string?)null, ipv4 = (string?)null, hostVerification = "pending",
+                hostFingerprint = (string?)null, sshUser = "root", rootKeyFingerprint = "SHA256:synthetic", checkpoint = (string?)null,
+                installerPhase = (string?)null, installationId = (string?)null, maintenancePending = Array.Empty<string>(), https = (string?)null,
+            },
+            ["domains"] = new { dashboard = "cloud.example.invalid", api = "api.cloud.example.invalid", app = "apps.example.invalid" },
+            ["dnsRecords"] = Array.Empty<object>(),
+            ["approval"] = approval,
+            ["costs"] = Array.Empty<object>(),
+            ["nextActions"] = new[] { "Add target.hostFingerprint from the provider console", "Rerun apply" },
+            ["note"] = note,
+        });
+
+    [Theory]
+    [InlineData(2, "minicloud-seed-report")]
+    [InlineData(1, "other-report")]
+    public void Unsupported_report_schema_is_not_trusted_or_staged(int schemaVersion, string kind)
     {
-        ["classification"] = classification,
-        ["approvalDigest"] = digest,
-        ["nextActions"] = new object[] { "Add target.hostFingerprint from the provider console", new { summary = "Rerun apply" } },
-    });
+        if (OperatingSystem.IsWindows()) return;
+        var directory = Prepared("plan");
+        var report = JsonNode.Parse(Report("new_seed", Digest))!.AsObject();
+        report["schemaVersion"] = schemaVersion;
+        report["kind"] = kind;
+        RunCli("plan", directory, 0, report.ToJsonString(), cliDigest: OtherDigest);
+        var result = RunStep("Summarize and stage the non-secret report", ReportEnv("plan", directory, "0"));
+        Assert.Equal(0, result.ExitCode);
+        Assert.False(result.Outputs.ContainsKey("path"));
+        Assert.Equal("", result.Outputs["classification"]);
+        Assert.Equal(OtherDigest, result.Outputs["approval_digest"]);
+        Assert.Contains("not a supported minicloud-seed-report", result.Summary);
+    }
 
     private Dictionary<string, string> ValidateEnv(string operation, string approve, string newSeed, string eventName, string version)
     {

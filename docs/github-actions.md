@@ -378,7 +378,9 @@ them, and a copy that exists only on the VPS is not an independent backup.
 | Other | `error` | Fails | CLI or input error. No automatic retry. |
 
 The job summary shows the operation, result, classification, approval digest,
-SSH key fingerprint and next actions. The CLI's non-secret JSON report is
+SSH key fingerprint, reasons and next actions, read from the CLI's
+`minicloud-seed-report` (`schemaVersion` 1); a report with another kind or
+version is neither trusted nor uploaded. The CLI's non-secret JSON report is
 uploaded as an artifact for 30 days, readable by anyone with read access to
 the repository's Actions runs. It is a convenience snapshot, never the source
 of truth; losing it does not affect the installation.

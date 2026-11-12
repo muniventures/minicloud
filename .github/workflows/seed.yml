@@ -373,6 +373,9 @@ jobs:
                       report = json.load(source)
                   if not isinstance(report, dict):
                       report, report_error = None, "The report is not a JSON object."
+                  elif type(report.get("schemaVersion")) is not int or report["schemaVersion"] != 1 \
+                          or report.get("kind") != "minicloud-seed-report":
+                      report, report_error = None, "The report is not a supported minicloud-seed-report (schemaVersion 1)."
           except FileNotFoundError:
               report_error = "The CLI did not write a report."
           except ValueError:
@@ -401,23 +404,19 @@ jobs:
           if not (isinstance(classification, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", classification)):
               classification = ""
           digest = ""
-          if report:
-              candidate = report.get("approvalDigest")
-              if not isinstance(candidate, str) and isinstance(report.get("approval"), dict):
-                  candidate = report["approval"].get("digest")
-              if isinstance(candidate, str) and re.fullmatch(r"[0-9a-f]{64}", candidate):
-                  digest = candidate
+          if report and isinstance(report.get("approval"), str) and re.fullmatch(r"[0-9a-f]{64}", report["approval"]):
+              digest = report["approval"]
           if not digest and operation == "plan":
               match = re.search(r"Approval digest: ([0-9a-f]{64})\b", read("cli-output.txt"))
               digest = match.group(1) if match else ""
 
-          actions = []
-          if report and isinstance(report.get("nextActions"), list):
-              for item in report["nextActions"][:10]:
-                  if isinstance(item, dict):
-                      item = next((item[key] for key in ("summary", "message", "description", "action", "command")
-                                   if isinstance(item.get(key), str)), json.dumps(item, sort_keys=True))
-                  actions.append(clean(item))
+          def strings(name):
+              values = report.get(name) if report else None
+              if not isinstance(values, list):
+                  return []
+              return [clean(value) for value in values if isinstance(value, str) and value.strip()][:10]
+
+          reasons, actions = strings("reasons"), strings("nextActions")
 
           meaning = {
               "success": "Completed.",
@@ -444,6 +443,8 @@ jobs:
           if operation == "plan" and result == "success" and digest:
               summary += ["Review the plan in the job log. To approve exactly this plan, dispatch `apply` with this digest "
                           "and the same `new_seed` value. Changed configuration, prices or targets invalidate it.", ""]
+          if reasons:
+              summary += ["### Reasons", "", "```text", *reasons, "```", ""]
           if actions:
               summary += ["### Next actions", "", "```text", *actions, "```", ""]
           if report is not None:
