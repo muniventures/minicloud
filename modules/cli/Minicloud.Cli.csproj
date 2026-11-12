@@ -14,6 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Seed/prepare-host.sh" LogicalName="Minicloud.Cli.Seed.prepare-host.sh" />
     <ProjectReference Include="..\contracts\Minicloud.Contracts.csproj" />
   </ItemGroup>
 

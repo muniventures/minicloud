@@ -183,6 +183,12 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
         var app = Assert.Single(createdApplication.Environments);
         Assert.Equal(plan.Name, app.Plan);
         Assert.DoesNotContain(_factory.Cloud.Requests, request => request.Credential == "synthetic-denied");
+        Assert.Equal(new ProviderPermissionsResponse(false, false),
+            await deploy.GetFromJsonAsync<ProviderPermissionsResponse>($"/api/providers/permissions?organizationId={OrganizationId}"));
+        Assert.Equal(new ProviderPermissionsResponse(true, true),
+            await owner.GetFromJsonAsync<ProviderPermissionsResponse>($"/api/providers/permissions?organizationId={OrganizationId}"));
+        Assert.Equal(new ProviderPermissionsResponse(false, false),
+            await owner.GetFromJsonAsync<ProviderPermissionsResponse>("/api/providers/permissions?organizationId=org_unrelated"));
     }
 
     [Theory]
@@ -195,6 +201,8 @@ public sealed class ProviderCatalogApiTests : IAsyncLifetime
         var token = await AddDashboardUserAsync(role);
         using var client = Client(token);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/providers?organizationId={OrganizationId}")).StatusCode);
+        Assert.Equal(new ProviderPermissionsResponse(true, canManage),
+            await client.GetFromJsonAsync<ProviderPermissionsResponse>($"/api/providers/permissions?organizationId={OrganizationId}"));
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/plans?organizationId={OrganizationId}")).StatusCode);
         var response = await client.PostAsJsonAsync("/api/providers", new CreateProviderRequest(OrganizationId, role.ToString(), "hetzner", "synthetic-role-token"));
         Assert.Equal(canManage ? HttpStatusCode.Created : HttpStatusCode.Forbidden, response.StatusCode);

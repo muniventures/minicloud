@@ -91,6 +91,12 @@ public sealed class MinicloudApiClient
     public Task<ProviderAccountResponse> CreateProviderAsync(CreateProviderRequest request, CancellationToken ct) =>
         SendAsync<ProviderAccountResponse>(HttpMethod.Post, "/api/providers", request, ct);
 
+    public Task<ProviderPermissionsResponse> GetProviderPermissionsAsync(string organizationId, CancellationToken ct) =>
+        SendAsync<ProviderPermissionsResponse>(HttpMethod.Get, $"/api/providers/permissions?organizationId={Uri.EscapeDataString(organizationId)}", null, ct);
+
+    public Task<IReadOnlyList<ProviderAccountResponse>> GetProvidersAsync(string organizationId, CancellationToken ct) =>
+        SendAsync<IReadOnlyList<ProviderAccountResponse>>(HttpMethod.Get, $"/api/providers?organizationId={Uri.EscapeDataString(organizationId)}", null, ct);
+
     public Task<IReadOnlyList<ProviderSshKeyResponse>> GetProviderSshKeysAsync(string providerAccountId, string organizationId, CancellationToken ct) =>
         SendAsync<IReadOnlyList<ProviderSshKeyResponse>>(HttpMethod.Get, $"/api/providers/{Uri.EscapeDataString(providerAccountId)}/ssh-keys?organizationId={Uri.EscapeDataString(organizationId)}", null, ct);
 

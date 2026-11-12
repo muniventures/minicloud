@@ -8,6 +8,13 @@ acceptance remain release gates. [Maintenance](server-maintenance.md) provides
 coordinated backup, upgrade, restore and transfer through the maintenance
 authority. Those flows are not yet qualified on a real host.
 
+The optional [standalone CLI seed](seed.md) supplies a verified dedicated host,
+official Ubuntu Docker/Compose/Buildx/Python/OpenSSH/OpenSSL packages and pinned
+Cosign, then independently verifies and invokes this exact installer. It does
+not replace these checks or duplicate Compose/bootstrap. Seed also requires an
+explicit protected off-VPS recovery export; host-local output alone cannot
+complete its handoff. No new server release has been published by that feature.
+
 ## Trust and prerequisites
 
 Use a dedicated Ubuntu 24.04 host, `amd64` or `arm64`. Install Python 3,
