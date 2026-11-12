@@ -448,7 +448,7 @@ jobs:
           if actions:
               summary += ["### Next actions", "", "```text", *actions, "```", ""]
           if report is not None:
-              summary.append(f"Non-secret report artifact: `{os.environ['REPORT_ARTIFACT_NAME']}`.")
+              summary.append(f"Non-secret report staged for upload: `{os.environ['REPORT_ARTIFACT_NAME']}`.")
           else:
               summary.append(f"No report artifact: {report_error}")
 
@@ -465,19 +465,28 @@ jobs:
               output.write("\n".join(outputs) + "\n")
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as output:
               output.write("\n".join(summary) + "\n")
-          if report_error and "secret" in report_error:
+          if report_error:
               print(f"::error::{report_error}")
               raise SystemExit(1)
           PY
 
       - name: Upload non-secret report
+        id: upload
         if: always() && steps.report.outputs.path != ''
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ inputs.report_artifact_name }}
           path: ${{ steps.report.outputs.path }}/seed-report.json
           if-no-files-found: error
           retention-days: 30
+
+      - name: Warn if report upload failed
+        if: always() && steps.upload.outcome == 'failure'
+        run: |
+          echo "::warning::Non-secret report upload failed. Artifact transport does not change the seed outcome; inspect the job summary and CLI log before deciding whether any further action is needed. Do not retry apply just to recover the artifact."
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Warning: non-secret report upload failed; the artifact may be unavailable. The seed outcome is unchanged. Do not retry apply just to recover the artifact." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove protected inputs
         if: always()
