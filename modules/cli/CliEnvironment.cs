@@ -79,4 +79,11 @@ public sealed class CliEnvironment
     }
 
     public static CliEnvironment ForTests(string apiBaseUrl, string configHome) => new(apiBaseUrl, "local", configHome, "app.example.com");
+
+    internal static CliEnvironment ForInstance(InstanceProfile profile, string configHome)
+    {
+        var result = new CliEnvironment("", "local", configHome);
+        result.SelectInstance(profile);
+        return result;
+    }
 }

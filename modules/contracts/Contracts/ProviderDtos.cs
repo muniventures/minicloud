@@ -16,3 +16,4 @@ public sealed record ProviderPlanResponse(string Id, string OrganizationId, stri
     string ProviderName, string ProviderType, string Region, string Sku, string? Image, string BuildPlatform,
     bool Enabled, bool AccountEnabled, long Revision, bool ProvisioningLocked);
 public sealed record ProviderValidationResponse(string Status, DateTimeOffset CheckedAt);
+public sealed record ProviderPermissionsResponse(bool CanRead, bool CanManage);

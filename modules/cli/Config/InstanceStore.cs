@@ -37,6 +37,30 @@ public sealed class InstanceStore(string configHome)
     public void Save(State state)
     {
         Directory.CreateDirectory(configHome);
+        using var operationLock = Lock();
+        SaveCore(state);
+    }
+
+    internal void AddWithoutSelecting(InstanceProfile profile)
+    {
+        Directory.CreateDirectory(configHome);
+        using var operationLock = Lock();
+        var state = Load();
+        if (state.Instances.Any(x => (x.Name == profile.Name || x.Url == profile.Url) && x != profile))
+            throw new CliCommandException(CliExitCodes.ValidationError, "Instance name/URL conflicts; no existing instance or authentication was replaced.");
+        if (state.Instances.Contains(profile)) return;
+        state.Instances.Add(profile);
+        SaveCore(state);
+    }
+
+    private FileStream Lock()
+    {
+        try { return new FileStream(Path.Combine(configHome, "instances.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+        catch (IOException) { throw new CliCommandException(CliExitCodes.ValidationError, "Instance configuration is locked. Retry; never remove its persistent lock."); }
+    }
+
+    private void SaveCore(State state)
+    {
         var temporary = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {

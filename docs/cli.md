@@ -2,14 +2,17 @@
 
 The current command is `minicloud`.
 
-The CLI is built from a reviewed source revision; new prebuilt CLI releases are
-not published. Install from a shell with Git and the .NET 10 SDK:
+CLI source builds remain supported. A new exact signed binary distribution
+workflow is implemented, but no new binaries have been published/qualified.
+See [verified binary/source installation](cli-distribution.md).
+To retain the source workflow, use Git and the .NET 10 SDK:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/muniventures/minicloud/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/muniventures/minicloud/main/install.sh |
+  MINICLOUD_INSTALL_MODE=source sh
 ```
 
-The installer defaults to source commit
+In explicit source mode, the installer defaults to source commit
 `7416e1408ecd9d11f58c638f0caf1c28e5fa6e3f`. Set `MINICLOUD_VERSION` to a full
 lowercase commit SHA or an exact CLI version tag such as `v3.1.0` to select
 another revision; branches, `latest`, and `server-v*` tags are rejected.
@@ -18,7 +21,7 @@ is accepted only as `muniventures/minicloud`. Windows users can run `install.ps1
 with the same environment variables. Git and the .NET 10 SDK are needed to
 build; the self-contained installed CLI does not need a separate .NET runtime.
 Historical release assets remain available but are not used by these installers
-or the reusable customer workflow.
+or the reusable customer workflow without the new signed delivery contract.
 
 For the unpublished `0.0.1-rc.1` server candidate, explicitly select merged CLI
 source `2a5ae0ccea6c3dd680b4146586ec0668c60c8b93` instead of the historical
@@ -26,13 +29,24 @@ installer default:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/muniventures/minicloud/main/install.sh |
-  MINICLOUD_VERSION=2a5ae0ccea6c3dd680b4146586ec0668c60c8b93 sh
+  MINICLOUD_INSTALL_MODE=source MINICLOUD_VERSION=2a5ae0ccea6c3dd680b4146586ec0668c60c8b93 sh
 ```
 
-In PowerShell, set `$env:MINICLOUD_VERSION` to that same SHA before invoking
+In PowerShell, set `$env:MINICLOUD_INSTALL_MODE = "source"` and
+`$env:MINICLOUD_VERSION` to that same SHA before invoking
 `install.ps1`. The reusable workflow already defaults to this source revision.
 This is a candidate source/protocol pairing, **not tested runtime compatibility**;
 see the [candidate handoff and remaining gates](public-candidate-handoff.md).
+
+## Seed the first control plane
+
+`minicloud seed` plans independently of instance discovery/login for Hetzner,
+DigitalOcean and Vultr. Explicit region/size/current-price approval, independently
+verified SSH identity, manual dashboard/API DNS, signed installer, public HTTPS,
+protected independent recovery export and normal browser onboarding are required.
+See [seed lifecycle, resume and owned cleanup](seed.md). The present server
+candidate is unpublished/unqualified: missing/unverified assets fail before
+creation. IP-only access is explicitly deferred.
 
 ## Instances
 

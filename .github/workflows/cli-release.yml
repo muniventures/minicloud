@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: MPL-2.0
+name: CLI release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/cli-release.yml
+      - scripts/cli-release/**
+      - install.sh
+      - install.ps1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cli-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: |
+          git check-ignore .local/artifacts/probe
+          python3 -B -m unittest discover -s scripts/cli-release -p 'test_*.py' -v
+
+  publish:
+    if: github.repository == 'muniventures/minicloud' && startsWith(github.ref, 'refs/tags/v')
+    needs: contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: cli-release
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      SOURCE_REVISION: ${{ github.sha }}
+      GH_TOKEN: ${{ github.token }}
+      OUTPUT: ${{ github.workspace }}/.local/artifacts/cli-release
+      PAYLOAD: ${{ github.workspace }}/.local/artifacts/cli-payload
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Gate canonical main and forbid reused release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
+          git merge-base --is-ancestor "$SOURCE_REVISION" origin/main
+          git check-ignore .local/artifacts/probe
+          tags="$(gh api --paginate repos/muniventures/minicloud/releases --jq '.[].tag_name')"
+          if grep -Fqx -- "$RELEASE_TAG" <<< "$tags"; then
+            echo "::error::Existing releases are immutable. Select a new CLI version."
+            exit 1
+          fi
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.404'
+      - name: Build four self-contained untrimmed single-file CLIs and notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          for rid in linux-x64 linux-arm64 osx-arm64 win-x64; do
+            output="$PAYLOAD/$rid"
+            dotnet publish modules/cli/Minicloud.Cli.csproj --configuration Release \
+              --runtime "$rid" --self-contained true --output "$output" \
+              -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+              -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false \
+              -p:Version="${RELEASE_TAG#v}" -p:SourceRevisionId="$SOURCE_REVISION" \
+              -p:IncludeSourceRevisionInInformationalVersion=false \
+              -p:InformationalVersion="${RELEASE_TAG#v}+sha.$SOURCE_REVISION"
+            suffix=""; if [[ "$rid" == win-x64 ]]; then suffix=.exe; fi
+            mv "$output/Minicloud.Cli$suffix" "$output/minicloud$suffix"
+            python3 scripts/package-cli-notices.py "$output" muniventures/minicloud "$SOURCE_REVISION"
+          done
+          python3 scripts/cli-release/package.py --root "$PAYLOAD" --output "$OUTPUT" \
+            --tag "$RELEASE_TAG" --source "$SOURCE_REVISION"
+      - name: Smoke-test native binary metadata before signing (not four-platform qualification)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$PAYLOAD/linux-x64/minicloud" --version | grep -F -- "${RELEASE_TAG#v}"
+          "$PAYLOAD/linux-x64/minicloud" --version | grep -F -- "$SOURCE_REVISION"
+          "$PAYLOAD/linux-x64/minicloud" --help | grep -F seed
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        with:
+          cosign-release: v2.6.5
+      - name: Authenticate full inventory and workflow/source provenance
+        run: |
+          cosign sign-blob --yes --new-bundle-format \
+            --bundle "$OUTPUT/checksums.txt.sigstore.json" "$OUTPUT/checksums.txt"
+          cosign verify-blob --new-bundle-format --bundle "$OUTPUT/checksums.txt.sigstore.json" \
+            --certificate-identity "https://github.com/muniventures/minicloud/.github/workflows/cli-release.yml@refs/tags/$RELEASE_TAG" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$OUTPUT/checksums.txt"
+          cd "$OUTPUT" && sha256sum --check --strict checksums.txt
+      - name: Publish new exact CLI assets only (never repository-wide latest)
+        shell: bash
+        run: |
+          set -euo pipefail
+          prerelease=()
+          if [[ "${RELEASE_TAG#v}" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$RELEASE_TAG" "$OUTPUT/"* \
+            --repo muniventures/minicloud --verify-tag --latest=false \
+            --title "Minicloud CLI ${RELEASE_TAG#v}" "${prerelease[@]}" \
+            --notes "Exact CLI source: https://github.com/muniventures/minicloud/tree/$SOURCE_REVISION. Verify the signed inventory with the exact cli-release.yml tag identity. This publication does not qualify seed, any server release or live provider/host compatibility."

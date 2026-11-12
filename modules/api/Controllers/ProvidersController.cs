@@ -32,6 +32,12 @@ public sealed class ProvidersController(MinicloudDbContext db, ControlPlaneAutho
             .Where(x => x.OrganizationId == organizationId).OrderBy(x => x.Name).ToListAsync(ct)).Select(ToResponse));
     }
 
+    [HttpGet("permissions")]
+    public async Task<IResult> Permissions(string organizationId, CancellationToken ct) =>
+        Results.Ok(new ProviderPermissionsResponse(
+            await CanAsync(organizationId, OrganizationAction.ReadProviders, ct),
+            await CanAsync(organizationId, OrganizationAction.ManageProviders, ct)));
+
     [HttpGet("{providerAccountId}/ssh-keys")]
     public async Task<IResult> SshKeys(
         [FromRoute] string providerAccountId,

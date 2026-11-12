@@ -82,6 +82,7 @@ public sealed partial class CliApplication
                 return CliExitCodes.Success;
             }
             if (args[0] == "instance") return await RunInstanceAsync(args.Skip(1).ToArray(), cancellationToken);
+            if (args[0] == "seed") return await RunSeedAsync(args.Skip(1).ToArray(), cancellationToken);
             if (args[0] is "token" or "init" or "add-service" or "login" or "assets" or "deploy" or "branch" or "status" or "logs" or "apps" or "domains" or "secrets" or "environments" or "plans" or "providers")
                 await EnsureInstanceAsync(cancellationToken);
             return args[0] switch
@@ -173,6 +174,9 @@ public sealed partial class CliApplication
     private void PrintVersion()
     {
         _console.WriteLine($"minicloud version {GetVersion()}");
+        var source = typeof(CliApplication).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        var match = System.Text.RegularExpressions.Regex.Match(source ?? "", @"(?:sha\.|\+)([0-9a-f]{40})(?:$|\.)");
+        if (match.Success) _console.WriteLine("source " + match.Groups[1].Value);
     }
 
     private void PrintHelp()
@@ -184,6 +188,7 @@ public sealed partial class CliApplication
         _console.WriteLine("  minicloud <command> [arguments] [options]");
         _console.WriteLine();
         _console.WriteLine("Commands:");
+        _console.WriteLine("  seed            Provision the first control plane without an instance/login");
         _console.WriteLine("  init            Initialize a new application and generate minicloud.yml");
         _console.WriteLine("  add-service     Add a new service configuration to an existing application");
         _console.WriteLine("  deploy          Deploy changed services to Minicloud (or 'all' / '--all' to deploy all)");
@@ -217,6 +222,14 @@ public sealed partial class CliApplication
         var normalized = command.Trim().ToLowerInvariant();
         switch (normalized)
         {
+            case "seed":
+            case "seed status":
+            case "seed resume":
+            case "seed cleanup":
+            case "seed export":
+            case "seed register-provider":
+                PrintSeedHelp();
+                return CliExitCodes.Success;
             case "instance":
             case "instance add":
             case "instance list":

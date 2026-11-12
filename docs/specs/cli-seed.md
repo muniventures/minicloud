@@ -1,6 +1,8 @@
 # CLI seed: provision the first Minicloud control plane
 
-Status: proposed feature, not implemented or released. Scope decisions confirmed
+Status: source implementation submitted; not published or qualified. See the
+[implemented interface](../seed.md) and [delivery contract](../cli-distribution.md).
+Scope decisions confirmed
 with the user on 2026-11-12. This is new work after the public pre-v1 code-only
 milestone, not evidence that the earlier milestone included host provisioning.
 Tracking issue: [#80](https://github.com/muniventures/minicloud/issues/80).
@@ -37,7 +39,8 @@ The current source-built customer workflow need not switch to binaries.
 
 ## Proposed command interface
 
-The following is a design contract, not an already available command:
+The following interface is implemented in source; release/provider qualification
+and actual signed server publication remain separate gates:
 
 ```sh
 minicloud seed --provider hetzner \

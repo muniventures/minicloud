@@ -13,6 +13,12 @@ transport. This is not a customer CLI command or a public recovery endpoint.
 It does not publish or qualify the unfinished self-hosting stack.
 The identity administrator uses the packaged Kratos schema ID `user`.
 
+[CLI seed](seed.md) reuses the signed host installer's calls to this producer.
+It never invokes `complete` anonymously, turns a setup token into an API token,
+or imports provider credentials before ordinary authentication/authorization.
+Requested setup-token output is exported over independently pinned SSH to a
+protected local file, never printed or placed in a browser URL.
+
 Inputs are bounded JSON objects (64 KiB maximum). Never supply passwords or
 setup tokens as command-line arguments. Input files must be regular,
 non-symlink Linux files owned by the command's effective user and readable
