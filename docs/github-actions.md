@@ -311,18 +311,26 @@ jobs:
       environment: minicloud-seed
       minicloud_version: v<exact-cli-version>
     secrets:
-      seed_config: ${{ secrets.MINICLOUD_SEED_CONFIG }}
-      ssh_private_key: ${{ secrets.MINICLOUD_SEED_SSH_KEY }}
-      provider_credential: ${{ secrets.MINICLOUD_SEED_PROVIDER_CREDENTIAL }}
+      MINICLOUD_SEED_CONFIG: ${{ secrets.MINICLOUD_SEED_CONFIG }}
+      MINICLOUD_SEED_SSH_KEY: ${{ secrets.MINICLOUD_SEED_SSH_KEY }}
+      MINICLOUD_SEED_PROVIDER_CREDENTIAL: ${{ secrets.MINICLOUD_SEED_PROVIDER_CREDENTIAL }}
 ```
 
 The caller job cannot set `environment`; the reusable workflow binds the
 `environment` input on its own executing job, so Environment protection rules
-run before any secret is available. The caller must still pass each secret
-**by name** as shown, even when it exists only in the Environment; no
-`secrets: inherit` is needed. A secret that is not passed, or not defined,
-resolves to an empty value, so the workflow fails at runtime when a required
-secret is empty.
+run before the job can use its Environment secrets. Keep the **same names**
+in Environment storage, the caller mapping above and the reusable workflow;
+do not rename them to lowercase aliases. An Environment-only secret is not
+available to the caller job: the executing job resolves it by its original
+name from the selected Environment, overriding any caller-supplied value of
+that name. No repository-secret duplicates or `secrets: inherit` are needed.
+The workflow explicitly fails at runtime if a required secret is empty.
+
+Local synthetic tests check these names and protected-input handling; they
+do not prove GitHub-hosted Environment-only resolution. Verify that separately
+with no repository-secret duplicates after the stateless CLI dependency
+(#90) is merged and integrated. Until then this workflow is not operationally
+qualified.
 
 ### Inputs and outputs
 
