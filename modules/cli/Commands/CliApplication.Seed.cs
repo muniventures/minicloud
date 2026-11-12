@@ -116,8 +116,8 @@ public sealed partial class CliApplication
                         SeedGuard.Require(Option("--setup-token") is not null, "Explicit --setup-token is also required for rotation/export.");
                         state.PendingTokenOutput ??= "seed-token-" + Guid.NewGuid().ToString("N");
                         journal.Save(state);
-                        var release = await new SeedRelease().VerifyAsync(state.Plan.Selection.ServerVersion, Path.Combine(journal.DirectoryPath, "release"), ct);
-                        SeedGuard.Require(release.Digest == state.Plan.ReleaseDigest, "Release identity changed; no token rotation allowed.");
+                        var rotationRelease = await new SeedRelease().VerifyAsync(state.Plan.Selection.ServerVersion, Path.Combine(journal.DirectoryPath, "release"), ct);
+                        SeedGuard.Require(rotationRelease.Digest == state.Plan.ReleaseDigest, "Release identity changed; no token rotation allowed.");
                         await host.RotateTokenAsync(state, journal.DirectoryPath, state.PendingTokenOutput, ct);
                     }
                     await host.ExportAsync(state, journal.DirectoryPath, destination!, Option("--setup-token") is not null, ct);
