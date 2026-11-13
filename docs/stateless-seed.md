@@ -66,6 +66,15 @@ source's `.local/artifacts/local-seed/`. Local assets are not compatible with
 the signed-release maintenance entrypoint; migration to a published release
 needs a separately designed and qualified transition, not reinstall/adoption.
 
+An explicitly reviewed `--refresh-partial-source` on local `plan`/`apply` can
+repair source defects **only while phase is `prepared`, before any OpenBao
+initialization**. It binds the previous source hash/revision, requires identical
+release/dependency/schema contracts, verifies the original bundle/credentials,
+and preserves installation IDs, database volumes and keys. Sources/assets are
+content-addressed; the previous bundle and refresh audit are retained. Interrupted
+refresh markers block further mutation. This is not a ready-host upgrade,
+an automatic retry with changed source, or a signed-release trust transition.
+
 ## Protected configuration and user-owned key
 
 Create a caller-owned `seedId` **once** with `minicloud seed new-id`

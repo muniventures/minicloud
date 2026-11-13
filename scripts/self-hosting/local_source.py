@@ -244,6 +244,38 @@ def package_native(root, output, metadata, images, archive_digest, native, relea
     return value
 
 
+def refresh_partial(installer, manifest, expected_previous, shared):
+    state = installer.state
+    require(state is not None and state["phase"] == "prepared"
+            and state["artifactTrust"] == TRUST and state["sourceArchiveSha256"] == expected_previous
+            and not state["baoInitStarted"] and not state["baoConfigureStarted"] and not state["baoConfigured"],
+            "Source refresh is limited to the original prepared local installation before OpenBao initialization.")
+    for field in ("releaseTag", "serverVersion", "dependencies", "applicationMigration",
+                  "configurationSchemaVersion", "identitySchemaVersion"):
+        require(state[field] == manifest[field], "Partial refresh cannot change release/dependencies/schema contracts.")
+    require(state["sourceRevision"] != manifest["sourceRevision"], "Source refresh requires a new reviewed source.")
+    for name in ("maintenance.json", "maintenance.json.pending", "local-source-refresh.pending"):
+        require(not (installer.root / name).exists() and not (installer.root / name).is_symlink(),
+                "Maintenance/interrupted refresh requires reconciliation.")
+    previous = installer.root / ("bundle.previous-" + expected_previous)
+    require(not previous.exists() and not previous.is_symlink(), "Previous bundle checkpoint already exists.")
+    pending = installer.root / "local-source-refresh.pending"
+    audit = {"previousSource": state["sourceRevision"], "previousSourceSha256": expected_previous,
+             "sourceRevision": manifest["sourceRevision"], "sourceSha256": manifest["sourceArchiveSha256"],
+             "installationId": state["installationId"], "operationId": state["operationId"]}
+    shared.exclusive(pending, encoded(audit))
+    (installer.root / "bundle").rename(previous)
+    shared.sync_directory(installer.root)
+    state.update(sourceRevision=manifest["sourceRevision"], images=manifest["images"],
+                 sourceArchiveSha256=manifest["sourceArchiveSha256"], bundleSha256=manifest["bundle"]["sha256"])
+    shared.atomic_json(installer.state_path, state)
+    installer.installed = manifest
+    installer.manifest = manifest
+    installer.extract()
+    pending.rename(installer.root / ("local-source-refresh-" + manifest["sourceArchiveSha256"] + ".json"))
+    shared.sync_directory(installer.root)
+
+
 def install(args):
     require(os.geteuid() == 0, "Dedicated-host installation requires root.")
     require(args.archive.is_absolute() and args.archive == args.archive.resolve(), "Use a canonical source archive.")
@@ -260,7 +292,8 @@ def install(args):
     require(native is not None, "Unsupported build host.")
     output = source / ".local/artifacts/local-seed"
     output.mkdir(mode=0o700, parents=True, exist_ok=True)
-    local_assets = args.archive.parent.parent / "local-assets"
+    operation_root = args.config.parent
+    local_assets = args.archive.parent / "local-assets"
 
     class LocalHost(shared.Host):
         def tools(self):
@@ -292,17 +325,38 @@ def install(args):
     with shared.installation_lock(args.root):
         info = host.tools()
         host.resources(args.root, info["DockerRootDir"], {"bundleBytes": args.archive.stat().st_size})
+        previous_installer = None
         if not args.root.exists():
+            require(args.previous_source_sha256 is None, "A fresh host cannot refresh source.")
             host.conflicts(None)
         else:
-            require((local_assets / "server-manifest.json").exists(), "Existing installation lacks its original local assets.")
-            LocalInstaller(args, host).load_state()
+            require(not (args.root / "local-source-refresh.pending").exists(), "Interrupted source refresh requires reconciliation.")
+            stored = read_json(args.root / "installation.json")
+            stored_digest = stored.get("sourceArchiveSha256", "")
+            require(stored.get("artifactTrust") == TRUST and re.fullmatch(r"[0-9a-f]{64}", stored_digest),
+                    "Only an established local-source installation can continue.")
+            previous_assets = operation_root / "assets" / stored_digest / "local-assets"
+            if not previous_assets.exists():
+                previous_assets = operation_root / "local-assets"
+            require((previous_assets / "server-manifest.json").exists(), "Original local assets are missing.")
+            previous_args = argparse.Namespace(**vars(args))
+            previous_args.assets_dir = previous_assets
+            previous_installer = shared.Installer(previous_args, host)
+            previous_installer.load_state()
+            host.conflicts(previous_installer.state)
+            if stored_digest != args.sha256:
+                require(args.previous_source_sha256 == stored_digest, "Review an explicit previous source hash before refreshing.")
+            else:
+                require(args.previous_source_sha256 is None, "Source refresh is already applied; replan without the refresh flag.")
         anonymous = output / "anonymous"
         anonymous.mkdir(mode=0o700, exist_ok=True)
         require(not any(anonymous.iterdir()), "Anonymous Docker configuration must remain empty.")
-        build_swap(args.archive.parent.parent, shared)
+        build_swap(operation_root, shared)
         images = build_images(source, output, metadata, native, release)
-        package_native(source, local_assets, metadata, images, args.sha256, native, release)
+        manifest = package_native(source, local_assets, metadata, images, args.sha256, native, release)
+        if args.previous_source_sha256 is not None:
+            previous_installer.args.assets_dir = local_assets
+            refresh_partial(previous_installer, manifest, args.previous_source_sha256, shared)
         installer = LocalInstaller(args, host)
         result = installer.execute()
     print(json.dumps({**result, "artifactTrust": TRUST, "sourceArchiveSha256": args.sha256}, sort_keys=True))
@@ -323,6 +377,7 @@ def main():
     deploy.add_argument("--config", type=Path, required=True)
     deploy.add_argument("--recovery-dir", type=Path, required=True)
     deploy.add_argument("--public-address", action="append", required=True)
+    deploy.add_argument("--previous-source-sha256")
     args = parser.parse_args()
     os.umask(0o077)
     if args.command == "package":

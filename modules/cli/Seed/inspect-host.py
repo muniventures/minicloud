@@ -88,7 +88,7 @@ def inspect_host(seed, base=pathlib.Path("/"), owner=0, run=subprocess.run, acqu
         if exists(root):
             protected(root, True)
             assert stat.S_IMODE(root.lstat().st_mode) == 0o700
-            assert not any(exists(root / name) for name in ("installation.json.pending", "maintenance.json.pending"))
+            assert not any(exists(root / name) for name in ("installation.json.pending", "maintenance.json.pending", "local-source-refresh.pending"))
             state = document(root / "installation.json")
             assert bound and exists(preparation)
             assert type(state.get("schemaVersion")) is int and state["schemaVersion"] == 1 and state.get("product") == "minicloud"
@@ -160,6 +160,7 @@ def inspect_host(seed, base=pathlib.Path("/"), owner=0, run=subprocess.run, acqu
                 "health": "pending" if healthy else "unavailable",
                 "openBao": "ready" if services.get("openbao") else "unavailable",
                 "browser": "unknown", "prepared": True,
+                "artifactTrust": state.get("artifactTrust"), "sourceArchiveSha256": state.get("sourceArchiveSha256"),
                 "configuration": {key: state["configuration"][key] for key in ("consoleUrl", "apiUrl", "appDomain")},
                 "publicAddresses": state["publicAddresses"], "identity": identity}
     except (AssertionError, KeyError, ValueError, OSError, subprocess.SubprocessError, TypeError):

@@ -79,7 +79,8 @@ internal sealed record SeedPortableTarget(string ServerId, string? Ipv4 = null, 
 
 internal sealed record SeedObservation(string State, string Progress, string? InstallationId = null,
     string? OperationId = null, string? Release = null, string? Source = null, string Health = "unknown",
-    string OpenBao = "unknown", string Browser = "unknown", bool Prepared = false);
+    string OpenBao = "unknown", string Browser = "unknown", bool Prepared = false,
+    string? ArtifactTrust = null, string? SourceArchiveSha256 = null);
 
 internal interface ISeedInspector
 {

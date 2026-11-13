@@ -165,6 +165,8 @@ services:
 
   kratos-migrate:
     image: ${MINICLOUD_KRATOS_IMAGE:?set MINICLOUD_KRATOS_IMAGE}
+    # Installer-owned configuration is root-only, including inside bind mounts.
+    user: "0:0"
     restart: "no"
     command: ["migrate", "sql", "-e", "--yes", "--config", "/etc/config/kratos.yml"]
     environment: &kratos-environment
@@ -189,6 +191,7 @@ services:
 
   kratos:
     image: ${MINICLOUD_KRATOS_IMAGE:?set MINICLOUD_KRATOS_IMAGE}
+    user: "0:0"
     restart: unless-stopped
     command: ["serve", "--config", "/etc/config/kratos.yml"]
     environment: *kratos-environment

@@ -264,6 +264,7 @@ public sealed partial class CliApplication
         _console.WriteLine("minicloud seed export --config PROTECTED_JSON --report NONSECRET_JSON --ssh-key USER_PRIVATE_KEY --recovery-dir SEPARATE_PRIVATE_DIR [--setup-token]");
         _console.WriteLine("Optional plan key generation: --generate-ssh-key EXPLICIT_NEW_PATH [--ssh-key-passphrase | --no-ssh-key-passphrase]; default question protects the key.");
         _console.WriteLine("Explicit local source alternative (plan/apply only): --local-source PROTECTED_ARCHIVE --source-sha256 REVIEWED_SHA256. Builds on the dedicated VPS; no GitHub release or product registry. See docs/stateless-seed.md.");
+        _console.WriteLine("Explicit --refresh-partial-source requires local mode and a prepared installation before OpenBao initialization; preserves original IDs/credentials and retains the previous bundle.");
         _console.WriteLine("Check is observational, including failures; explicit-target SSH/export needs no provider credential. Keyless check observes public HTTPS only.");
         _console.WriteLine("Exit codes: 0 success, 10 handoff pending, 11 upgrade required, 12 reconciliation required; 2 malformed invocation. See docs/stateless-seed.md.");
         _console.WriteLine("Legacy journal callers remain supported below; their keys/journals are never imported, replaced or deleted:");

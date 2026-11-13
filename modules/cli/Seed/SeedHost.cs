@@ -45,6 +45,7 @@ fcntl.flock(lock_fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
         var context = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(new
         {
             seedId = state.Id, release = state.Plan.Selection.ServerVersion, source = state.Plan.ReleaseSource,
+            previousSource = state.Plan.PreviousLocalSourceRevision,
             consoleUrl = "https://" + state.Plan.Selection.Domain, apiUrl = "https://api." + state.Plan.Selection.Domain,
             appDomain = state.Plan.Selection.AppDomain, address = state.Server!.Address,
             identity = new
@@ -63,7 +64,9 @@ if observation.get("identity") is not None:
  assert observation["identity"] == context["identity"]
 if observation["state"] == "installed":
  assert observation["progress"] in ("initializing","prepared","initialized")
- assert observation["release"] == context["release"] and observation["source"] == context["source"]
+ assert observation["release"] == context["release"]
+ assert observation["source"] == context["source"] or (context["previousSource"] is not None
+     and observation["source"] == context["previousSource"] and observation["progress"] == "prepared")
  assert observation["configuration"] == {key:context[key] for key in ("consoleUrl","apiUrl","appDomain")}
  assert observation["publicAddresses"] == [context["address"]]
 
@@ -265,21 +268,28 @@ else:
         {
             SeedGuard.Require(state.Plan.ArtifactTrust == SeedLocalSource.Trust && !statusOnly,
                 "Local source installation requires an explicit reviewed local-source plan.");
+            var localAssets = basePath + "/assets/" + state.Plan.ReleaseDigest;
+            var mkdir = await SshAsync(state, directory, "python3 -B -c " + Quote(MutationGuard(state)
+                + "\np=pathlib.Path(" + JsonSerializer.Serialize(localAssets) + ")\n"
+                + "if not p.exists() and not p.is_symlink(): p.mkdir(mode=0o700)\n"
+                + "s=p.lstat()\nassert stat.S_ISDIR(s.st_mode) and s.st_uid == 0 and stat.S_IMODE(s.st_mode) == 0o700\n"), null, ct);
+            SeedGuard.Require(mkdir.ExitCode == 0, "Protected source asset directory conflicts.");
             foreach (var name in new[] { "source.tar.gz", "local-source.py" })
             {
                 var path = Path.Combine(directory, "release", name);
                 SeedFiles.Check(path);
-                await PutAsync(state, directory, basePath + "/assets/" + name, await File.ReadAllBytesAsync(path, ct), ct);
+                await PutAsync(state, directory, localAssets + "/" + name, await File.ReadAllBytesAsync(path, ct), ct);
             }
             // Pinned SSH plus the plan-bound archive and runner hashes replace GitHub's release authority.
             var runnerDigest = Convert.ToHexStringLower(SHA256.HashData(
                 await File.ReadAllBytesAsync(Path.Combine(directory, "release", "local-source.py"), ct)));
-            var verify = $"cd {Quote(basePath + "/assets")} && printf '%s  %s\\n' {Quote(state.Plan.ReleaseDigest)} source.tar.gz "
+            var verify = $"cd {Quote(localAssets)} && printf '%s  %s\\n' {Quote(state.Plan.ReleaseDigest)} source.tar.gz "
                 + $"{Quote(runnerDigest)} local-source.py | sha256sum --check --strict --status && "
-                + $"python3 -B local-source.py install --archive {Quote(basePath + "/assets/source.tar.gz")} "
+                + $"python3 -B local-source.py install --archive {Quote(localAssets + "/source.tar.gz")} "
                 + $"--sha256 {Quote(state.Plan.ReleaseDigest)} --tag {Quote(s.ServerVersion)} "
                 + $"--config {Quote(basePath + "/configuration.json")} --recovery-dir {Quote(basePath + "/recovery")} "
-                + $"--public-address {Quote(state.Server!.Address!)}";
+                + $"--public-address {Quote(state.Server!.Address!)}"
+                + (state.Plan.PreviousLocalSourceDigest is { } previous ? " --previous-source-sha256 " + Quote(previous) : "");
             var installed = await SshAsync(state, directory, "bash -c " + Quote(verify), null, ct);
             await MetadataAsync(state, directory, ct);
             SeedGuard.Require(installed.ExitCode is 0 or 2,
@@ -346,7 +356,10 @@ else:
             && (state.InstallationId is null || state.InstallationId == id)
             && (state.InstallerOperationId is null || state.InstallerOperationId == operation)
             && value.GetProperty("releaseTag").GetString() == state.Plan.Selection.ServerVersion
-            && value.GetProperty("sourceRevision").GetString() == state.Plan.ReleaseSource
+            && (value.GetProperty("sourceRevision").GetString() == state.Plan.ReleaseSource
+                || state.Plan.PreviousLocalSourceRevision is { } previousSource
+                    && value.GetProperty("sourceRevision").GetString() == previousSource
+                    && value.GetProperty("phase").GetString() == "prepared")
             && value.GetProperty("root").GetString() == "/opt/minicloud"
             && value.GetProperty("recoveryDir").GetString() == Remote(state) + "/recovery"
             && value.GetProperty("publicAddresses").EnumerateArray().Select(x => x.GetString()).SequenceEqual([state.Server!.Address])

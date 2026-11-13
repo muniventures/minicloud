@@ -38,6 +38,8 @@ internal sealed record SeedPlan(SeedSelection Selection, SeedQuote Quote, string
 {
     public string[] OperatorPublicKeys { get; init; } = [];
     public string ArtifactTrust { get; init; } = "github-sigstore";
+    public string? PreviousLocalSourceDigest { get; init; }
+    public string? PreviousLocalSourceRevision { get; init; }
 
     [JsonIgnore]
     public string Approval
