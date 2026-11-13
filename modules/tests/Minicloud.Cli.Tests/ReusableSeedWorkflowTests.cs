@@ -333,6 +333,60 @@ public sealed class ReusableSeedWorkflowTests : IDisposable
         Assert.Equal(jobExit, outcome.ExitCode);
     }
 
+    [Theory]
+    [InlineData(0, "success", 0)]
+    [InlineData(3, "error", 1)]
+    public void Artifact_transport_failure_warns_without_changing_cli_outcome(int code, string expected, int jobExit)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var directory = Prepared("apply");
+        var run = RunCli("apply", directory, code, Report("current"));
+        var report = RunStep("Summarize and stage the non-secret report",
+            ReportEnv("apply", directory, run.Outputs["exit_code"]));
+        Assert.Equal(0, report.ExitCode);
+        Assert.Equal(expected, report.Outputs["result"]);
+        Assert.True(File.Exists(Path.Combine(report.Outputs["path"], "seed-report.json")));
+
+        var upload = Step("Upload non-secret report");
+        Assert.Equal("upload", Text(upload["id"]));
+        Assert.Equal("always() && steps.report.outputs.path != ''", Text(upload["if"]));
+        Assert.Equal("true", Text(upload["continue-on-error"]));
+        Assert.Equal("error", Text(Map(upload, "with")["if-no-files-found"]));
+        Assert.Equal(["Upload non-secret report"], Steps.Where(step =>
+            step.Children.TryGetValue(new YamlScalarNode("continue-on-error"), out var value)
+            && Text(value) == "true").Select(Name));
+        Assert.False(Job.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
+
+        // Substitute only the remote action; run the real warning and outcome scripts locally.
+        Assert.NotEqual(0, Execute("bash", ["-c", "echo 'Synthetic artifact service failure' >&2; exit 1"], new()).ExitCode);
+        Assert.Equal("always() && steps.upload.outcome == 'failure'", Text(Step("Warn if report upload failed")["if"]));
+        var warning = RunStep("Warn if report upload failed", new());
+        Assert.Equal(0, warning.ExitCode);
+        Assert.Contains("::warning::Non-secret report upload failed", warning.Output);
+        Assert.Contains("Do not retry apply", warning.Summary);
+        var outcome = RunStep("Report seed outcome", new() { ["EXIT_CODE"] = run.Outputs["exit_code"] });
+        Assert.Equal("always() && steps.run.outcome == 'success'", Text(Step("Report seed outcome")["if"]));
+        Assert.Equal(jobExit, outcome.ExitCode);
+    }
+
+    [Theory]
+    [InlineData("{invalid-json", "not valid JSON")]
+    [InlineData("[]", "not a JSON object")]
+    [InlineData("secret", "contained supplied secret material")]
+    public void Invalid_apply_reports_fail_before_artifact_transport(string content, string message)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var directory = Prepared("apply");
+        RunCli("apply", directory, 0, content == "secret" ? Report("current", note: ProviderSecret) : content);
+        var report = RunStep("Summarize and stage the non-secret report", ReportEnv("apply", directory, "0"));
+        Assert.NotEqual(0, report.ExitCode);
+        Assert.Contains("::error::", report.Output);
+        Assert.Contains(message, report.Output);
+        Assert.False(report.Outputs.ContainsKey("path"));
+        Assert.DoesNotContain(ProviderSecret, report.Output + report.Summary);
+        Assert.False(Step("Summarize and stage the non-secret report").Children.ContainsKey(new YamlScalarNode("continue-on-error")));
+    }
+
     [Fact]
     public void Reports_containing_supplied_secrets_are_not_staged_and_inputs_are_removed()
     {
@@ -428,7 +482,7 @@ public sealed class ReusableSeedWorkflowTests : IDisposable
         report["kind"] = kind;
         RunCli("plan", directory, 0, report.ToJsonString(), cliDigest: OtherDigest);
         var result = RunStep("Summarize and stage the non-secret report", ReportEnv("plan", directory, "0"));
-        Assert.Equal(0, result.ExitCode);
+        Assert.NotEqual(0, result.ExitCode);
         Assert.False(result.Outputs.ContainsKey("path"));
         Assert.Equal("", result.Outputs["classification"]);
         Assert.Equal(OtherDigest, result.Outputs["approval_digest"]);

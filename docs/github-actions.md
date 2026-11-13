@@ -388,10 +388,14 @@ them, and a copy that exists only on the VPS is not an independent backup.
 The job summary shows the operation, result, classification, approval digest,
 SSH key fingerprint, reasons and next actions, read from the CLI's
 `minicloud-seed-report` (`schemaVersion` 1); a report with another kind or
-version is neither trusted nor uploaded. The CLI's non-secret JSON report is
-uploaded as an artifact for 30 days, readable by anyone with read access to
+version is neither trusted nor uploaded. Invalid reports and reports containing
+supplied secrets fail report validation and the job. The CLI's non-secret JSON
+report is uploaded as an artifact for 30 days, readable by anyone with read access to
 the repository's Actions runs. It is a convenience snapshot, never the source
-of truth; losing it does not affect the installation.
+of truth; losing it does not affect the installation. Artifact transport failure
+emits a warning in the log and job summary without changing the seed outcome
+or masking CLI/report validation failures. Do not retry `apply` merely to
+recover an artifact.
 
 ### Security and limits
 
