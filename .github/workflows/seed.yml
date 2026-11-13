@@ -33,13 +33,13 @@ on:
         type: string
         default: minicloud-seed-report
     secrets:
-      seed_config:
+      MINICLOUD_SEED_CONFIG:
         description: "Versioned seed configuration JSON (schemaVersion 1)."
         required: true
-      ssh_private_key:
+      MINICLOUD_SEED_SSH_KEY:
         description: "Unencrypted OpenSSH private key for the seed host. Required for plan and apply."
         required: false
-      provider_credential:
+      MINICLOUD_SEED_PROVIDER_CREDENTIAL:
         description: "Provider API credential when it is not part of the seed configuration."
         required: false
     outputs:
@@ -222,9 +222,9 @@ jobs:
         env:
           OPERATION: ${{ inputs.operation }}
           SAFE_BASE: ${{ steps.validate.outputs.safe_base }}
-          SEED_CONFIG: ${{ secrets.seed_config }}
-          SSH_PRIVATE_KEY: ${{ secrets.ssh_private_key }}
-          PROVIDER_CREDENTIAL: ${{ secrets.provider_credential }}
+          SEED_CONFIG: ${{ secrets.MINICLOUD_SEED_CONFIG }}
+          SSH_PRIVATE_KEY: ${{ secrets.MINICLOUD_SEED_SSH_KEY }}
+          PROVIDER_CREDENTIAL: ${{ secrets.MINICLOUD_SEED_PROVIDER_CREDENTIAL }}
         run: |
           set -euo pipefail
           umask 077
@@ -259,20 +259,20 @@ jobs:
 
           missing = []
           if not config_text.strip():
-              missing.append("seed_config")
+              missing.append("MINICLOUD_SEED_CONFIG")
           if operation in ("plan", "apply") and not key_text.strip():
-              missing.append("ssh_private_key")
+              missing.append("MINICLOUD_SEED_SSH_KEY")
           if missing:
               fail("Required secret(s) are empty or were not passed: " + ", ".join(missing)
-                   + ". Pass them by name from the caller and define them in the selected Environment.")
+                   + ". Define them in the selected Environment and keep the same names in the caller.")
 
           mask(credential)
           try:
               config = json.loads(config_text)
           except ValueError:
-              fail("seed_config is not valid JSON. Its contents are not shown.")
+              fail("MINICLOUD_SEED_CONFIG is not valid JSON. Its contents are not shown.")
           if not isinstance(config, dict) or config.get("schemaVersion") != 1:
-              fail("seed_config must be a JSON object with schemaVersion 1.")
+              fail("MINICLOUD_SEED_CONFIG must be a JSON object with schemaVersion 1.")
           if isinstance(config.get("providerCredential"), str):
               mask(config["providerCredential"])
           write("seed-config.json", config_text)
@@ -287,7 +287,7 @@ jobs:
               check = subprocess.run(["ssh-keygen", "-y", "-P", "", "-f", key_path],
                                      stdin=subprocess.DEVNULL, capture_output=True)
               if check.returncode != 0:
-                  fail("ssh_private_key must be an unencrypted OpenSSH private key. Unattended CI does not use passphrases or an SSH agent.")
+                  fail("MINICLOUD_SEED_SSH_KEY must be an unencrypted OpenSSH private key. Unattended CI does not use passphrases or an SSH agent.")
               fingerprint = subprocess.run(["ssh-keygen", "-l", "-E", "sha256", "-f", key_path],
                                            stdin=subprocess.DEVNULL, capture_output=True, text=True, check=True)
               with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:

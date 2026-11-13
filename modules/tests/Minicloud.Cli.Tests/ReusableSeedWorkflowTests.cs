@@ -51,8 +51,8 @@ public sealed class ReusableSeedWorkflowTests : IDisposable
         Assert.False(Map(inputs, "minicloud_version").Children.ContainsKey(new YamlScalarNode("default")));
 
         var secrets = Map(Map(Map(Workflow, "on"), "workflow_call"), "secrets");
-        Assert.Equal(["seed_config", "ssh_private_key", "provider_credential"], secrets.Children.Keys.Select(Text));
-        Assert.Equal("true", Text(Map(secrets, "seed_config")["required"]));
+        Assert.Equal(["MINICLOUD_SEED_CONFIG", "MINICLOUD_SEED_SSH_KEY", "MINICLOUD_SEED_PROVIDER_CREDENTIAL"], secrets.Children.Keys.Select(Text));
+        Assert.Equal("true", Text(Map(secrets, "MINICLOUD_SEED_CONFIG")["required"]));
 
         var concurrency = Map(Job, "concurrency");
         Assert.Contains("inputs.environment", Text(concurrency["group"]));
@@ -97,10 +97,52 @@ public sealed class ReusableSeedWorkflowTests : IDisposable
         Assert.StartsWith("muniventures/minicloud/.github/workflows/seed.yml@", Text(job["uses"]));
         Assert.False(job.Children.ContainsKey(new YamlScalarNode("environment")));
         var secrets = Map(job, "secrets");
-        Assert.Equal("${{ secrets.MINICLOUD_SEED_CONFIG }}", Text(secrets["seed_config"]));
-        Assert.Equal("${{ secrets.MINICLOUD_SEED_SSH_KEY }}", Text(secrets["ssh_private_key"]));
+        var declared = Map(Map(Map(Workflow, "on"), "workflow_call"), "secrets");
+        var references = Map(Step("Write protected seed inputs"), "env").Children.Values.Select(Text).ToList();
+        Assert.Equal(declared.Children.Keys.Select(Text), secrets.Children.Keys.Select(Text));
+        foreach (var name in secrets.Children.Keys.Select(Text))
+        {
+            var reference = "${{ secrets." + name + " }}";
+            Assert.Equal(reference, Text(secrets[name]));
+            Assert.Contains(reference, references);
+            Assert.Contains("| `" + name + "` |", section);
+        }
         Assert.Equal("${{ inputs.approve }}", Text(Map(job, "with")["approve"]));
         Assert.DoesNotContain("inherit", yaml);
+    }
+
+    [Theory]
+    [InlineData("check")]
+    [InlineData("plan")]
+    [InlineData("apply")]
+    public void Synthetic_environment_secret_names_feed_the_protected_input_step(string operation)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        // Resolve only the declared secret references locally, not GitHub's hosted Environment behavior.
+        var selectedEnvironment = new Dictionary<string, string>
+        {
+            ["MINICLOUD_SEED_CONFIG"] = Config(),
+            ["MINICLOUD_SEED_SSH_KEY"] = operation == "check" ? "" : NewKey(),
+            ["MINICLOUD_SEED_PROVIDER_CREDENTIAL"] = "synthetic-separate-provider-token",
+        };
+        var environment = new Dictionary<string, string> { ["OPERATION"] = operation, ["SAFE_BASE"] = home };
+        foreach (var (name, value) in Map(Step("Write protected seed inputs"), "env").Children)
+        {
+            var match = Regex.Match(Text(value), @"^\$\{\{ secrets\.([A-Za-z0-9_]+) \}\}$");
+            if (match.Success)
+            {
+                Assert.True(selectedEnvironment.TryGetValue(match.Groups[1].Value, out var secret),
+                    "Secret reference must match the documented Environment secret name.");
+                environment[Text(name)] = secret!;
+            }
+        }
+        var result = RunStep("Write protected seed inputs", environment);
+        Assert.True(result.ExitCode == 0, result.Output);
+        var directory = result.Outputs["dir"];
+        Assert.Equal(Config(), File.ReadAllText(Path.Combine(directory, "seed-config.json")));
+        Assert.Equal(selectedEnvironment["MINICLOUD_SEED_PROVIDER_CREDENTIAL"],
+            File.ReadAllText(Path.Combine(directory, "provider-credential")));
+        Assert.Equal(operation != "check", File.Exists(Path.Combine(directory, "ssh-key")));
     }
 
     [Theory]
@@ -153,9 +195,9 @@ public sealed class ReusableSeedWorkflowTests : IDisposable
     }
 
     [Theory]
-    [InlineData("plan", "", "KEY", "seed_config")]
-    [InlineData("plan", "CONFIG", "  \n", "ssh_private_key")]
-    [InlineData("apply", " ", "", "seed_config, ssh_private_key")]
+    [InlineData("plan", "", "KEY", "MINICLOUD_SEED_CONFIG")]
+    [InlineData("plan", "CONFIG", "  \n", "MINICLOUD_SEED_SSH_KEY")]
+    [InlineData("apply", " ", "", "MINICLOUD_SEED_CONFIG, MINICLOUD_SEED_SSH_KEY")]
     public void Empty_or_unpassed_required_secrets_fail_before_any_cli_run(string operation, string config, string key, string missing)
     {
         if (OperatingSystem.IsWindows()) return;
