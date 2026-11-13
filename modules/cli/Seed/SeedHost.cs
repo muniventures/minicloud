@@ -8,7 +8,8 @@ using System.Text.RegularExpressions;
 namespace Minicloud.Cli.Seed;
 
 internal sealed partial class SeedHost(string? userKey = null, bool useAgent = false,
-    Func<string, IEnumerable<string>, byte[]?, CancellationToken, bool, Task<SeedProcessResult>>? process = null) : ISeedHost
+    Func<string, IEnumerable<string>, byte[]?, CancellationToken, bool, Task<SeedProcessResult>>? process = null,
+    bool localSource = false) : ISeedHost
 {
     private static string Remote(SeedState state) => "/var/lib/minicloud-seed/" + state.Id;
     private static string Quote(string value) => "'" + value.Replace("'", "'\\''") + "'";
@@ -73,8 +74,11 @@ if observation["state"] == "installed":
     {
         await SeedProcess.RequireAsync("ssh", ["-V"], null, ct);
         await SeedProcess.RunAsync("ssh-keygen", ["-?"], null, ct);
-        var cosign = await SeedProcess.RequireAsync("cosign", ["version", "--json"], null, ct);
-        SeedGuard.Require(cosign.Contains("v2.6.5"), "Install Cosign 2.6.5 independently before seed.");
+        if (!localSource)
+        {
+            var cosign = await SeedProcess.RequireAsync("cosign", ["version", "--json"], null, ct);
+            SeedGuard.Require(cosign.Contains("v2.6.5"), "Install Cosign 2.6.5 independently before seed.");
+        }
         await SeedProcess.RunAsync("ssh-keyscan", ["-h"], null, ct);
     }
 
@@ -145,7 +149,8 @@ if observation["state"] == "installed":
             serverId = state.Server!.Id, region = state.Plan.Selection.Region, size = state.Plan.Selection.Size,
             image = state.Plan.Quote.Image, architecture = state.Plan.Quote.Architecture
         }));
-        var result = await SshAsync(state, directory, $"bash -s -- {Quote(state.Id)} {Quote(state.Plan.Quote.Architecture)} {Quote(identity)}", script.ToArray(), ct);
+        var result = await SshAsync(state, directory, $"bash -s -- {Quote(state.Id)} {Quote(state.Plan.Quote.Architecture)} {Quote(identity)} "
+            + Quote(localSource ? "local-source" : "github-sigstore"), script.ToArray(), ct);
         SeedGuard.Require(result.ExitCode == 0, "Dedicated Ubuntu host preparation failed. Preserve resources; inspect through pinned SSH. No host output was logged.");
     }
 
@@ -256,6 +261,32 @@ else:
             googleOidc = new { enabled = false }, sourceUrl = "https://github.com/muniventures/minicloud/tree/" + state.Plan.ReleaseSource,
             recovery = new { openBaoUnsealMaterialPath = basePath + "/recovery", backupDestination = "explicit protected workstation export required" } });
         await PutAsync(state, directory, basePath + "/configuration.json", config, ct);
+        if (localSource)
+        {
+            SeedGuard.Require(state.Plan.ArtifactTrust == SeedLocalSource.Trust && !statusOnly,
+                "Local source installation requires an explicit reviewed local-source plan.");
+            foreach (var name in new[] { "source.tar.gz", "local-source.py" })
+            {
+                var path = Path.Combine(directory, "release", name);
+                SeedFiles.Check(path);
+                await PutAsync(state, directory, basePath + "/assets/" + name, await File.ReadAllBytesAsync(path, ct), ct);
+            }
+            // Pinned SSH plus the plan-bound archive and runner hashes replace GitHub's release authority.
+            var runnerDigest = Convert.ToHexStringLower(SHA256.HashData(
+                await File.ReadAllBytesAsync(Path.Combine(directory, "release", "local-source.py"), ct)));
+            var verify = $"cd {Quote(basePath + "/assets")} && printf '%s  %s\\n' {Quote(state.Plan.ReleaseDigest)} source.tar.gz "
+                + $"{Quote(runnerDigest)} local-source.py | sha256sum --check --strict --status && "
+                + $"python3 -B local-source.py install --archive {Quote(basePath + "/assets/source.tar.gz")} "
+                + $"--sha256 {Quote(state.Plan.ReleaseDigest)} --tag {Quote(s.ServerVersion)} "
+                + $"--config {Quote(basePath + "/configuration.json")} --recovery-dir {Quote(basePath + "/recovery")} "
+                + $"--public-address {Quote(state.Server!.Address!)}";
+            var installed = await SshAsync(state, directory, "bash -c " + Quote(verify), null, ct);
+            await MetadataAsync(state, directory, ct);
+            SeedGuard.Require(installed.ExitCode is 0 or 2,
+                "Local source build/installation failed; preserve this target, source hash, build logs and recovery material.");
+            using var localResult = JsonDocument.Parse(installed.Output);
+            return localResult.RootElement.GetProperty("state").GetString()!;
+        }
         foreach (var name in SeedRelease.Names(s.ServerVersion))
         {
             var local = Path.Combine(directory, "release", name); SeedFiles.Check(local);

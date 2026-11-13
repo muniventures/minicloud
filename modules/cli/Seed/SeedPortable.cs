@@ -153,7 +153,7 @@ internal static class SeedPortable
         if (!observation.Prepared) await host.PrepareAsync(state, directory, ct);
         state.HostPrepared = true;
         if (state.Plan.OperatorPublicKeys.Length > 0) await host.AddOperatorKeysAsync(state, directory, ct);
-        if (!await host.DnsReadyAsync(state, ct))
+        if (!await host.DnsReadyAsync(state, ct) && state.Plan.ArtifactTrust != SeedLocalSource.Trust)
             return observation with { Progress = "awaiting_dns", Health = "pending", Prepared = true };
         await host.InstallAsync(state, directory, false, ct);
         return await inspector.InspectAsync(state, directory, ct);

@@ -3,8 +3,54 @@
 Issue #90 supersedes the required laptop journal and hidden bootstrap identity.
 This is source functionality, **not publication or live-provider qualification**.
 The [seed release/qualification gate](seed.md) still applies: an exact signed,
-compatible server release is mandatory. Never bypass compatibility, publish
+compatible server release is mandatory in the default mode. Never bypass compatibility, publish
 artifacts, or substitute an unqualified release just to make seed proceed.
+
+## Explicit local source alternative
+
+For operator-controlled TEST deployments without publishing to GitHub or GHCR,
+package a **clean, locally committed** source revision:
+
+```sh
+umask 077
+python3 -B scripts/self-hosting/local_source.py package \
+  --version 0.0.1-local.1 \
+  --output "$PWD/.local/artifacts/local-seed/source.tar.gz"
+```
+
+Build the CLI from that same revision (including its full informational source
+SHA). Set `serverVersion` in the protected seed config to `server-v0.0.1-local.1`.
+Add `--local-source /absolute/path/source.tar.gz --source-sha256 REVIEWED_SHA256`
+to **both** `seed plan` and `seed apply`. Review the archive hash, source, native
+architecture, SSH identity and quote before approving. These flags are never
+inferred from a failed download; omitting either fails. `check` and `export`
+require neither artifacts nor provider credentials for an explicit trusted host.
+
+This mode uses **operator-pinned source**, not GitHub/Sigstore release authority.
+The SHA256 must come from the operator's reviewed packaging output, not an
+untrusted download. The CLI validates and copies the archive before provider
+creation, binds its hash and authority into approval, transfers it through
+independently pinned SSH, and verifies both archive and runner hashes on-host
+before execution. Never use a checksum beside an untrusted archive as approval.
+
+The dedicated Ubuntu VPS builds the three product images natively, records
+their immutable Docker content IDs, validates both worker-agent executables,
+and pulls dependencies at the existing pinned registry digests anonymously.
+There is **no** product-image push, GitHub release, or GitHub credential on the
+VPS. Internet access to upstream package/base-image/dependency registries is
+still required. Builds need additional CPU, disk, time and memory; existing
+runtime refusal floors are not measured build-capacity guarantees.
+
+The shared installer preserves installation identities, protected credentials,
+independent recovery output and maintenance locking. Local mode explicitly
+allows initialization/startup before DNS, without replacing HTTPS with HTTP or
+exposing internal service ports. A running stack awaiting DNS is **not ready**:
+public HTTPS and browser setup remain separate handoffs. Preserve the same
+source archive/hash, user key and target across retries; build failures never
+authorize replacement VPS creation. Protected build logs are under the uploaded
+source's `.local/artifacts/local-seed/`. Local assets are not compatible with
+the signed-release maintenance entrypoint; migration to a published release
+needs a separately designed and qualified transition, not reinstall/adoption.
 
 ## Protected configuration and user-owned key
 

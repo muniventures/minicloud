@@ -103,6 +103,7 @@ sshd -T | grep -qx 'kbdinteractiveauthentication no'
 sshd -T | grep -Eq '^permitrootlogin (prohibit-password|without-password)$'
 systemctl reload ssh
 systemctl enable --now docker
+if test "${4:-github-sigstore}" != local-source; then
 cosign="$root/cosign-linux-$cosign_arch"
 if test ! -e "$cosign"; then
   test ! -e "$cosign.partial"
@@ -119,6 +120,7 @@ check_dir /usr/local/bin
 test ! -L /usr/local/bin/cosign
 install -m 755 "$cosign" /usr/local/bin/cosign
 cosign version --json
+fi
 docker version --format '{{.Server.Version}}'
 docker compose version
 docker buildx version

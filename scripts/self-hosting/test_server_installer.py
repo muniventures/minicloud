@@ -156,6 +156,21 @@ class InstallerTests(unittest.TestCase):
     def subject(self):
         return FixtureInstaller(self.args, self.host)
 
+    def test_explicit_deferred_dns_initializes_but_does_not_claim_https_ready(self):
+        self.host.dns_ready = False
+        subject = self.subject()
+        self.assertEqual("awaiting_dns_tls", subject.execute()["state"])
+        self.assertEqual([], subject.events)
+        self.assertFalse(self.args.root.exists())
+        self.args.defer_dns = True
+        subject = self.subject()
+        with mock.patch.object(subject, "readiness", return_value={"state": "awaiting_dns_tls"}):
+            self.assertEqual("awaiting_dns_tls", subject.execute()["state"])
+        self.assertTrue(subject.state["credentialsComplete"])
+        self.assertIn("verify-and-pull", subject.events)
+        self.assertIn(("up", "-d", "caddy"), subject.events)
+        self.assertEqual("awaiting_dns_tls", subject.state["phase"])
+
     def test_pending_or_unknown_maintenance_blocks_install_before_any_host_operation(self):
         self.args.root.mkdir(mode=0o700)
         for record in ({"state": "started"}, {"state": "upgraded", "pendingUpgrade": {}},
