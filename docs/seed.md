@@ -18,6 +18,13 @@ It uses the [existing signed installer](server-installer.md) and shared
 
 ## Before starting
 
+**Stateless interface (#90):** use the [current configuration, plan/apply/check
+and portable-report guide](stateless-seed.md). It supersedes the machine-bound
+journal/hidden-bootstrap-key requirements below. The remaining commands on this
+page document retained **legacy** callers; do not copy/import their secrets or
+delete their journals during transition. Release qualification gates above
+still apply to both interfaces.
+
 - Own a public dashboard hostname and a separate app suffix. For a dashboard
   `cloud.example.com`, the API is exactly `api.cloud.example.com`. Replace
   these examples with domains you control. No domain is purchased.
@@ -304,6 +311,7 @@ The targeted tests use mocked providers; they do not create an actual VPS or
 qualify live-provider behavior. From the checkout root, with the .NET 10 SDK:
 
 ```sh
+umask 077
 dotnet test modules/tests/Minicloud.Cli.Tests/Minicloud.Cli.Tests.csproj \
   --configuration Release \
   --artifacts-path .local/artifacts/seed-tests \

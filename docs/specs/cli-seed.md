@@ -7,6 +7,14 @@ with the user on 2026-11-12. This is new work after the public pre-v1 code-only
 milestone, not evidence that the earlier milestone included host provisioning.
 Tracking issue: [#80](https://github.com/muniventures/minicloud/issues/80).
 
+**Current contract:** [#90](https://github.com/muniventures/minicloud/issues/90)
+supersedes the machine-bound journal and hidden automation identity in this
+historical design. The [stateless seed interface](../stateless-seed.md) specifies
+the implemented protected configuration, caller-held identity, observational
+inspection, classifications, uncertainty and recovery boundaries. Existing
+legacy keys/journals remain user-owned and compatible; they are not required
+for the stateless interface and are never automatically imported or removed.
+
 ## Outcome
 
 A user downloads a prebuilt CLI, or builds the CLI from canonical source, then

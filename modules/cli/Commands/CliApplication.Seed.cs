@@ -19,6 +19,8 @@ public sealed partial class CliApplication
 
     private async Task<int> RunSeedAsync(string[] args, CancellationToken ct)
     {
+        if (args.Contains("--config") || args.FirstOrDefault() is "plan" or "apply" or "check" or "generate-id" or "new-id")
+            return await RunPortableSeedAsync(args, ct);
         string? operation = null;
         try
         {
@@ -256,6 +258,14 @@ public sealed partial class CliApplication
 
     private void PrintSeedHelp()
     {
+        _console.WriteLine("Stateless seed: minicloud seed new-id (generate once; retain the caller-owned seedId).");
+        _console.WriteLine("minicloud seed plan|apply|check --config PROTECTED_JSON --report NONSECRET_JSON [--ssh-key USER_PRIVATE_KEY] [--use-ssh-agent] [--credential-file PATH]");
+        _console.WriteLine("Initial creation only: plan/apply --new-seed plus explicit config initialCreationIntent; apply --approve EXACT_DIGEST. Never repeat an uncertain create.");
+        _console.WriteLine("minicloud seed export --config PROTECTED_JSON --report NONSECRET_JSON --ssh-key USER_PRIVATE_KEY --recovery-dir SEPARATE_PRIVATE_DIR [--setup-token]");
+        _console.WriteLine("Optional plan key generation: --generate-ssh-key EXPLICIT_NEW_PATH [--ssh-key-passphrase | --no-ssh-key-passphrase]; default question protects the key.");
+        _console.WriteLine("Check is observational, including failures; explicit-target SSH/export needs no provider credential. Keyless check observes public HTTPS only.");
+        _console.WriteLine("Exit codes: 0 success, 10 handoff pending, 11 upgrade required, 12 reconciliation required; 2 malformed invocation. See docs/stateless-seed.md.");
+        _console.WriteLine("Legacy journal callers remain supported below; their keys/journals are never imported, replaced or deleted:");
         _console.WriteLine("Standalone seed (no instance/login): --provider hetzner|digitalocean|vultr --region ID --size ID --domain HOST --app-domain SUFFIX --server-version server-vX.Y.Z [--credential-file PATH]");
         _console.WriteLine("Operator access: [--ssh-public-key PUBLIC_FILE ...] [--generate-ssh-key NEW_PRIVATE_PATH [--ssh-key-passphrase | --no-ssh-key-passphrase]] or --no-operator-ssh-key.");
         _console.WriteLine("Interactive planning offers public-key input or generation and asks about passphrase protection (default yes). Only public keys reach the VPS; the bootstrap identity stays separate.");

@@ -31,7 +31,13 @@ public sealed class CliHelpAndVersionTests
         var exitCode = await app.RunAsync([arg], CancellationToken.None);
 
         Assert.Equal(CliExitCodes.Success, exitCode);
-        Assert.Equal($"minicloud version {CliApplication.GetVersion()}", console.Output.Trim());
+        var lines = console.Output.Trim().Split('\n', StringSplitOptions.TrimEntries);
+        Assert.Equal($"minicloud version {CliApplication.GetVersion()}", lines[0]);
+        Assert.InRange(lines.Length, 1, 2);
+        if (lines.Length == 2)
+        {
+            Assert.Matches("^source [0-9a-f]{40}$", lines[1]);
+        }
     }
 
     [Theory]

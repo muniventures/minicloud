@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Seed/prepare-host.sh" LogicalName="Minicloud.Cli.Seed.prepare-host.sh" />
+    <EmbeddedResource Include="Seed/inspect-host.py" LogicalName="Minicloud.Cli.Seed.inspect-host.py" />
     <ProjectReference Include="..\contracts\Minicloud.Contracts.csproj" />
   </ItemGroup>
 

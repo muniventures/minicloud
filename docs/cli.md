@@ -44,7 +44,9 @@ see the [candidate handoff and remaining gates](public-candidate-handoff.md).
 DigitalOcean and Vultr. Explicit region/size/current-price approval, independently
 verified SSH identity, manual dashboard/API DNS, signed installer, public HTTPS,
 protected independent recovery export and normal browser onboarding are required.
-See [seed lifecycle, resume and owned cleanup](seed.md). The present server
+Use [stateless plan/apply/check and portable reports](stateless-seed.md).
+Existing journal-based callers retain [legacy resume/export/owned cleanup](seed.md).
+The present server
 candidate is unpublished/unqualified: missing/unverified assets fail before
 creation. IP-only access is explicitly deferred.
 
