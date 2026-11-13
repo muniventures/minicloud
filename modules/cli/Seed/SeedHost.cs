@@ -256,14 +256,15 @@ else:
 
     public async Task<string> InstallAsync(SeedState state, string directory, bool statusOnly, CancellationToken ct)
     {
-        await MetadataAsync(state, directory, ct);
+        var existingMetadata = await MetadataAsync(state, directory, ct);
         var basePath = Remote(state);
         var s = state.Plan.Selection;
         var config = JsonSerializer.SerializeToUtf8Bytes(new { consoleUrl = "https://" + s.Domain, apiUrl = "https://api." + s.Domain,
             consoleHostname = s.Domain, apiHostname = "api." + s.Domain, appDomain = s.AppDomain, manageDnsRecords = false,
             googleOidc = new { enabled = false }, sourceUrl = "https://github.com/muniventures/minicloud/tree/" + state.Plan.ReleaseSource,
             recovery = new { openBaoUnsealMaterialPath = basePath + "/recovery", backupDestination = "explicit protected workstation export required" } });
-        await PutAsync(state, directory, basePath + "/configuration.json", config, ct);
+        if (!localSource || existingMetadata is null)
+            await PutAsync(state, directory, basePath + "/configuration.json", config, ct);
         if (localSource)
         {
             SeedGuard.Require(state.Plan.ArtifactTrust == SeedLocalSource.Trust && !statusOnly,
