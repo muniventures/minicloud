@@ -96,7 +96,8 @@ class ReleaseTests(unittest.TestCase):
         )
         revisions = candidate["cliCompatibility"]["sourceRevisions"]
         self.assertIn(source, revisions)
-        self.assertIn("4fa46a46e0d492d0e9ae41e1cd9b8a8188170443", revisions)
+        self.assertIn("7a4b16130215ea8b2c74221cb02c5e45344d4427", revisions)
+        self.assertNotIn("4fa46a46e0d492d0e9ae41e1cd9b8a8188170443", revisions)
         self.assertEqual(len(revisions), len(set(revisions)))
         for revision in revisions:
             self.assertRegex(revision, r"^[0-9a-f]{40}$")

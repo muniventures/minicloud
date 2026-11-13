@@ -4,7 +4,7 @@
 clean-machine qualification**. No new CLI/server release has been published
 by this feature. The current `server-v0.0.1-rc.1` candidate is unpublished,
 unqualified; its [exact-source TEST prerelease input](../packaging/server/README.md#selected-test-prerelease-pairing)
-now allows the locally tested seed CLI source, but has no published signed
+now selects the merged stateless CLI source from #102, but has no published signed
 assets and cannot yet complete seed. Live/native validation remains pending.
 Missing assets, signatures or compatibility fail before provider creation;
 do not substitute artifacts to work around that. Only the authorized publisher

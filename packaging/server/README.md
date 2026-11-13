@@ -52,16 +52,17 @@ until all of these are present in the selected source revision:
 
 The existing unpublished `server-v0.0.1-rc.1` input preserves customer-workflow
 CLI source `2a5ae0ccea6c3dd680b4146586ec0668c60c8b93` and additionally allows seed
-CLI source `4fa46a46e0d492d0e9ae41e1cd9b8a8188170443`. Both version bounds remain
+stateless CLI source `7a4b16130215ea8b2c74221cb02c5e45344d4427` (#102).
+The superseded pre-stateless seed source is no longer selected. Both version bounds remain
 `null`; this is an exact-source allowlist, not a version range. Schema versions,
 dependency index digests and the candidate version are unchanged. Product image
 digests must come from the real release build, never placeholders.
 
-The seed source passed 63 seed tests and 4 CLI packaging tests (zero failures)
-in a private local Linux arm64 worktree after #84/#85 merged. This is **local
-automated evidence only**, not a live CLI/server compatibility test. The parent
+The stateless implementation passed all 453 CLI tests in a private local Linux
+arm64 worktree; backend, dashboard and release-contract CI passed on #102.
+This is **automated evidence only**, not a live CLI/server compatibility test. The publisher
 will build the local CLI with informational source exactly
-`4fa46a46e0d492d0e9ae41e1cd9b8a8188170443`; the server manifest's source must
+`7a4b16130215ea8b2c74221cb02c5e45344d4427`; the server manifest's source must
 instead identify the actual merged release-build commit containing this input.
 After review, only the authorized publisher may publish this signed **TEST
 prerelease**, without reusing an existing tag/release. Preparing or merging this
