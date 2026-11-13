@@ -254,10 +254,10 @@ class Host:
         run(["docker", "buildx", "version"])
         return info
 
-    def resources(self, root, docker_root, manifest):
+    def resources(self, root, docker_root, manifest, *, reserved_memory_bytes=0):
         # Encoded operational floors, NOT a measured supported hardware claim.
         memory = int(re.search(r"MemTotal:\s+(\d+)", Path("/proc/meminfo").read_text())[1]) * 1024
-        require(memory >= 2 * 1024**3, "Guard: at least 2 GiB physical RAM before starting seven images.")
+        require(memory + reserved_memory_bytes >= 2 * 1024**3, "Guard: at least 2 GiB physical RAM before starting seven images.")
         require((os.cpu_count() or 0) >= 2, "Guard: at least two logical CPUs before parallel dependency startup.")
         ancestor = root
         while not ancestor.exists():

@@ -86,6 +86,16 @@ class LocalSourceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "differs"):
                 local.verify_images(images, "linux/amd64", "c" * 40)
 
+    def test_nominal_two_gib_reservation_is_explicit_and_does_not_change_default_floor(self):
+        installer = local.module("resource_fixture", ROOT / "packaging/server/bundle/server_install.py")
+        disk = mock.Mock(free=30 * 1024**3)
+        with mock.patch.object(Path, "read_text", return_value="MemTotal: 1965716 kB"), \
+                mock.patch.object(installer.os, "cpu_count", return_value=2), \
+                mock.patch.object(installer.shutil, "disk_usage", return_value=disk):
+            with self.assertRaises(installer.InstallError):
+                installer.Host().resources(self.base, self.base, {"bundleBytes": 1})
+            installer.Host().resources(self.base, self.base, {"bundleBytes": 1}, reserved_memory_bytes=256 * 1024**2)
+
     def test_local_package_pins_content_ids_and_refuses_changed_replay(self):
         release = local.module("local_release_fixture", ROOT / "scripts/server-release/release.py")
         metadata = {"serverVersion": "0.0.1-local.1", "sourceRevision": "a" * 40,

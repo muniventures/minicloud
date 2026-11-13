@@ -150,6 +150,31 @@ def verify_images(images, native, revision, *, complete=True):
                 "Local image content/platform/source differs; do not rebuild or adopt silently.")
 
 
+def build_swap(operation_root, shared):
+    memory = int(re.search(r"MemTotal:\s+(\d+)", Path("/proc/meminfo").read_text())[1]) * 1024
+    if memory >= 4 * 1024**3:
+        return
+    path = operation_root / "build.swap"
+    if not path.exists():
+        require(not path.is_symlink(), "Swap file cannot be a symlink.")
+        shared.exclusive(path, b"")
+        shared.run(["fallocate", "-l", str(4 * 1024**3), str(path)])
+        shared.run(["mkswap", str(path)])
+    shared.protected(path)
+    require(path.stat().st_size == 4 * 1024**3, "Partial build swap requires reconciliation.")
+    name = shared.run(["systemd-escape", "--path", "--suffix=swap", str(path)]).decode().strip()
+    require(re.fullmatch(r"[A-Za-z0-9._\\-]+\.swap", name), "Invalid swap unit name.")
+    unit = Path("/etc/systemd/system") / name
+    data = ("[Unit]\nDescription=Minicloud local-source build swap\n[Swap]\nWhat=" + str(path)
+            + "\n[Install]\nWantedBy=swap.target\n").encode()
+    if unit.exists():
+        require(not unit.is_symlink() and unit.read_bytes() == data, "Conflicting swap unit.")
+    else:
+        shared.exclusive(unit, data)
+        shared.run(["systemctl", "daemon-reload"])
+    shared.run(["systemctl", "enable", "--now", name])
+
+
 def build_images(root, output, metadata, native, release):
     checkpoint = output / "images.json"
     revision = metadata["sourceRevision"]
@@ -241,6 +266,10 @@ def install(args):
         def tools(self):
             return super().tools(require_cosign=False)
 
+        def resources(self, root, docker_root, manifest):
+            # Nominal 2-GiB VPSes reserve some RAM for the kernel/hypervisor.
+            return super().resources(root, docker_root, manifest, reserved_memory_bytes=256 * 1024**2)
+
     class LocalInstaller(shared.Installer):
         def load_state(self, manifest=None):
             super().load_state(manifest)
@@ -271,6 +300,7 @@ def install(args):
         anonymous = output / "anonymous"
         anonymous.mkdir(mode=0o700, exist_ok=True)
         require(not any(anonymous.iterdir()), "Anonymous Docker configuration must remain empty.")
+        build_swap(args.archive.parent.parent, shared)
         images = build_images(source, output, metadata, native, release)
         package_native(source, local_assets, metadata, images, args.sha256, native, release)
         installer = LocalInstaller(args, host)

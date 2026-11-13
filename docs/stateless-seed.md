@@ -18,8 +18,17 @@ python3 -B scripts/self-hosting/local_source.py package \
   --output "$PWD/.local/artifacts/local-seed/source.tar.gz"
 ```
 
-Build the CLI from that same revision (including its full informational source
-SHA). Set `serverVersion` in the protected seed config to `server-v0.0.1-local.1`.
+Build the CLI from that same revision, letting the SDK append its full source
+SHA (do not also append it manually to `InformationalVersion`):
+
+```sh
+dotnet publish modules/cli/Minicloud.Cli.csproj --configuration Release \
+  --artifacts-path .local/artifacts/local-seed/cli-build \
+  --output .local/artifacts/local-seed/cli \
+  -p:SourceRevisionId="$(git rev-parse HEAD)"
+```
+
+Set `serverVersion` in the protected seed config to `server-v0.0.1-local.1`.
 Add `--local-source /absolute/path/source.tar.gz --source-sha256 REVIEWED_SHA256`
 to **both** `seed plan` and `seed apply`. Review the archive hash, source, native
 architecture, SSH identity and quote before approving. These flags are never
@@ -40,6 +49,11 @@ There is **no** product-image push, GitHub release, or GitHub credential on the
 VPS. Internet access to upstream package/base-image/dependency registries is
 still required. Builds need additional CPU, disk, time and memory; existing
 runtime refusal floors are not measured build-capacity guarantees.
+Local mode accepts nominal 2-GiB hosts with at most 256 MiB reserved by the
+kernel/hypervisor, retaining the two-CPU and disk floors. On hosts below 4 GiB
+physical RAM it creates one protected 4-GiB swap file in the seed operation
+directory and a matching persistent systemd swap unit. It never replaces
+existing swap or conflicting units; keep the operation directory on this host.
 
 The shared installer preserves installation identities, protected credentials,
 independent recovery output and maintenance locking. Local mode explicitly
