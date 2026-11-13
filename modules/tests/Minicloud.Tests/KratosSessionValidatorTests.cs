@@ -10,9 +10,11 @@ public sealed class KratosSessionValidatorTests
     [Fact]
     public async Task ValidationUsesOnlyTheFixedAdminSessionEndpoint()
     {
-        var handler = new ResponseHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        var handler = new ResponseHandler(request => new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent("""{"id":"session-1","active":true,"identity":{"id":"identity-1"}}""")
+            Content = new StringContent(request.RequestUri!.Query == "?expand=identity"
+                ? """{"id":"session-1","active":true,"identity":{"id":"identity-1"}}"""
+                : """{"id":"session-1","active":true,"identity":null}""")
         });
         using var client = new HttpClient(handler);
         var validator = new KratosSessionValidator(
@@ -22,6 +24,10 @@ public sealed class KratosSessionValidatorTests
         Assert.True(await validator.IsSessionActiveAsync("session-1", "identity-1", CancellationToken.None));
         Assert.Equal(HttpMethod.Get, handler.Request!.Method);
         Assert.Equal("/admin/sessions/session-1", handler.Request.RequestUri!.AbsolutePath);
+        Assert.Equal("?expand=identity", handler.Request.RequestUri.Query);
+        await validator.RevokeSessionAsync("session-1", CancellationToken.None);
+        Assert.Equal(HttpMethod.Delete, handler.Request.Method);
+        Assert.Equal("", handler.Request.RequestUri!.Query);
         await Assert.ThrowsAsync<KratosUnavailableException>(
             () => validator.IsSessionActiveAsync("../admin", "identity-1", CancellationToken.None));
     }
