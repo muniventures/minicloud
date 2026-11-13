@@ -116,7 +116,14 @@ def inspect_host(seed, base=pathlib.Path("/"), owner=0, run=subprocess.run, acqu
                     assert isinstance(record["lastFailure"], dict) and record["lastFailure"].get("fenceReleased") is True
         else:
             protected(path("/opt"), True)
-            assert not any(p.name not in ("minicloud.seed-operation", "minicloud.installation.lock")
+            containerd = path("/opt/containerd")
+            if exists(containerd):
+                protected(containerd, True)
+                assert {item.name for item in containerd.iterdir()} == {"bin", "lib"}
+                for directory in (containerd / "bin", containerd / "lib"):
+                    protected(directory, True)
+                    assert not any(directory.iterdir())
+            assert not any(p.name not in ("minicloud.seed-operation", "minicloud.installation.lock", "containerd")
                            for p in path("/opt").iterdir())
 
         services = {}
