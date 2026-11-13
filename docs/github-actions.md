@@ -1,6 +1,8 @@
 # GitHub Actions Workflow
 
 Use the reusable Minicloud workflow when you want GitHub Actions to deploy source artifacts through the Minicloud API.
+To create or check your own control-plane VPS from Actions, see
+[Seed a control plane](#seed-a-control-plane).
 
 For self-hosting, pass your HTTPS API origin as `minicloud_api_url`. When the
 instance has no managed registry, use `buildMode: source` for source-backed
@@ -237,3 +239,175 @@ Set `minicloud_api_url` to your HTTPS API origin and `minicloud_app_domain` to
 that installation's APP_DOMAIN. The latter sets `MINICLOUD_APP_DOMAIN` for
 framework host validation. Both are required when selecting a self-hosted instance.
 Select a CLI source revision containing these options with `minicloud_version`.
+
+## Seed a control plane
+
+`seed.yml` is a separate reusable workflow that wraps the stateless
+`minicloud seed check|plan|apply` CLI so a fresh GitHub-hosted runner can
+create or continue your **own** first control-plane VPS. It needs no fork,
+existing Minicloud instance, persistent runner, Docker image or external state
+service. Progress lives with the provider and on the VPS; every run starts
+from the secrets you pass and the live provider/host state. Read the
+[seed guide](seed.md) first: the same prerequisites, provider permissions,
+costs and security boundaries apply. This workflow does not change
+`customer-deploy.yml`, the public installers or package names.
+
+The workflow has not been run end to end against real providers. It needs a
+CLI revision containing the stateless seed commands: either a published,
+signed CLI tag or an explicit merged canonical `main` commit (source build).
+
+### Set up
+
+1. Create a GitHub Environment in your repository, for example
+   `minicloud-seed`. Add **required reviewers** (strongly recommended for
+   `apply`, which can create a billable VPS) and restrict deployment branches
+   to your default branch.
+2. Add these **Environment** secrets. Repository secrets are not needed.
+
+   | Secret | Required | Contents |
+   | --- | --- | --- |
+   | `MINICLOUD_SEED_CONFIG` | Yes | Seed configuration JSON (`schemaVersion` 1): `seedId` from `minicloud seed new-id`, provider, region, size, `domain`, `appDomain`, exact `serverVersion`, optional `providerCredential`, operator keys and, after creation, `target` (`serverId`, `ipv4`, `hostFingerprint`). Keep the same `seedId` for every run. |
+   | `MINICLOUD_SEED_SSH_KEY` | For `plan`/`apply` | **Unencrypted** OpenSSH private key used as the seed root identity. |
+   | `MINICLOUD_SEED_PROVIDER_CREDENTIAL` | Only without `providerCredential` | Provider API credential. |
+
+   Generate a dedicated key for this purpose, for example
+   `ssh-keygen -t ed25519 -N '' -f minicloud-seed`, store the private key only
+   in the Environment secret and your own offline backup, then delete local
+   copies you do not need. GitHub Actions has no interactive passphrase and the
+   workflow does not use an SSH agent, so encrypted keys are rejected. Anyone
+   who can run jobs in this Environment can use the key: protect it with
+   reviewers and branch rules, and rotate it if exposed.
+3. Commit a caller workflow such as `.github/workflows/minicloud-seed.yml`:
+
+```yaml
+name: Minicloud control plane
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        options: [check, plan, apply]
+        default: check
+      approve:
+        description: Approval digest from a reviewed plan (apply only)
+        type: string
+        default: ""
+      new_seed:
+        description: Allow creating a new VPS (use the same value for plan and apply)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    uses: muniventures/minicloud/.github/workflows/seed.yml@<reviewed-commit-sha>
+    with:
+      operation: ${{ inputs.operation }}
+      approve: ${{ inputs.approve }}
+      new_seed: ${{ inputs.new_seed }}
+      environment: minicloud-seed
+      minicloud_version: v<exact-cli-version>
+    secrets:
+      seed_config: ${{ secrets.MINICLOUD_SEED_CONFIG }}
+      ssh_private_key: ${{ secrets.MINICLOUD_SEED_SSH_KEY }}
+      provider_credential: ${{ secrets.MINICLOUD_SEED_PROVIDER_CREDENTIAL }}
+```
+
+The caller job cannot set `environment`; the reusable workflow binds the
+`environment` input on its own executing job, so Environment protection rules
+run before any secret is available. The caller must still pass each secret
+**by name** as shown, even when it exists only in the Environment; no
+`secrets: inherit` is needed. A secret that is not passed, or not defined,
+resolves to an empty value, so the workflow fails at runtime when a required
+secret is empty.
+
+### Inputs and outputs
+
+| Input | Required | Description |
+| --- | --- | --- |
+| `operation` | Yes | `check` (read-only), `plan` (read-only) or `apply`. |
+| `environment` | Yes | GitHub Environment holding the seed secrets and protection rules. |
+| `minicloud_version` | Yes | Exact signed CLI tag `vX.Y.Z[-prerelease]` (verified binary install) or full lowercase canonical-`main` commit SHA (explicit source build with the .NET 10 SDK). Branches, `latest` and `server-v*` tags are rejected. There is no fallback between the two modes. |
+| `approve` | For `apply` | 64-character approval digest printed by a reviewed `plan`. Rejected for other operations. |
+| `new_seed` | No | Default `false`. Explicitly allows a plan/apply that creates a new VPS. Rejected for `check`. |
+| `report_artifact_name` | No | Default `minicloud-seed-report`. Use distinct names when one run calls the workflow more than once. |
+
+Outputs: `result` (`success`, `handoff_pending`, `upgrade_required`,
+`reconciliation_required` or `error`), `classification` and `approval_digest`.
+
+`apply` runs only from `workflow_dispatch`; `check` may also run on
+`schedule`. Other events, including `push` and pull requests, are refused.
+
+### Flow
+
+1. `check`: inspect provider and host state without changing anything.
+2. `plan` (with `new_seed: true` for a first creation): review placement,
+   prices, release and target in the job log. The summary shows the
+   **approval digest**.
+3. `apply` with `approve: <digest>` and the same `new_seed` value. The fresh
+   runner re-plans; the CLI refuses the digest if the configuration, prices,
+   SSH key, release or target changed. A changed plan cannot approve itself:
+   plan and review again.
+4. Handoff: after creation the run ends with `handoff_pending`. Open the
+   provider's authenticated browser console for the reported server, read the
+   host key fingerprint as described in the [seed guide](seed.md), and update
+   `MINICLOUD_SEED_CONFIG` with the reported `target.serverId` and
+   `target.ipv4` plus that console `target.hostFingerprint`. Never take the
+   fingerprint from an unverified scan.
+5. `plan` and `apply` again to continue preparation and installation. DNS,
+   TLS and browser setup waits are also reported as `handoff_pending`;
+   complete them and rerun.
+6. `check` to confirm the installation is current.
+
+Retrieve setup tokens and OpenBao recovery material from a trusted
+workstation with the CLI as described in the [seed guide](seed.md), using the
+same configuration and key over verified SSH. This workflow never exports
+them, and a copy that exists only on the VPS is not an independent backup.
+
+### Results
+
+| Exit code | Result | Job | Meaning |
+| --- | --- | --- | --- |
+| `0` | `success` | Succeeds | Completed (plan computed, apply step done, or check current). |
+| `10` | `handoff_pending` | Succeeds with a warning | A user action is required (host fingerprint, DNS, TLS or browser setup). Complete it, then rerun. |
+| `11` | `upgrade_required` | Fails | The installed release differs from `serverVersion`. Use the existing coordinated [server maintenance](server-maintenance.md) upgrade. The workflow never upgrades. |
+| `12` | `reconciliation_required` | Fails | Provider or host state is ambiguous or conflicting, including an uncertain create. Reconcile in the provider console; do not retry blindly or create another VPS. |
+| Other | `error` | Fails | CLI or input error. No automatic retry. |
+
+The job summary shows the operation, result, classification, approval digest,
+SSH key fingerprint, reasons and next actions, read from the CLI's
+`minicloud-seed-report` (`schemaVersion` 1); a report with another kind or
+version is neither trusted nor uploaded. The CLI's non-secret JSON report is
+uploaded as an artifact for 30 days, readable by anyone with read access to
+the repository's Actions runs. It is a convenience snapshot, never the source
+of truth; losing it does not affect the installation.
+
+### Security and limits
+
+- Workflow permissions are `contents: read`; actions are pinned by commit
+  SHA. The caller repository is not checked out.
+- Secrets are written to a fresh owner-only (`0700`/`0600`) runner directory
+  without links or group/world-writable ancestors, passed to the CLI as files,
+  and deleted in an always-run cleanup step. The configuration is never
+  printed; extracted credentials are additionally masked. CLI output cannot
+  issue workflow commands. A report containing supplied secret material is
+  not uploaded.
+- Binary installs verify the Sigstore-signed CLI release with the reviewed
+  `install.sh` from the selected canonical-`main` revision. Cosign 2.6.5 is
+  installed from its official release with a pinned SHA-256 for server
+  release verification.
+- `apply` runs one at a time per Environment within the calling repository
+  (`cancel-in-progress: false`; a newer queued apply replaces an older queued
+  one). This is not a lock across repositories, workstations or other CLI
+  users: keep a single creator per `seedId`. If a create may have happened
+  but cannot be confirmed, the CLI stops for reconciliation rather than
+  creating again.
+- No automatic upgrade, rollback, replacement, DNS change, firewall change or
+  retry is performed.
+- GitHub-hosted runners use changing public IP addresses. The provider API and
+  the VPS (TCP 22) must be reachable from them. Vultr API access-control lists
+  must allow the runner, so either adjust them deliberately or use a runner
+  with a stable egress address. The workflow never changes access controls.
