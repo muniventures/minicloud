@@ -224,13 +224,15 @@ internal sealed class SeedJournal : IDisposable
 internal sealed record SeedProcessResult(int ExitCode, string Output);
 internal static class SeedProcess
 {
-    public static async Task<SeedProcessResult> RunAsync(string executable, IEnumerable<string> args, byte[]? input, CancellationToken ct)
+    public static async Task<SeedProcessResult> RunAsync(string executable, IEnumerable<string> args, byte[]? input, CancellationToken ct, bool useSshAgent = false)
     {
         var start = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, CreateNoWindow = true };
         foreach (var arg in args) start.ArgumentList.Add(arg);
         var inherited = new Dictionary<string, string?>();
         foreach (var name in new[] { "PATH", "HOME", "SystemRoot", "WINDIR", "USERPROFILE", "LOCALAPPDATA", "SSL_CERT_FILE", "SSL_CERT_DIR" })
             if (Environment.GetEnvironmentVariable(name) is { } value) inherited[name] = value;
+        if (useSshAgent && Environment.GetEnvironmentVariable("SSH_AUTH_SOCK") is { } socket)
+            inherited["SSH_AUTH_SOCK"] = socket;
         start.Environment.Clear();
         foreach (var pair in inherited) start.Environment[pair.Key] = pair.Value;
         using var process = new Process { StartInfo = start };

@@ -120,6 +120,24 @@ public sealed class SeedProviderTests
         Assert.Single(fixture.Requests);
     }
 
+    [Theory]
+    [InlineData("hetzner")]
+    [InlineData("digitalocean")]
+    [InlineData("vultr")]
+    public async Task User_provider_key_lookup_is_observational_and_refuses_ambiguous_matches(string name)
+    {
+        var fixture = new Fixture(name);
+        var path = name switch { "hetzner" => "ssh_keys", "digitalocean" => "account/keys", _ => "ssh-keys" };
+        var key = new { id = "original-user-key", name = "user-owned", public_key = "ssh-ed25519 synthetic comment",
+            ssh_key = "ssh-ed25519 synthetic comment" };
+        fixture.Bodies[path] = new { ssh_keys = new[] { key } };
+        using var provider = fixture.CreateProvider();
+        Assert.Equal("original-user-key", await provider.FindUserKeyAsync("ssh-ed25519 synthetic", default));
+        fixture.Bodies[path] = new { ssh_keys = new[] { key, key } };
+        await Assert.ThrowsAsync<CliCommandException>(() => provider.FindUserKeyAsync("ssh-ed25519 synthetic", default));
+        Assert.All(fixture.Requests, request => Assert.Equal("GET", request.Method));
+    }
+
     internal sealed class Fixture : HttpMessageHandler
     {
         private readonly string provider;

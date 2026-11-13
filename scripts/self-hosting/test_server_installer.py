@@ -156,6 +156,36 @@ class InstallerTests(unittest.TestCase):
     def subject(self):
         return FixtureInstaller(self.args, self.host)
 
+    def test_pending_or_unknown_maintenance_blocks_install_before_any_host_operation(self):
+        self.args.root.mkdir(mode=0o700)
+        for record in ({"state": "started"}, {"state": "upgraded", "pendingUpgrade": {}},
+                       {"state": "upgraded", "pendingRestore": {}}, {"state": "upgraded", "restoreInProgress": {}},
+                       {"state": "upgraded", "heldFence": {}}, {"state": "future"},
+                       {"state": "upgraded", "lastFailure": {"fenceReleased": False}}):
+            with self.subTest(record=record):
+                installer.atomic_json(self.args.root / "maintenance.json", record)
+                subject = self.subject()
+                with mock.patch.object(subject, "preflight", side_effect=AssertionError("No host action")):
+                    with self.assertRaises(installer.InstallError):
+                        subject.execute()
+                self.assertEqual([], subject.events)
+                self.assertEqual(record, installer.read_json(self.args.root / "maintenance.json"))
+
+    def test_interrupted_maintenance_write_blocks_install_and_completed_maintenance_allows_preflight(self):
+        self.args.root.mkdir(mode=0o700)
+        pending = self.args.root / "maintenance.json.pending"
+        self.write(pending, b"{")
+        with self.assertRaises(installer.InstallError):
+            self.subject().execute()
+        self.assertEqual(b"{", pending.read_bytes())
+        pending.unlink()
+        installer.atomic_json(self.args.root / "maintenance.json", {"state": "upgraded", "lastSuccessfulUpgrade": {}})
+        subject = self.subject()
+        self.args.command = "preflight"
+        with mock.patch.object(subject, "preflight", return_value={"state": "preflight_passed"}) as preflight:
+            self.assertEqual({"state": "preflight_passed"}, subject.execute())
+            preflight.assert_called_once()
+
     def test_maintenance_dispatch_requires_and_verifies_signed_helper_before_execution(self):
         helper = BUNDLE / "server_maintenance.py"
         self.payload[helper.name] = helper.read_bytes()
