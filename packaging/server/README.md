@@ -42,11 +42,33 @@ until all of these are present in the selected source revision:
   Keep operator secrets and generated execution output out of these assets.
 - T80 supplies `packaging/server/release.json` with selected candidate
   compatibility, schema versions and resolved dependency digests. The current
-  unpublished `0.0.1-rc.1` input selects a single merged CLI source revision,
-  **not tested runtime compatibility**. See the
+  unpublished `0.0.1-rc.1` input selects exact CLI source revisions,
+  **not qualified runtime compatibility**. See the test-prerelease pairing below and the
   [public candidate handoff](../../docs/public-candidate-handoff.md) for registry
   evidence, the explicit public-only scope decision and outstanding T90/T91
   qualification. Input presence or a successful preflight is not release acceptance.
+
+### Selected TEST prerelease pairing
+
+The existing unpublished `server-v0.0.1-rc.1` input preserves customer-workflow
+CLI source `2a5ae0ccea6c3dd680b4146586ec0668c60c8b93` and additionally allows seed
+stateless CLI source `7a4b16130215ea8b2c74221cb02c5e45344d4427` (#102).
+The superseded pre-stateless seed source is no longer selected. Both version bounds remain
+`null`; this is an exact-source allowlist, not a version range. Schema versions,
+dependency index digests and the candidate version are unchanged. Product image
+digests must come from the real release build, never placeholders.
+
+The stateless implementation passed all 453 CLI tests in a private local Linux
+arm64 worktree; backend, dashboard and release-contract CI passed on #102.
+This is **automated evidence only**, not a live CLI/server compatibility test. The publisher
+will build the local CLI with informational source exactly
+`7a4b16130215ea8b2c74221cb02c5e45344d4427`; the server manifest's source must
+instead identify the actual merged release-build commit containing this input.
+After review, only the authorized publisher may publish this signed **TEST
+prerelease**, without reusing an existing tag/release. Preparing or merging this
+input does not publish it. Live seed/provider, native amd64/arm64, full-image,
+OIDC/signature/anonymous-pull and installation/recovery qualification remain
+pending; the earlier workflow source is retained, not newly qualified.
 
 Compose must reference exactly the three product images and the four dependency
 images. Each image may be a literal manifest-pinned digest or the corresponding
