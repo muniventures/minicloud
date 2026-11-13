@@ -7,23 +7,67 @@ using System.Text.RegularExpressions;
 
 namespace Minicloud.Cli.Seed;
 
-internal sealed class SeedHost : ISeedHost
+internal sealed partial class SeedHost(string? userKey = null, bool useAgent = false,
+    Func<string, IEnumerable<string>, byte[]?, CancellationToken, bool, Task<SeedProcessResult>>? process = null) : ISeedHost
 {
     private static string Remote(SeedState state) => "/var/lib/minicloud-seed/" + state.Id;
     private static string Quote(string value) => "'" + value.Replace("'", "'\\''") + "'";
     private static string NullFile => OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
-    private static IEnumerable<string> SshOptions(SeedState state, string directory) =>
+    private IEnumerable<string> SshOptions(SeedState state, string directory) =>
     [
         "-F", NullFile, "-T", "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
         "-o", "StrictHostKeyChecking=yes", "-o", "CheckHostIP=yes", "-o", "ConnectTimeout=20",
         "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no",
         "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes", "-o", "HostKeyAlgorithms=ssh-ed25519",
         "-o", "GlobalKnownHostsFile=" + NullFile, "-o", "UserKnownHostsFile=\"" + Path.Combine(directory, "known_hosts").Replace('\\', '/').Replace("\"", "\\\"") + "\"",
-        "-i", Path.Combine(directory, "id_ed25519"), "root@" + state.Server!.Address
+        "-i", userKey ?? Path.Combine(directory, "id_ed25519"), "root@" + state.Server!.Address
     ];
 
-    private static Task<SeedProcessResult> SshAsync(SeedState state, string directory, string command, byte[]? input, CancellationToken ct) =>
-        SeedProcess.RunAsync("ssh", SshOptions(state, directory).Append("env -i HOME=/root PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " + command), input, ct);
+    private Task<SeedProcessResult> SshAsync(SeedState state, string directory, string command, byte[]? input, CancellationToken ct) =>
+        (process ?? SeedProcess.RunAsync)("ssh", SshOptions(state, directory).Append("env -i HOME=/root PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " + command), input, ct, useAgent);
+
+    private const string MutationLockScript = """
+import fcntl, os, pathlib, stat
+for parent in (pathlib.Path("/"), pathlib.Path("/opt")):
+ info=parent.lstat()
+ assert stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022
+lock_fd=os.open("/opt/minicloud.installation.lock",os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
+info=os.fstat(lock_fd)
+assert stat.S_ISREG(info.st_mode) and info.st_uid == 0 and stat.S_IMODE(info.st_mode) == 0o600
+fcntl.flock(lock_fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+
+""";
+
+    private string MutationGuard(SeedState state)
+    {
+        if (userKey is null) return MutationLockScript;
+        var context = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            seedId = state.Id, release = state.Plan.Selection.ServerVersion, source = state.Plan.ReleaseSource,
+            consoleUrl = "https://" + state.Plan.Selection.Domain, apiUrl = "https://api." + state.Plan.Selection.Domain,
+            appDomain = state.Plan.Selection.AppDomain, address = state.Server!.Address,
+            identity = new
+            {
+                provider = state.Plan.Selection.Provider, providerAccount = state.ProviderAccountId,
+                serverId = state.Server.Id, region = state.Plan.Selection.Region, size = state.Plan.Selection.Size,
+                image = state.Plan.Quote.Image, architecture = state.Plan.Quote.Architecture
+            }
+        }));
+        return MutationLockScript + "\nimport base64, json\nnamespace={'__name__':'seed_inspection'}\nexec("
+            + JsonSerializer.Serialize(InspectionScript) + ", namespace)\ncontext=json.loads(base64.b64decode("
+            + Quote(context) + "))\n" + """
+observation=namespace["inspect_host"](context["seedId"],acquire_lock=False)
+assert observation["state"] in ("preparing","installed")
+if observation.get("identity") is not None:
+ assert observation["identity"] == context["identity"]
+if observation["state"] == "installed":
+ assert observation["progress"] in ("initializing","prepared","initialized")
+ assert observation["release"] == context["release"] and observation["source"] == context["source"]
+ assert observation["configuration"] == {key:context[key] for key in ("consoleUrl","apiUrl","appDomain")}
+ assert observation["publicAddresses"] == [context["address"]]
+
+""";
+    }
 
     public async Task CheckPrerequisitesAsync(CancellationToken ct)
     {
@@ -55,8 +99,8 @@ internal sealed class SeedHost : ISeedHost
 
     public async Task TrustAsync(SeedState state, string directory, string? independentFingerprint, CancellationToken ct)
     {
-        SeedFiles.Check(Path.Combine(directory, "id_ed25519"));
-        SeedFiles.NoLinks(Path.Combine(directory, "id_ed25519.pub"));
+        SeedFiles.Check(userKey ?? Path.Combine(directory, "id_ed25519"));
+        if (userKey is null) SeedFiles.NoLinks(Path.Combine(directory, "id_ed25519.pub"));
         var expected = state.HostFingerprint ?? independentFingerprint!;
         SeedGuard.Require(Regex.IsMatch(expected, @"^SHA256:[A-Za-z0-9+/]{43}$"), "Confirm an exact independently obtained ed25519 SHA256 console fingerprint.");
         SeedGuard.Require(independentFingerprint is null || state.HostFingerprint is null || independentFingerprint == state.HostFingerprint,
@@ -95,7 +139,13 @@ internal sealed class SeedHost : ISeedHost
     {
         using var resource = typeof(SeedHost).Assembly.GetManifestResourceStream("Minicloud.Cli.Seed.prepare-host.sh")!;
         using var script = new MemoryStream(); await resource.CopyToAsync(script, ct);
-        var result = await SshAsync(state, directory, $"bash -s -- {Quote(state.Id)} {Quote(state.Plan.Quote.Architecture)}", script.ToArray(), ct);
+        var identity = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            provider = state.Plan.Selection.Provider, providerAccount = state.ProviderAccountId ?? state.Plan.Quote.Account,
+            serverId = state.Server!.Id, region = state.Plan.Selection.Region, size = state.Plan.Selection.Size,
+            image = state.Plan.Quote.Image, architecture = state.Plan.Quote.Architecture
+        }));
+        var result = await SshAsync(state, directory, $"bash -s -- {Quote(state.Id)} {Quote(state.Plan.Quote.Architecture)} {Quote(identity)}", script.ToArray(), ct);
         SeedGuard.Require(result.ExitCode == 0, "Dedicated Ubuntu host preparation failed. Preserve resources; inspect through pinned SSH. No host output was logged.");
     }
 
@@ -146,7 +196,7 @@ if additions:
     public async Task AddOperatorKeysAsync(SeedState state, string directory, CancellationToken ct)
     {
         SeedOperatorKeys.Validate(state.Plan.OperatorPublicKeys);
-        var result = await SshAsync(state, directory, "python3 -c " + Quote(OperatorKeysScript),
+        var result = await SshAsync(state, directory, "python3 -B -c " + Quote(MutationGuard(state) + OperatorKeysScript),
             JsonSerializer.SerializeToUtf8Bytes(state.Plan.OperatorPublicKeys), ct);
         SeedGuard.Require(result.ExitCode == 0,
             "Operator public-key installation failed. Bootstrap access is retained; inspect and resume through pinned SSH.");
@@ -164,7 +214,7 @@ if additions:
         return true;
     }
 
-    private static async Task PutAsync(SeedState state, string directory, string path, byte[] bytes, CancellationToken ct)
+    private async Task PutAsync(SeedState state, string directory, string path, byte[] bytes, CancellationToken ct)
     {
         const string script = """
 import os, pathlib, stat, sys
@@ -173,16 +223,22 @@ for parent in p.parents:
  s=parent.lstat()
  assert stat.S_ISDIR(s.st_mode) and s.st_uid == 0 and not s.st_mode & 0o022
 data=sys.stdin.buffer.read()
+pending=p.with_name(p.name+".pending")
+assert not pending.exists() and not pending.is_symlink()
 if p.exists() or p.is_symlink():
  s=p.lstat()
  assert stat.S_ISREG(s.st_mode) and s.st_uid == 0 and stat.S_IMODE(s.st_mode) in (0o400,0o600)
  assert p.read_bytes() == data
 else:
- fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+ fd=os.open(pending,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
  with os.fdopen(fd,"wb") as target:
   target.write(data); target.flush(); os.fsync(target.fileno())
+ os.rename(pending,p)
+ fd=os.open(p.parent,os.O_RDONLY|os.O_DIRECTORY)
+ try: os.fsync(fd)
+ finally: os.close(fd)
 """;
-        var result = await SshAsync(state, directory, "python3 -c " + Quote(script) + " " + Quote(path), bytes, ct);
+        var result = await SshAsync(state, directory, "python3 -B -c " + Quote(MutationGuard(state) + script) + " " + Quote(path), bytes, ct);
         SeedGuard.Require(result.ExitCode == 0, "Protected remote input conflicts or upload interrupted. Do not overwrite; reconcile exact partial input through pinned SSH.");
     }
 
@@ -224,7 +280,7 @@ else:
         return phase;
     }
 
-    private static async Task<JsonElement?> MetadataAsync(SeedState state, string directory, CancellationToken ct)
+    private async Task<JsonElement?> MetadataAsync(SeedState state, string directory, CancellationToken ct)
     {
         const string script = """
 import json, pathlib, stat, sys
@@ -254,7 +310,8 @@ else:
         var value = json.RootElement;
         var id = value.GetProperty("installationId").GetString()!;
         var operation = value.GetProperty("operationId").GetString()!;
-        SeedGuard.Require(Guid.TryParse(id, out _) && Guid.TryParse(operation, out _)
+        SeedGuard.Require(value.GetProperty("schemaVersion").GetInt32() == 1 && value.GetProperty("product").GetString() == "minicloud"
+            && Guid.TryParse(id, out _) && Guid.TryParse(operation, out _)
             && (state.InstallationId is null || state.InstallationId == id)
             && (state.InstallerOperationId is null || state.InstallerOperationId == operation)
             && value.GetProperty("releaseTag").GetString() == state.Plan.Selection.ServerVersion
@@ -276,7 +333,9 @@ else:
         SeedGuard.Require(metadata is not null && state.InstallationId is not null, "Installation recovery is not available yet.");
         destination = Path.GetFullPath(destination);
         SeedGuard.Require(state.RecoveryDirectory is null || state.RecoveryDirectory == destination, "Resume recovery export at its original local path.");
-        if (state.RecoveryDirectory is null) SeedGuard.Require(!Directory.Exists(destination) && !File.Exists(destination), "Choose a new independent local recovery directory.");
+        if (state.RecoveryDirectory is null && userKey is null)
+            SeedGuard.Require(!Directory.Exists(destination) && !File.Exists(destination), "Choose a new independent local recovery directory.");
+        if (userKey is not null && Directory.Exists(destination)) SeedFiles.Check(destination, true);
         SeedFiles.Directory(destination);
         var paths = new Dictionary<string, string>(StringComparer.Ordinal)
         {

@@ -148,6 +148,14 @@ internal sealed partial class SeedProvider : ISeedProvider
         return list.Length == 0 ? null : Resource(list[0], operation);
     }
 
+    public async Task<string?> FindUserKeyAsync(string publicKey, CancellationToken ct)
+    {
+        var matches = (await ListAsync(Keys, KeyArray, ct))
+            .Where(x => SameKey(Text(x, provider == "vultr" ? "ssh_key" : "public_key"), publicKey)).ToArray();
+        SeedGuard.Require(matches.Length <= 1, "Multiple provider keys match the user identity; reconcile before creation.");
+        return matches.Length == 0 ? null : Text(matches[0], "id");
+    }
+
     public async Task<SeedResource> CreateServerAsync(SeedState state, CancellationToken ct)
     {
         var s = state.Plan.Selection;

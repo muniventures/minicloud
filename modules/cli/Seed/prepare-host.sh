@@ -23,9 +23,21 @@ check_dir() {
   test "$(( 8#$permissions & 8#022 ))" = 0
 }
 for parent in / /var /var/lib /opt; do check_dir "$parent"; done
+lock=/opt/minicloud.installation.lock
+if test -e "$lock" || test -L "$lock"; then
+  test -f "$lock" && test ! -L "$lock"
+  test "$(stat -c %u:%a "$lock")" = 0:600
+fi
+# Use the installer's persistent inode, including while preparing a partial host.
+exec 9<>"$lock"
+flock -xn 9
+test ! -e /opt/minicloud && test ! -L /opt/minicloud
+test -z "$(find /opt -mindepth 1 -maxdepth 1 ! -name minicloud.installation.lock ! -name minicloud.seed-operation -print -quit)"
+test ! -e /opt/minicloud.seed-operation.pending && test ! -L /opt/minicloud.seed-operation.pending
 base=/var/lib/minicloud-seed
 if test ! -e "$base"; then mkdir -m 700 "$base"; fi
 check_dir "$base"
+test -z "$(find "$base" -mindepth 1 -maxdepth 1 ! -name "$operation" -print -quit)"
 root="$base/$operation"
 if test ! -e "$root"; then
   # Never prepare an existing installation on the strength of a name.
@@ -33,23 +45,32 @@ if test ! -e "$root"; then
   test ! -e /opt/minicloud.seed-operation
   if command -v docker >/dev/null; then
     test -z "$(docker ps -aq)"
-    test -z "$(docker volume ls -q --filter name=minicloud)"
+    test -z "$(docker volume ls -q)"
   fi
   mkdir -m 700 "$root"
-  printf '%s\n' "$operation" > "$root/operation"
+  (set -C; printf '%s\n' "$operation" > "$root/operation.pending")
+  sync -f "$root/operation.pending"
+  mv -T "$root/operation.pending" "$root/operation"
+  sync -f "$root"
 fi
 check_dir "$root"
 test "$(stat -c %a "$root")" = 700
 test -f "$root/operation" && test ! -L "$root/operation"
+test "$(stat -c %u:%a "$root/operation")" = 0:600
 test "$(cat "$root/operation")" = "$operation"
+test -z "$(find "$root" -name '*.pending' -o -name '*.partial')"
 if test -e /opt/minicloud || test -e /opt/minicloud.seed-operation; then
   test -f /opt/minicloud.seed-operation && test ! -L /opt/minicloud.seed-operation
   test "$(cat /opt/minicloud.seed-operation)" = "$operation"
 else
   # Durable host/operation binding before any installer input can be transmitted.
-  (set -C; printf '%s\n' "$operation" > /opt/minicloud.seed-operation)
+  test ! -L /opt/minicloud.seed-operation
+  (set -C; printf '%s\n' "$operation" > /opt/minicloud.seed-operation.pending)
+  sync -f /opt/minicloud.seed-operation.pending
+  mv -T /opt/minicloud.seed-operation.pending /opt/minicloud.seed-operation
   sync -f /opt
 fi
+test "$(stat -c %u:%a /opt/minicloud.seed-operation)" = 0:600
 # Use only Ubuntu's authenticated archive, never image-supplied third-party sources.
 sources="$root/ubuntu.sources"
 if test -e "$sources" || test -L "$sources"; then
@@ -106,3 +127,22 @@ for directory in assets recovery; do
   check_dir "$root/$directory"
   test "$(stat -c %a "$root/$directory")" = 700
 done
+python3 -B -c '
+import base64, json, os, pathlib, stat, sys
+p=pathlib.Path(sys.argv[1]) / "preparation.json"
+identity=json.loads(base64.b64decode(sys.argv[3],validate=True))
+data=(json.dumps({"schemaVersion":1,"seedId":sys.argv[2],"phase":"prepared","identity":identity},sort_keys=True)+"\n").encode()
+if p.exists() or p.is_symlink():
+ s=p.lstat()
+ assert stat.S_ISREG(s.st_mode) and s.st_uid == 0 and stat.S_IMODE(s.st_mode) == 0o600
+ assert p.read_bytes() == data
+else:
+ pending=p.with_name("preparation.pending")
+ fd=os.open(pending,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+ with os.fdopen(fd,"wb") as target:
+  target.write(data); target.flush(); os.fsync(target.fileno())
+ os.replace(pending,p)
+ fd=os.open(p.parent,os.O_RDONLY|os.O_DIRECTORY)
+ try: os.fsync(fd)
+ finally: os.close(fd)
+' "$root" "$operation" "$3"

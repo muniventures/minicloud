@@ -846,6 +846,28 @@ class Installer:
             namespace = {"__name__": "minicloud_verified_maintenance"}
             exec(compile(code, "verified-release/server_maintenance.py", "exec"), namespace)
             return namespace["execute"](self, globals())
+        # Main holds the shared installation lock here; do not race seed against
+        # an interrupted maintenance operation between inspection and execution.
+        maintenance = self.root / "maintenance.json"
+        require(not maintenance.with_name("maintenance.json.pending").exists()
+                and not maintenance.with_name("maintenance.json.pending").is_symlink(),
+                "Interrupted maintenance metadata requires reconciliation.")
+        if maintenance.exists() or maintenance.is_symlink():
+            protected(maintenance)
+            record = read_json(maintenance)
+            require(isinstance(record, dict)
+                    and not any(key in record for key in
+                                ("pendingUpgrade", "pendingRestore", "restoreInProgress", "heldFence", "error"))
+                    and set(record) <= {"operation", "at", "state", "lastSuccessfulBackup", "lastSuccessfulUpgrade",
+                                        "lastSuccessfulRecovery", "lastFailure"}
+                    and record.get("state") in
+                    ("backup_saved", "backup_verified", "backup_removed", "upgraded", "restore_confirmed",
+                     "fence_released", "maintenance_idle", "recovery_dependencies_verified",
+                     "recovery_dependencies_saved", "recovery_dependencies_rehearsed", "retention_plan",
+                     "recovery_archive_removed", "schedule_authored_not_installed")
+                    and ("lastFailure" not in record or isinstance(record["lastFailure"], dict)
+                         and record["lastFailure"].get("fenceReleased") is True),
+                    "Incomplete or unknown maintenance state requires explicit reconciliation, not seed/install.")
         result = self.preflight()
         if self.args.command == "preflight":
             return result

@@ -90,6 +90,7 @@ internal interface ISeedProvider : IDisposable
     Task<string> GetAccountIdentityAsync(CancellationToken ct);
     Task<SeedQuote> QuoteAsync(SeedSelection selection, string operation, CancellationToken ct);
     Task<string?> FindKeyAsync(string operation, string publicKey, CancellationToken ct);
+    Task<string?> FindUserKeyAsync(string publicKey, CancellationToken ct) => Task.FromResult<string?>(null);
     Task<string> CreateKeyAsync(string operation, string publicKey, CancellationToken ct);
     Task<SeedResource?> FindServerAsync(string operation, CancellationToken ct);
     Task<SeedResource> CreateServerAsync(SeedState state, CancellationToken ct);
