@@ -230,7 +230,7 @@ def version_at_least(text, minimum):
 
 
 class Host:
-    def tools(self):
+    def tools(self, *, require_cosign=True):
         require(os.geteuid() == 0, "Run as root.")
         os_release = dict(line.split("=", 1) for line in Path("/etc/os-release").read_text().splitlines()
                           if "=" in line)
@@ -238,7 +238,7 @@ class Host:
                 and os_release.get("VERSION_ID", "").strip('"') == "24.04",
                 "Only dedicated Ubuntu 24.04 hosts are accepted.")
         require(platform.machine() in ("x86_64", "aarch64"), "Only amd64/arm64 hosts are accepted.")
-        for tool in ("python3", "cosign", "docker", "openssl", "ssh-keygen"):
+        for tool in ("python3", "docker", "openssl", "ssh-keygen", *(("cosign",) if require_cosign else ())):
             require(shutil.which(tool), f"Install prerequisite independently: {tool}. The installer never replaces an engine.")
         # Inspect the existing daemon before every other Docker operation.
         info = json.loads(run(["docker", "info", "--format", "{{json .}}"]))
@@ -254,10 +254,10 @@ class Host:
         run(["docker", "buildx", "version"])
         return info
 
-    def resources(self, root, docker_root, manifest):
+    def resources(self, root, docker_root, manifest, *, reserved_memory_bytes=0):
         # Encoded operational floors, NOT a measured supported hardware claim.
         memory = int(re.search(r"MemTotal:\s+(\d+)", Path("/proc/meminfo").read_text())[1]) * 1024
-        require(memory >= 2 * 1024**3, "Guard: at least 2 GiB physical RAM before starting seven images.")
+        require(memory + reserved_memory_bytes >= 2 * 1024**3, "Guard: at least 2 GiB physical RAM before starting seven images.")
         require((os.cpu_count() or 0) >= 2, "Guard: at least two logical CPUs before parallel dependency startup.")
         ancestor = root
         while not ancestor.exists():
@@ -487,6 +487,9 @@ class Installer:
             "setupTokenFile": "setup-token-initial",
             "lastSuccessfulOperation": None,
         }
+        if self.manifest.get("artifactTrust") == "operator-pinned-local-source":
+            self.state.update(artifactTrust=self.manifest["artifactTrust"],
+                              sourceArchiveSha256=self.manifest["sourceArchiveSha256"])
         atomic_json(self.state_path, self.state)
         sync_directory(self.root.parent)
 
@@ -874,7 +877,7 @@ class Installer:
         if self.args.command in ("install", "prepare", "initialize", "activate"):
             require(self.state is None or self.state["phase"] != "ready",
                     "Recognized finished installation: use explicit upgrade, not reinstall.")
-            if result["state"] == "awaiting_dns_tls":
+            if result["state"] == "awaiting_dns_tls" and not getattr(self.args, "defer_dns", False):
                 return result
             if self.args.command in ("install", "prepare"):
                 self.pull_verified_images()

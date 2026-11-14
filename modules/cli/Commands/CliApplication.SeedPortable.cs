@@ -21,8 +21,10 @@ public sealed partial class CliApplication
             var action = args.FirstOrDefault();
             SeedGuard.Require(action is "plan" or "apply" or "check" or "export",
                 "Use seed plan|apply|check|export --config <protected.json> --report <report.json>.");
-            HashSet<string> flags = ["--new-seed", "--use-ssh-agent", "--setup-token", "--ssh-key-passphrase", "--no-ssh-key-passphrase"];
-            HashSet<string> values = ["--config", "--report", "--ssh-key", "--credential-file", "--approve", "--recovery-dir", "--generate-ssh-key"];
+            HashSet<string> flags = ["--new-seed", "--use-ssh-agent", "--setup-token", "--ssh-key-passphrase", "--no-ssh-key-passphrase",
+                "--refresh-partial-source"];
+            HashSet<string> values = ["--config", "--report", "--ssh-key", "--credential-file", "--approve", "--recovery-dir", "--generate-ssh-key",
+                "--local-source", "--source-sha256"];
             var options = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var i = 1; i < args.Length; i++)
             {
@@ -37,6 +39,13 @@ public sealed partial class CliApplication
                 SeedGuard.Require(options.TryAdd(name, value), "Duplicate seed option.");
             }
             string? Option(string name) => options.GetValueOrDefault(name);
+            var localSource = Option("--local-source");
+            SeedGuard.Require((localSource is null) == (Option("--source-sha256") is null),
+                "--local-source and --source-sha256 must be supplied together.");
+            SeedGuard.Require(localSource is null || action is "plan" or "apply",
+                "Local source artifacts are only needed for plan/apply; check and export remain observational.");
+            SeedGuard.Require(!options.ContainsKey("--refresh-partial-source") || localSource is not null,
+                "--refresh-partial-source requires explicit local-source plan/apply.");
             SeedGuard.Require(Option("--config") is not null && Option("--report") is not null, "--config and --report are required.");
             var configPath = Path.GetFullPath(Option("--config")!);
             SeedFiles.Check(configPath);
@@ -46,7 +55,8 @@ public sealed partial class CliApplication
             embeddedCredential = config.ProviderCredential;
             reportPath = Path.GetFullPath(Option("--report")!);
             SeedGuard.Require(reportPath != configPath && reportPath != Path.GetFullPath(Option("--ssh-key") ?? configPath)
-                && reportPath != Path.GetFullPath(Option("--credential-file") ?? configPath), "Report must be separate from protected inputs.");
+                && reportPath != Path.GetFullPath(Option("--credential-file") ?? configPath)
+                && reportPath != Path.GetFullPath(localSource ?? configPath), "Report must be separate from protected inputs.");
             if (Option("--generate-ssh-key") is { } generatedPath)
             {
                 var fullKeyPath = Path.GetFullPath(generatedPath);
@@ -91,7 +101,7 @@ public sealed partial class CliApplication
                     Convert.FromBase64String(publicKey.Split(' ')[1]))).TrimEnd('=');
             scratch = Path.Combine(Path.GetDirectoryName(reportPath)!, ".seed-session-" + Guid.NewGuid().ToString("N"));
             SeedFiles.Directory(scratch);
-            var host = new SeedHost(keyPath, useAgent);
+            var host = new SeedHost(keyPath, useAgent, localSource: localSource is not null);
             credential = Option("--credential-file") is { } credentialPath ? SeedFiles.Credential(credentialPath, _console) : config.ProviderCredential;
             using var provider = string.IsNullOrEmpty(credential) ? null : new SeedProvider(config.Selection.Provider, credential);
             if (provider is not null)
@@ -154,7 +164,15 @@ public sealed partial class CliApplication
                 return CliExitCodes.Success;
             }
             // Observation precedes release comparison/verification. Never run the installer to discover installed identity.
-            var release = await new SeedRelease().VerifyAsync(config.Selection.ServerVersion, Path.Combine(scratch, "release"), ct);
+            var release = localSource is null
+                ? await new SeedRelease().VerifyAsync(config.Selection.ServerVersion, Path.Combine(scratch, "release"), ct)
+                : SeedLocalSource.Verify(Path.GetFullPath(localSource), Option("--source-sha256")!,
+                    config.Selection.ServerVersion, Path.Combine(scratch, "release"));
+            var refresh = options.ContainsKey("--refresh-partial-source");
+            SeedGuard.Require(!refresh || observation.State == "installed" && observation.Progress == "prepared"
+                && observation.ArtifactTrust == SeedLocalSource.Trust
+                && System.Text.RegularExpressions.Regex.IsMatch(observation.SourceArchiveSha256 ?? "", "^[0-9a-f]{64}$")
+                && observation.Source != release.Source, "Only an explicitly observed, pre-initialization local installation can refresh its source.");
             SeedGuard.Require(observation.State is not ("empty" or "preparing") || observation.Prepared
                 || !string.IsNullOrEmpty(state.Plan.Quote.Image),
                 "For initial host-only preparation include target.image from the creation report/provider console, or supply authorized read-only provider inventory access.");
@@ -164,9 +182,16 @@ public sealed partial class CliApplication
             if (state.Server is null)
                 SeedGuard.Require(quote.Architecture == config.Architecture, "Approved architecture differs from provider image.");
             quote = quote with { Account = config.ProviderAccount, CredentialScope = "authorized-account-access" };
-            state.Plan = new(config.Selection, quote, release.Digest, release.Source) { OperatorPublicKeys = config.OperatorPublicKeys };
+            state.Plan = new(config.Selection, quote, release.Digest, release.Source)
+            {
+                OperatorPublicKeys = config.OperatorPublicKeys,
+                ArtifactTrust = localSource is null ? "github-sigstore" : SeedLocalSource.Trust,
+                PreviousLocalSourceDigest = refresh ? observation.SourceArchiveSha256 : null,
+                PreviousLocalSourceRevision = refresh ? observation.Source : null
+            };
             if (observation.State == "installed" && observation.Release == config.Selection.ServerVersion)
-                SeedGuard.Require(observation.Source == release.Source, "Installed source differs from exact signed release; reconcile.");
+                SeedGuard.Require(observation.Source == release.Source || refresh,
+                    "Installed source differs from exact selected source; reconcile or explicitly review a pre-initialization local refresh.");
             report.Plan = state.Plan;
             var newSeed = options.ContainsKey("--new-seed");
             report.Approval = SeedPortable.Approval(config, state, report.Classification, publicKey, newSeed);

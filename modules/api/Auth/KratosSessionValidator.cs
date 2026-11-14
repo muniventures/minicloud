@@ -22,7 +22,8 @@ public sealed class KratosSessionValidator(HttpClient client, IOptions<KratosOpt
         var upstreamToken = timeout.Token;
         try
         {
-            using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, upstreamToken);
+            var sessionUri = new UriBuilder(uri) { Query = "expand=identity" }.Uri;
+            using var response = await client.GetAsync(sessionUri, HttpCompletionOption.ResponseHeadersRead, upstreamToken);
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
                 return false;

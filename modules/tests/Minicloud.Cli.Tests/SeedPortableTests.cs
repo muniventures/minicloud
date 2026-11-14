@@ -110,6 +110,20 @@ public sealed class SeedPortableTests : IDisposable
     }
 
     [Fact]
+    public async Task Explicit_local_source_plan_can_stage_before_DNS_without_claiming_ready()
+    {
+        var host = new Host { Dns = false, Observation = new("installed", "awaiting_dns_tls", Release: "server-v1.2.3") };
+        var state = State();
+        state.Plan = state.Plan with { ArtifactTrust = SeedLocalSource.Trust };
+        var result = await SeedPortable.ContinueAsync(state, home, host, host, new("preparing", "pending"), default);
+        Assert.Equal(["prepare", "dns", "install", "inspect"], host.Calls);
+        Assert.Equal("awaiting_dns_tls", result.Progress);
+        var config = Config();
+        Assert.NotEqual(SeedPortable.Approval(config, State(), "new_seed", "key", true),
+            SeedPortable.Approval(config, state, "new_seed", "key", true));
+    }
+
+    [Fact]
     public void Approval_survives_credential_rotation_but_binds_cost_identity_key_classification_and_resolved_target()
     {
         var config = Config() with { ProviderCredential = "synthetic-old-credential" };

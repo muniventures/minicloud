@@ -263,6 +263,8 @@ public sealed partial class CliApplication
         _console.WriteLine("Initial creation only: plan/apply --new-seed plus explicit config initialCreationIntent; apply --approve EXACT_DIGEST. Never repeat an uncertain create.");
         _console.WriteLine("minicloud seed export --config PROTECTED_JSON --report NONSECRET_JSON --ssh-key USER_PRIVATE_KEY --recovery-dir SEPARATE_PRIVATE_DIR [--setup-token]");
         _console.WriteLine("Optional plan key generation: --generate-ssh-key EXPLICIT_NEW_PATH [--ssh-key-passphrase | --no-ssh-key-passphrase]; default question protects the key.");
+        _console.WriteLine("Explicit local source alternative (plan/apply only): --local-source PROTECTED_ARCHIVE --source-sha256 REVIEWED_SHA256. Builds on the dedicated VPS; no GitHub release or product registry. See docs/stateless-seed.md.");
+        _console.WriteLine("Explicit --refresh-partial-source requires local mode and a prepared installation before OpenBao initialization; preserves original IDs/credentials and retains the previous bundle.");
         _console.WriteLine("Check is observational, including failures; explicit-target SSH/export needs no provider credential. Keyless check observes public HTTPS only.");
         _console.WriteLine("Exit codes: 0 success, 10 handoff pending, 11 upgrade required, 12 reconciliation required; 2 malformed invocation. See docs/stateless-seed.md.");
         _console.WriteLine("Legacy journal callers remain supported below; their keys/journals are never imported, replaced or deleted:");
@@ -273,6 +275,6 @@ public sealed partial class CliApplication
         _console.WriteLine("minicloud seed cleanup OP [--confirm-cleanup DIGEST] [--credential-file PATH] (forbidden after installation starts)");
         _console.WriteLine("minicloud seed export OP --recovery-dir NEW_LOCAL_PATH [--setup-token [--rotate-setup-token]] [--ack-recovery INSTALLATION_ID]");
         _console.WriteLine("minicloud seed register-provider OP --register-provider --organization ID --provider-name NAME [--use-existing-auth] [--credential-file PATH] [--confirm-provider-import DIGEST | --confirm-provider-account ID]");
-        _console.WriteLine("Exact signed published server required; current candidate unpublished/unqualified. Public HTTPS and independent console SSH fingerprint required. IP-only access deferred. See docs/seed.md.");
+        _console.WriteLine("Default/legacy mode requires an exact signed published server. Public HTTPS and independent console SSH fingerprint required. IP-only access deferred. See docs/seed.md.");
     }
 }

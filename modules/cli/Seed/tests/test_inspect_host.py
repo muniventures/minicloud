@@ -81,6 +81,19 @@ class InspectorTests(unittest.TestCase):
         self.assertEqual("empty", self.observe()["state"])
         self.assertFalse((self.root / "opt/minicloud.installation.lock").exists())
 
+    def test_only_empty_protected_containerd_package_directories_are_accepted(self):
+        containerd = self.root / "opt/containerd"
+        for name in ("bin", "lib"):
+            (containerd / name).mkdir(mode=0o711, parents=True, exist_ok=True)
+        containerd.chmod(0o711)
+        self.assertEqual("empty", self.observe()["state"])
+        self.write("/opt/containerd/bin/unknown", "do not adopt")
+        self.assertEqual("reconciliation_required", self.observe()["state"])
+        (containerd / "bin/unknown").unlink()
+        (containerd / "lib").rmdir()
+        (containerd / "lib").symlink_to(containerd / "bin")
+        self.assertEqual("reconciliation_required", self.observe()["state"])
+
     def test_missing_corrupt_future_and_unknown_installation_metadata_fail_closed(self):
         for content in (None, "{", {"schemaVersion": 2}, {"schemaVersion": True}):
             with self.subTest(content=content):

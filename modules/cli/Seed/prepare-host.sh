@@ -32,7 +32,15 @@ fi
 exec 9<>"$lock"
 flock -xn 9
 test ! -e /opt/minicloud && test ! -L /opt/minicloud
-test -z "$(find /opt -mindepth 1 -maxdepth 1 ! -name minicloud.installation.lock ! -name minicloud.seed-operation -print -quit)"
+if test -e /opt/containerd || test -L /opt/containerd; then
+  check_dir /opt/containerd
+  test -z "$(find /opt/containerd -mindepth 1 -maxdepth 1 ! -name bin ! -name lib -print -quit)"
+  for directory in /opt/containerd/bin /opt/containerd/lib; do
+    check_dir "$directory"
+    test -z "$(find "$directory" -mindepth 1 -print -quit)"
+  done
+fi
+test -z "$(find /opt -mindepth 1 -maxdepth 1 ! -name minicloud.installation.lock ! -name minicloud.seed-operation ! -name containerd -print -quit)"
 test ! -e /opt/minicloud.seed-operation.pending && test ! -L /opt/minicloud.seed-operation.pending
 base=/var/lib/minicloud-seed
 if test ! -e "$base"; then mkdir -m 700 "$base"; fi
@@ -98,11 +106,13 @@ else
   (set -C; printf '%s' "$policy" > "$ssh_policy")
 fi
 sshd -t
-sshd -T | grep -qx 'passwordauthentication no'
-sshd -T | grep -qx 'kbdinteractiveauthentication no'
-sshd -T | grep -Eq '^permitrootlogin (prohibit-password|without-password)$'
+effective_policy="$(sshd -T)"
+grep -qx 'passwordauthentication no' <<< "$effective_policy"
+grep -qx 'kbdinteractiveauthentication no' <<< "$effective_policy"
+grep -Eq '^permitrootlogin (prohibit-password|without-password)$' <<< "$effective_policy"
 systemctl reload ssh
 systemctl enable --now docker
+if test "${4:-github-sigstore}" != local-source; then
 cosign="$root/cosign-linux-$cosign_arch"
 if test ! -e "$cosign"; then
   test ! -e "$cosign.partial"
@@ -119,6 +129,7 @@ check_dir /usr/local/bin
 test ! -L /usr/local/bin/cosign
 install -m 755 "$cosign" /usr/local/bin/cosign
 cosign version --json
+fi
 docker version --format '{{.Server.Version}}'
 docker compose version
 docker buildx version

@@ -37,6 +37,9 @@ internal sealed record SeedQuote(string Account, string CredentialScope, string 
 internal sealed record SeedPlan(SeedSelection Selection, SeedQuote Quote, string ReleaseDigest, string ReleaseSource)
 {
     public string[] OperatorPublicKeys { get; init; } = [];
+    public string ArtifactTrust { get; init; } = "github-sigstore";
+    public string? PreviousLocalSourceDigest { get; init; }
+    public string? PreviousLocalSourceRevision { get; init; }
 
     [JsonIgnore]
     public string Approval

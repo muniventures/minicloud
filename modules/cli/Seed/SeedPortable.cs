@@ -79,7 +79,8 @@ internal sealed record SeedPortableTarget(string ServerId, string? Ipv4 = null, 
 
 internal sealed record SeedObservation(string State, string Progress, string? InstallationId = null,
     string? OperationId = null, string? Release = null, string? Source = null, string Health = "unknown",
-    string OpenBao = "unknown", string Browser = "unknown", bool Prepared = false);
+    string OpenBao = "unknown", string Browser = "unknown", bool Prepared = false,
+    string? ArtifactTrust = null, string? SourceArchiveSha256 = null);
 
 internal interface ISeedInspector
 {
@@ -153,7 +154,7 @@ internal static class SeedPortable
         if (!observation.Prepared) await host.PrepareAsync(state, directory, ct);
         state.HostPrepared = true;
         if (state.Plan.OperatorPublicKeys.Length > 0) await host.AddOperatorKeysAsync(state, directory, ct);
-        if (!await host.DnsReadyAsync(state, ct))
+        if (!await host.DnsReadyAsync(state, ct) && state.Plan.ArtifactTrust != SeedLocalSource.Trust)
             return observation with { Progress = "awaiting_dns", Health = "pending", Prepared = true };
         await host.InstallAsync(state, directory, false, ct);
         return await inspector.InspectAsync(state, directory, ct);

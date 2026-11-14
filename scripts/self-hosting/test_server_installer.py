@@ -156,6 +156,45 @@ class InstallerTests(unittest.TestCase):
     def subject(self):
         return FixtureInstaller(self.args, self.host)
 
+    def test_explicit_partial_source_refresh_preserves_identity_and_credential_bytes(self):
+        spec = importlib.util.spec_from_file_location("partial_local_source", ROOT / "scripts/self-hosting/local_source.py")
+        local = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(local)
+        self.manifest.update(artifactTrust=local.TRUST, sourceArchiveSha256="a" * 64)
+        (self.assets / "server-manifest.json").write_text(json.dumps(self.manifest))
+        self.args.command = "prepare"
+        subject = self.subject()
+        subject.execute()
+        original_state = dict(subject.state)
+        credentials = {path: path.read_bytes() for path in (self.args.root / "secrets").rglob("*") if path.is_file()}
+        selected = dict(self.manifest, sourceRevision="b" * 40, sourceArchiveSha256="b" * 64)
+        # The fixture bundle need not change to test the controlled authority transition.
+        local.refresh_partial(subject, selected, "a" * 64, installer)
+        self.assertEqual(original_state["installationId"], subject.state["installationId"])
+        self.assertEqual(original_state["operationId"], subject.state["operationId"])
+        self.assertEqual(credentials, {path: path.read_bytes() for path in credentials})
+        self.assertTrue((self.args.root / ("bundle.previous-" + "a" * 64)).is_dir())
+        self.assertFalse((self.args.root / "local-source-refresh.pending").exists())
+        self.assertEqual("b" * 64, subject.state["sourceArchiveSha256"])
+        subject.state["baoInitStarted"] = True
+        with self.assertRaisesRegex(ValueError, "before OpenBao"):
+            local.refresh_partial(subject, dict(selected, sourceRevision="c" * 40), "b" * 64, installer)
+
+    def test_explicit_deferred_dns_initializes_but_does_not_claim_https_ready(self):
+        self.host.dns_ready = False
+        subject = self.subject()
+        self.assertEqual("awaiting_dns_tls", subject.execute()["state"])
+        self.assertEqual([], subject.events)
+        self.assertFalse(self.args.root.exists())
+        self.args.defer_dns = True
+        subject = self.subject()
+        with mock.patch.object(subject, "readiness", return_value={"state": "awaiting_dns_tls"}):
+            self.assertEqual("awaiting_dns_tls", subject.execute()["state"])
+        self.assertTrue(subject.state["credentialsComplete"])
+        self.assertIn("verify-and-pull", subject.events)
+        self.assertIn(("up", "-d", "caddy"), subject.events)
+        self.assertEqual("awaiting_dns_tls", subject.state["phase"])
+
     def test_pending_or_unknown_maintenance_blocks_install_before_any_host_operation(self):
         self.args.root.mkdir(mode=0o700)
         for record in ({"state": "started"}, {"state": "upgraded", "pendingUpgrade": {}},
