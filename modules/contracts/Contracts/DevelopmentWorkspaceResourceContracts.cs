@@ -22,6 +22,18 @@ public sealed record DevelopmentWorkspaceFilesystemResources(
     long? InodesTotal, long? InodesAvailable, int? NestedMountsExcluded,
     IReadOnlyList<string>? Roles = null, int? ScratchBindMounts = null);
 
+/// <summary>
+/// Last-hour resource history for the VM's current generation, ascending by observation time and limited
+/// to one sample per UTC minute and the 60 most recent samples. Null metrics were unknown when sampled.
+/// </summary>
+public sealed record DevelopmentWorkspaceVmResourceHistory(
+    string VmId, long Generation, DateTimeOffset WindowStart, DateTimeOffset WindowEnd,
+    IReadOnlyList<DevelopmentWorkspaceVmResourceHistorySample> Samples);
+
+public sealed record DevelopmentWorkspaceVmResourceHistorySample(
+    DateTimeOffset Minute, DateTimeOffset ObservedAt, double? CpuUtilizationPercent,
+    long? MemoryUsedBytes, long? MemoryTotalBytes, long? WorkspaceDiskUsedBytes, long? WorkspaceDiskTotalBytes);
+
 public sealed record DevelopmentWorkspaceDiskUsageScanRequest(long Generation, string IdempotencyKey, string? TargetToken = null);
 public sealed record DevelopmentWorkspaceDirectoryDeletionRequest(
     long Generation, string TargetToken, string ConfirmationPath, bool AcknowledgePermanentLoss, string IdempotencyKey);

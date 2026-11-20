@@ -11,6 +11,7 @@ public sealed partial class MinicloudDbContext
     public DbSet<DevelopmentWorkspaceOperation> DevelopmentWorkspaceOperations => Set<DevelopmentWorkspaceOperation>();
     public DbSet<DevelopmentWorkspaceTaskLease> DevelopmentWorkspaceTaskLeases => Set<DevelopmentWorkspaceTaskLease>();
     public DbSet<DevelopmentWorkspaceFilesystemJob> DevelopmentWorkspaceFilesystemJobs => Set<DevelopmentWorkspaceFilesystemJob>();
+    public DbSet<DevelopmentWorkspaceVmResourceSample> DevelopmentWorkspaceVmResourceSamples => Set<DevelopmentWorkspaceVmResourceSample>();
 
     private static void ConfigureDevelopmentWorkspaces(ModelBuilder modelBuilder)
     {
@@ -95,6 +96,15 @@ public sealed partial class MinicloudDbContext
                 nameof(DevelopmentWorkspaceFilesystemJob.PathJson), nameof(DevelopmentWorkspaceFilesystemJob.TargetDevice),
                 nameof(DevelopmentWorkspaceFilesystemJob.TargetInode) })
                 entity.Property(name).Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+            entity.HasOne<DevelopmentWorkspaceVm>().WithMany().HasForeignKey(x => new { x.WorkspaceId, x.VmId })
+                .HasPrincipalKey(x => new { x.WorkspaceId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<DevelopmentWorkspaceVmResourceSample>(entity =>
+        {
+            entity.ToTable("development_workspace_vm_resource_samples");
+            entity.HasKey(x => new { x.VmId, x.Generation, x.Minute });
+            entity.HasIndex(x => x.ExpiresAt);
+            entity.HasIndex(x => new { x.WorkspaceId, x.VmId });
             entity.HasOne<DevelopmentWorkspaceVm>().WithMany().HasForeignKey(x => new { x.WorkspaceId, x.VmId })
                 .HasPrincipalKey(x => new { x.WorkspaceId, x.Id }).OnDelete(DeleteBehavior.Cascade);
         });

@@ -9,6 +9,7 @@ import { WorkspaceVmCard } from "./WorkspaceVmCard";
 vi.mock("@/api/workspacesApi", () => ({
   getWorkspaceLaunchUrl: vi.fn(), mutateWorkspaceVm: vi.fn(), workspaceTask: vi.fn(),
 }));
+vi.mock("./WorkspaceVmResourceChart", () => ({ WorkspaceVmResourceChart: () => null }));
 vi.mock("./WorkspaceSelectionFields", () => ({
   WorkspaceSelectionFields: ({ value, onChange, disabled, onReadyChange }: {
     value: WorkspaceSelection; onChange: (selection: WorkspaceSelection) => void; disabled?: boolean;

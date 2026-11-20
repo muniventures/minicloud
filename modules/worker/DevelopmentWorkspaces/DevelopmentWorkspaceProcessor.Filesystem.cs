@@ -16,6 +16,11 @@ public sealed partial class DevelopmentWorkspaceProcessor
     public async Task FilesystemNextAsync(CancellationToken ct)
     {
         await lifecycle.PruneFilesystemJobsAsync(ct);
+        try { await lifecycle.PruneResourceHistoryAsync(ct); }
+        catch (Exception error) when (!ct.IsCancellationRequested)
+        {
+            logger?.LogWarning("Dev environment resource history expiry failed ({ErrorType}); the next pass will retry.", error.GetType().Name);
+        }
         foreach (var job in await lifecycle.RunningFilesystemJobsAsync(ct))
             await PollFilesystemJobAsync(job, ct);
         var claimed = await lifecycle.ClaimFilesystemJobAsync(2, ct);

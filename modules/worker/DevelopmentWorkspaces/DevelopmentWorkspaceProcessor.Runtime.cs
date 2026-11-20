@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Minicloud.Common.Models;
 using Minicloud.Common.Services;
 
@@ -112,10 +113,12 @@ public sealed partial class DevelopmentWorkspaceProcessor
             var activity = DateTimeOffset.FromUnixTimeMilliseconds(checked((long)(seconds * 1000)));
             if (activity <= Now && (fresh.LastActivityAt is null || activity > fresh.LastActivityAt)) fresh.LastActivityAt = activity;
         }
+        var history = DevelopmentWorkspaceService.ResourceHistorySample(fresh.ResourceSampleJson, fresh.WorkspaceId, fresh.Id, fresh.Generation);
         if (!publishRoute)
         {
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
+            await RecordResourceHistoryAsync(history, ct);
             return;
         }
         var route = await db.DevelopmentWorkspaceGatewayRoutes.SingleOrDefaultAsync(
@@ -156,6 +159,18 @@ public sealed partial class DevelopmentWorkspaceProcessor
         }
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
+        await RecordResourceHistoryAsync(history, ct);
+    }
+
+    // Runs only after the heartbeat commit: history is best-effort and must never affect status or route publication.
+    private async Task RecordResourceHistoryAsync(DevelopmentWorkspaceVmResourceSample? sample, CancellationToken ct)
+    {
+        if (sample is null) return;
+        try { await lifecycle.RecordResourceSampleAsync(sample, ct); }
+        catch (Exception error) when (!ct.IsCancellationRequested)
+        {
+            logger?.LogWarning("Dev environment resource history write failed ({ErrorType}); latest status is unaffected.", error.GetType().Name);
+        }
     }
 
     private async Task<Dictionary<string, int>> ProbePreviewsAsync(DevelopmentWorkspaceVm vm, CancellationToken ct)

@@ -207,7 +207,10 @@ public sealed partial class DevelopmentWorkspaceProcessor
                     machine.RuntimeCredentialRef = null; machine.RuntimeTokenExpiresAt = null;
                     if (machine.Kind == "primary") { parent.VolumeAttachedVmId = null; parent.VolumeStatus = "retained"; }
                     fresh.Status = "completed"; fresh.LeaseToken = null; fresh.LeaseOwner = null; fresh.LeaseExpiresAt = null;
-                }, ct); break;
+                }, ct);
+                if (vm.Kind == DevelopmentWorkspaceVmKinds.Ephemeral && vm.DiscardGeneration == vm.Generation && vm.DiscardOperationId == op.Id)
+                    await DeleteResourceHistoryAsync(vm.WorkspaceId, vm.Id, ct);
+                break;
             default: throw new InvalidOperationException("Unknown workspace stop stage.");
         }
     }

@@ -205,3 +205,19 @@ public sealed class DevelopmentWorkspaceFilesystemJob
     public DateTimeOffset UpdatedAt { get; set; }
     public long Revision { get; set; } = 1;
 }
+
+/// <summary>Short-lived per-minute resource history for one VM generation (#205).</summary>
+public sealed class DevelopmentWorkspaceVmResourceSample
+{
+    public string WorkspaceId { get; set; } = default!;
+    public string VmId { get; set; } = default!;
+    public long Generation { get; set; }
+    public DateTimeOffset Minute { get; set; }
+    public DateTimeOffset ObservedAt { get; set; }
+    public double? CpuUtilizationPercent { get; set; }
+    public long? MemoryTotalBytes { get; set; }
+    public long? MemoryAvailableBytes { get; set; }
+    public long? WorkspaceDiskTotalBytes { get; set; }
+    public long? WorkspaceDiskAvailableBytes { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+}

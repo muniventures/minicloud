@@ -483,6 +483,67 @@ public sealed partial class DevelopmentWorkspaceApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ResourceHistoryIsReaderScopedCamelCaseAndReadsOnlyStoredSamples()
+    {
+        using var owner = Client(token);
+        using var other = Client(otherToken);
+        var workspace = await Create(owner);
+        var sibling = await owner.PostAsJsonAsync(Root, Request() with { Name = "Sibling", IdempotencyKey = "sibling" });
+        var siblingVm = (await sibling.Content.ReadFromJsonAsync<DevelopmentWorkspaceResponse>())!.Vms!.Single();
+        var vm = workspace.Vms!.Single();
+        var url = $"{Root}/{workspace.Id}/vms/{vm.Id}/resource-history";
+
+        var empty = await owner.GetAsync($"{url}?organizationId=org");
+        Assert.Equal(HttpStatusCode.OK, empty.StatusCode);
+        using (var json = JsonDocument.Parse(await empty.Content.ReadAsStringAsync()))
+        {
+            Assert.Equal(vm.Id, json.RootElement.GetProperty("vmId").GetString());
+            Assert.Equal(JsonValueKind.Number, json.RootElement.GetProperty("generation").ValueKind);
+            Assert.Equal(JsonValueKind.String, json.RootElement.GetProperty("windowStart").ValueKind);
+            Assert.Equal(JsonValueKind.String, json.RootElement.GetProperty("windowEnd").ValueKind);
+            Assert.Empty(json.RootElement.GetProperty("samples").EnumerateArray());
+        }
+
+        var observedAt = DateTimeOffset.UtcNow.AddMinutes(-2);
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MinicloudDbContext>();
+            var generation = (await db.DevelopmentWorkspaceVms.SingleAsync(x => x.Id == vm.Id)).Generation;
+            db.DevelopmentWorkspaceVmResourceSamples.Add(new()
+            {
+                WorkspaceId = workspace.Id, VmId = vm.Id, Generation = generation,
+                Minute = new DateTimeOffset(observedAt.UtcTicks - observedAt.UtcTicks % TimeSpan.TicksPerMinute, TimeSpan.Zero),
+                ObservedAt = observedAt, MemoryTotalBytes = 8, MemoryAvailableBytes = 3,
+                ExpiresAt = observedAt.AddHours(2)
+            });
+            await db.SaveChangesAsync();
+        }
+        using (var json = JsonDocument.Parse(await owner.GetStringAsync($"{url}?organizationId=org")))
+        {
+            var sample = Assert.Single(json.RootElement.GetProperty("samples").EnumerateArray());
+            Assert.Equal(JsonValueKind.Null, sample.GetProperty("cpuUtilizationPercent").ValueKind);
+            Assert.Equal(5, sample.GetProperty("memoryUsedBytes").GetInt64());
+            Assert.Equal(8, sample.GetProperty("memoryTotalBytes").GetInt64());
+            Assert.Equal(JsonValueKind.Null, sample.GetProperty("workspaceDiskUsedBytes").ValueKind);
+            Assert.Equal(JsonValueKind.Null, sample.GetProperty("workspaceDiskTotalBytes").ValueKind);
+            Assert.Equal(observedAt, sample.GetProperty("observedAt").GetDateTimeOffset());
+            Assert.True(sample.TryGetProperty("minute", out _));
+        }
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await other.GetAsync($"{url}?organizationId=org")).StatusCode);
+        var crossOrg = await other.GetAsync($"{url}?organizationId=other");
+        Assert.Equal(HttpStatusCode.NotFound, crossOrg.StatusCode);
+        Assert.DoesNotContain("samples", await crossOrg.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await owner.GetAsync($"{Root}/{workspace.Id}/vms/{siblingVm.Id}/resource-history?organizationId=org")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await owner.GetAsync($"{Root}/{workspace.Id}/vms/missing/resource-history?organizationId=org")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await owner.GetAsync($"{Root}/missing/vms/{vm.Id}/resource-history?organizationId=org")).StatusCode);
+        await AssertNoCompute();
+    }
+
+    [Fact]
     public async Task DisabledMutationsAndStaleGenerationFailClosed()
     {
         using var client = Client(token);

@@ -264,7 +264,7 @@ function VmGenerationCard({ workspaceId, organizationId, vm, currency, refresh, 
       <p role="status">{visibleLaunch?.state === "expired" ? "Link expired" : ""}</p>
       {visibleLaunch?.state === "expired" && <Button variant="outline" disabled={blocked} onClick={() => authorize(visibleLaunch.service)}>Get a new link</Button>}
     </div>
-    <WorkspaceVmResources vm={vm} />
+    <WorkspaceVmResources workspaceId={workspaceId} organizationId={organizationId} vm={vm} />
     <Dialog open={panel !== null} onOpenChange={open => { if (!open) setPanel(null); }}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto" onCloseAutoFocus={restoreFocus}>
         {panel === "resize" && <>

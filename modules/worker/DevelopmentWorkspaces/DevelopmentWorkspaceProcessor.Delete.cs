@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Minicloud.Common.Models;
 using Minicloud.Common.Providers;
 using Minicloud.Common.Services;
@@ -53,6 +54,17 @@ public sealed partial class DevelopmentWorkspaceProcessor
         await lifecycle.RenewOperationLeaseAsync(op.Id, op.LeaseToken!, ct);
         await DeleteWorkspaceCredentialsAsync(workspace, ct);
         await lifecycle.CompleteDeletionAsync(op.Id, op.LeaseToken!, ct);
+        await DeleteResourceHistoryAsync(workspace.Id, null, ct);
+    }
+
+    // After the lifecycle commit; any rows left by a failure here still expire through retention pruning.
+    private async Task DeleteResourceHistoryAsync(string workspaceId, string? vmId, CancellationToken ct)
+    {
+        try { await lifecycle.DeleteResourceHistoryAsync(workspaceId, vmId, ct); }
+        catch (Exception error) when (!ct.IsCancellationRequested)
+        {
+            logger?.LogWarning("Dev environment resource history cleanup failed ({ErrorType}); retention expiry will remove it.", error.GetType().Name);
+        }
     }
 
     private async Task DeleteWorkspaceCredentialsAsync(DevelopmentWorkspace workspace, CancellationToken ct)

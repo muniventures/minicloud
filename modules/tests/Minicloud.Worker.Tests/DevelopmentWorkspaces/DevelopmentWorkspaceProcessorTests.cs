@@ -818,6 +818,9 @@ public sealed partial class DevelopmentWorkspaceProcessorTests : IAsyncLifetime
         cloud.Servers.Add(siblingServer.Id, siblingServer);
         var imageId = sibling.Vms.Single().ProviderImage;
         cloud.LoseDeleteVolumeResponse = loseResponse;
+        AddHistory(await CurrentVm(workspace.PrimaryVmId), 1, clock.GetUtcNow().AddMinutes(-1));
+        AddHistory(sibling.Vms.Single(), 1, clock.GetUtcNow().AddMinutes(-1));
+        await db.SaveChangesAsync();
 
         await lifecycle.DeleteAsync(workspace.Id, "org", true, "actor", default);
         await Hop("delete-verified-volume");
@@ -853,6 +856,7 @@ public sealed partial class DevelopmentWorkspaceProcessorTests : IAsyncLifetime
         Assert.Empty(cloud.DeletedServers);
         Assert.Empty(cloud.DeletedIps);
         Assert.Empty(cloud.DeletedFirewalls);
+        Assert.Equal(sibling.Id, Assert.Single(await db.DevelopmentWorkspaceVmResourceSamples.AsNoTracking().ToListAsync()).WorkspaceId);
         var completed = await CurrentOperation((await CurrentVm(workspace.PrimaryVmId)).OperationId!);
         Assert.Equal("completed", completed.Status);
         Assert.Equal("provider-absence-confirmed", completed.Step);

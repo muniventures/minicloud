@@ -65,3 +65,25 @@ export function getFilesystemJob(id: string, vmId: string, organizationId: strin
 export function cancelFilesystemJob(id: string, vmId: string, organizationId: string, jobId: string) {
   return apiRequest<FilesystemJob>(vmPath(id, vmId, organizationId, `filesystem-jobs/${encodeURIComponent(jobId)}/cancel`), { method: "POST" });
 }
+
+export type VmResourceHistorySample = {
+  minute: string;
+  observedAt: string;
+  cpuUtilizationPercent?: number | null;
+  memoryUsedBytes?: number | null;
+  memoryTotalBytes?: number | null;
+  workspaceDiskUsedBytes?: number | null;
+  workspaceDiskTotalBytes?: number | null;
+};
+
+export type VmResourceHistory = {
+  vmId: string;
+  generation: number;
+  windowStart: string;
+  windowEnd: string;
+  samples: VmResourceHistorySample[];
+};
+
+export function getVmResourceHistory(id: string, vmId: string, organizationId: string, signal?: AbortSignal) {
+  return apiRequest<VmResourceHistory>(vmPath(id, vmId, organizationId, "resource-history"), { signal });
+}

@@ -2458,6 +2458,62 @@ namespace Minicloud.Common.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Minicloud.Common.Models.DevelopmentWorkspaceVmResourceSample", b =>
+                {
+                    b.Property<string>("VmId")
+                        .HasColumnType("text")
+                        .HasColumnName("vm_id");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("bigint")
+                        .HasColumnName("generation");
+
+                    b.Property<DateTimeOffset>("Minute")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("minute");
+
+                    b.Property<double?>("CpuUtilizationPercent")
+                        .HasColumnType("double precision")
+                        .HasColumnName("cpu_utilization_percent");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<long?>("MemoryAvailableBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("memory_available_bytes");
+
+                    b.Property<long?>("MemoryTotalBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("memory_total_bytes");
+
+                    b.Property<DateTimeOffset>("ObservedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("observed_at");
+
+                    b.Property<long?>("WorkspaceDiskAvailableBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("workspace_disk_available_bytes");
+
+                    b.Property<long?>("WorkspaceDiskTotalBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("workspace_disk_total_bytes");
+
+                    b.Property<string>("WorkspaceId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("workspace_id");
+
+                    b.HasKey("VmId", "Generation", "Minute");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("WorkspaceId", "VmId");
+
+                    b.ToTable("development_workspace_vm_resource_samples", (string)null);
+                });
+
             modelBuilder.Entity("Minicloud.Common.Models.Domain", b =>
                 {
                     b.Property<string>("Id")
@@ -5253,6 +5309,16 @@ namespace Minicloud.Common.Migrations
                         .HasForeignKey("OrganizationId", "WorkspaceId")
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Minicloud.Common.Models.DevelopmentWorkspaceVmResourceSample", b =>
+                {
+                    b.HasOne("Minicloud.Common.Models.DevelopmentWorkspaceVm", null)
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId", "VmId")
+                        .HasPrincipalKey("WorkspaceId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

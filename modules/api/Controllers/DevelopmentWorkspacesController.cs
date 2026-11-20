@@ -51,6 +51,16 @@ public sealed class DevelopmentWorkspacesController(
             : Results.Ok(workspace.Vms.Select(workspaces.ToVmResponse));
     }
 
+    // Reads stored last-hour history only; never contacts the VM.
+    [HttpGet("{id}/vms/{vmId}/resource-history")]
+    public async Task<IResult> ResourceHistory(string id, string vmId, [FromQuery] string organizationId, CancellationToken ct)
+    {
+        if (!await CanAsync(organizationId, OrganizationAction.ReadApps, ct)) return EndpointResults.Forbidden();
+        Response.Headers.CacheControl = "no-store";
+        try { return Results.Ok(await workspaces.GetResourceHistoryAsync(id, organizationId, vmId, ct)); }
+        catch (DevelopmentWorkspaceException error) { return Error(error); }
+    }
+
     [HttpPost]
     public async Task<IResult> Create([FromBody] CreateDevelopmentWorkspaceRequest request, CancellationToken ct)
     {

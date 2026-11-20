@@ -48,6 +48,22 @@ public sealed class DevelopmentWorkspaceDeletionPostgresTests
             await fixture.VerifyDeletionFencingAsync();
         });
 
+    [Theory]
+    [InlineData("upsert")]
+    [InlineData("read")]
+    [InlineData("prune")]
+    public Task ResourceHistoryUpsertReadAndPruneWorkOnPostgres(string scenario) =>
+        WithPostgres(async fixture =>
+        {
+            await fixture.ApplyDeletionIdentityMigrationAsync();
+            await (scenario switch
+            {
+                "upsert" => fixture.HeartbeatRecordsNewestSamplePerMinuteIdempotentlyAndPreservesUnknownMetrics(),
+                "read" => fixture.HistoryReadIsScopedBoundedOrderedAndLimitedToTheCurrentGeneration(),
+                _ => fixture.ExpiredHistoryIsPrunedInBatchesWhileVmsAreStopped()
+            });
+        });
+
     private static async Task WithPostgres(Func<DevelopmentWorkspaceProcessorTests, Task> test)
     {
         var name = "mc-workspace-deletion-" + Guid.NewGuid().ToString("N");

@@ -74,6 +74,26 @@ belong to one VM generation, and never start compute. `filesystems[]` reports
 `diskUsageSupported` and `directoryDeletionSupported` reflect the image's
 advertised capabilities.
 
+`GET /api/development-workspaces/{id}/vms/{vmId}/resource-history?organizationId={id}`
+returns the last hour of that VM's samples for workspace readers (`apps:read`).
+It reads only stored control-plane data and never contacts the VM. The response
+is `{ "vmId", "generation", "windowStart", "windowEnd", "samples": [...] }`, with
+`Cache-Control: no-store`. `samples` holds at most 60 entries in ascending order:
+`minute` (UTC minute), `observedAt`, `cpuUtilizationPercent`, `memoryUsedBytes`,
+`memoryTotalBytes`, `workspaceDiskUsedBytes` and `workspaceDiskTotalBytes`. Any
+metric may be `null` when the reading was unavailable.
+
+- Collection: the worker records at most one sample per VM generation per minute
+  (the newest observation wins) from its verified status heartbeats, so collection
+  continues without dashboard viewers.
+- Generation: only samples from the VM's current `generation` are returned, so a
+  restarted VM starts with an empty chart. A stopped VM keeps returning its last
+  hour until the samples expire.
+- Retention: samples expire after two hours and are deleted in bounded batches.
+- Cleanup: history is deleted when the workspace is deleted or a temporary VM is
+  discarded.
+- Errors: an unknown VM, or a VM in another workspace, returns `404`.
+
 Folder sizes are measured only on request. All folder endpoints require
 organization app-write permission (`apps:write` for API keys), a running and ready
 VM with the matching `generation`, an image that advertises the capability, and an
