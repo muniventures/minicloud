@@ -1671,9 +1671,9 @@ namespace Selfrun.Common.Migrations
 
                     b.HasIndex("DeploymentId");
 
-                    b.HasIndex("EnvironmentId")
+                    b.HasIndex("EnvironmentId", "Kind")
                         .IsUnique()
-                        .HasDatabaseName("ux_environment_power_operations_active")
+                        .HasDatabaseName("ux_environment_power_operations_active_kind")
                         .HasFilter("status NOT IN ('completed', 'failed', 'cancelled')");
 
                     b.HasIndex("OrganizationId", "EnvironmentId");

@@ -9,6 +9,11 @@ API routes and identity aliases. Clients and server must be updated together.
 - `/api/apps/{applicationId}/environments` lists/creates its environments.
 - `/api/apps/{applicationId}/environments/{environmentId}` reads/updates/deletes
   one environment, with ownership and lifecycle checks.
+- The environment response includes its sleep policy and power state. The same
+  route accepts revision-checked `sleep.policy` updates; manual operations use
+  `POST /api/apps/{applicationId}/environments/{environmentId}/sleep` and
+  `/wake`. Policy changes require `apps:write`; sleep and wake require
+  `deployments:create`.
 - `/api/environments/{environmentId}` returns the runtime descriptor used by
   operational clients. Its telemetry, logs, storage and image actions use the
   same explicit environment identity. Plan and preview actions also target this
@@ -53,6 +58,50 @@ rows, `rejected` counts records from sources not allowed for the deployment, and
 `lastAcceptedCursorBySource` acknowledges the last eligible cursor in request
 order for each source, including duplicates. An invalid request fails validation
 as a whole.
+
+## Environment sleep
+
+`GET /api/apps/{applicationId}/environments/{environmentId}` includes `sleep`:
+the `policy` (`sleepAfterMinutes`, `httpTrafficIsActivity`, and `revision`),
+power `state`, activity timestamps, `sleepsAt`, eligibility, derived
+`addressMode`, retained-address and snapshot summaries, the latest power
+`operation`, and any `lastError`.
+
+PATCH accepts a nested policy with the current revision:
+
+```json
+{
+  "sleep": {
+    "policy": {
+      "enabled": true,
+      "sleepAfterMinutes": 120,
+      "httpTrafficIsActivity": true,
+      "revision": 0
+    }
+  }
+}
+```
+
+Omitted policy fields keep their current values. `enabled: false` or
+`sleepAfterMinutes: null` disables sleep. Enabling without a timeout defaults to
+120 minutes on first enable and keeps the existing timeout on later enables.
+Timeouts range from 30 to 43,200 minutes. A stale revision returns
+`409 sleep_policy_revision_conflict`; invalid values return
+`400 sleep_policy_invalid`. In retained address mode, policy enable reserves the
+address before saving the policy, and a failed reservation returns
+`address_reservation_failed`.
+
+`POST .../sleep` requests immediate sleep and returns `202` with the queued
+operation, or `409 environment_sleep_ineligible` / `environment_power_busy`.
+`POST .../wake` accepts an optional `{ "keepAwakeMinutes": 240 }` body (30–1,440
+minutes). It returns `202` with the wake operation, or `200` with the sleep
+state after recording keep-awake activity when the environment is already
+awake. A wake request joining a queued/running wake returns that operation.
+When sleep is already running, wake is durably queued behind it and returns
+`202`; when sleep is queued but the environment is still awake, the keep-awake
+request prevents that sleep from reaching provider power-off.
+Sleeping or waking environments reject server-dependent operations with
+`environment_asleep` or `environment_waking` and a wake hint.
 
 ## Browser accounts
 

@@ -98,7 +98,8 @@ public sealed record UpdateEnvironmentRequest(
     string? Plan = null,
     string? Database = null,
     bool? SetAsDefault = null,
-    SshAccessRequest? SshAccess = null);
+    SshAccessRequest? SshAccess = null,
+    EnvironmentSleepPatchRequest? Sleep = null);
 
 public sealed record DeleteEnvironmentRequest(string Confirmation);
 public sealed record DeleteApplicationRequest(string Confirmation);
@@ -133,7 +134,8 @@ public sealed record ApplicationEnvironmentResponse(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     EnvironmentSshAccessResponse? SshAccess = null,
-    SshConnectionResponse? SshConnection = null);
+    SshConnectionResponse? SshConnection = null,
+    EnvironmentSleepResponse? Sleep = null);
 
 public sealed record ApplicationResponse(
     string Id,

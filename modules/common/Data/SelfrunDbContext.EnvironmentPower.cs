@@ -44,8 +44,8 @@ public sealed partial class SelfrunDbContext
             entity.Property(x => x.OwnershipToken).IsConcurrencyToken();
             entity.HasOne<SelfrunApp>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.EnvironmentId })
                 .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Cascade);
-            entity.HasIndex(x => x.EnvironmentId).IsUnique().HasFilter($"status NOT IN {terminal}")
-                .HasDatabaseName("ux_environment_power_operations_active");
+            entity.HasIndex(x => new { x.EnvironmentId, x.Kind }).IsUnique().HasFilter($"status NOT IN {terminal}")
+                .HasDatabaseName("ux_environment_power_operations_active_kind");
             entity.HasIndex(x => new { x.Status, x.LeaseExpiresAt, x.UpdatedAt });
             entity.HasIndex(x => x.DeploymentId);
         });

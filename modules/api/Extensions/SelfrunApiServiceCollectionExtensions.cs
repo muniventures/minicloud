@@ -172,6 +172,7 @@ public static class SelfrunApiServiceCollectionExtensions
         services.AddScoped<AppBranchService>();
         services.AddScoped<AppEnvironmentService>();
         services.AddScoped<EnvironmentSshAccessService>();
+        services.AddScoped<EnvironmentSleepPolicyService>();
         services.AddScoped<AppDeletionService>();
         services.AddScoped<DeploymentOrchestrator>();
         services.AddScoped<IAppSecretService, AppSecretService>();
