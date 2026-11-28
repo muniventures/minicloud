@@ -190,13 +190,31 @@ public sealed partial class DatabaseOperationProcessor
     public async Task ScheduleBackupsAsync(CancellationToken ct)
     {
         var now = clock.GetUtcNow();
-        var candidates = await db.DatabaseBackupPolicies.Where(x => (x.Enabled && x.NextDueAt != null && x.NextDueAt <= now) ||
-                (x.EncryptedKeyMaterialJson != null && x.UpdatedAt <= now.AddMinutes(-15)))
-            .OrderBy(x => x.UpdatedAt).Take(50).AsNoTracking().ToListAsync(ct);
+        List<DatabaseBackupPolicy> candidates;
+        if (db.Database.IsSqlite())
+        {
+            candidates = (await db.DatabaseBackupPolicies
+                    .Where(x => x.Enabled || x.EncryptedKeyMaterialJson != null)
+                    .AsNoTracking()
+                    .ToListAsync(ct))
+                .Where(x => (x.Enabled && x.NextDueAt is { } dueAt && dueAt <= now) ||
+                    (x.EncryptedKeyMaterialJson != null && x.UpdatedAt <= now.AddMinutes(-15)))
+                .OrderBy(x => x.UpdatedAt)
+                .Take(50)
+                .ToList();
+        }
+        else
+        {
+            candidates = await db.DatabaseBackupPolicies.Where(x => (x.Enabled && x.NextDueAt != null && x.NextDueAt <= now) ||
+                    (x.EncryptedKeyMaterialJson != null && x.UpdatedAt <= now.AddMinutes(-15)))
+                .OrderBy(x => x.UpdatedAt).Take(50).AsNoTracking().ToListAsync(ct);
+        }
         foreach (var policy in candidates)
         {
             var database = await db.ManagedDatabases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == policy.DatabaseId && x.OrganizationId == policy.OrganizationId, ct);
             if (database is null || await db.DatabaseOperations.AnyAsync(x => x.DatabaseId == database.Id && (x.Status == "queued" || x.Status == "running" || x.Status == "cancelling"), ct)) { continue; }
+            var environmentIds = await BackupEnvironmentIdsAsync(policy, database, ct);
+            if (await IsBackupWorkDeferredAsync(environmentIds, ct)) { continue; }
             var backup = policy.Enabled && database.Status == "ready" && policy.NextDueAt <= now;
             var strategy = db.Database.CreateExecutionStrategy();
             await strategy.ExecuteAsync(async () =>
@@ -204,6 +222,12 @@ public sealed partial class DatabaseOperationProcessor
                 await using var transaction = await db.Database.BeginTransactionAsync(ct);
                 // Scheduling originates new work, so it pauses while maintenance holds the fence.
                 if (!(await maintenanceAuthority.CheckAsync(db, requireOpen: true, ct)).IsAdmitted)
+                {
+                    await transaction.RollbackAsync(ct);
+                    return;
+                }
+                await LockBackupEnvironmentsAsync(environmentIds, ct);
+                if (await IsBackupWorkDeferredAsync(environmentIds, ct))
                 {
                     await transaction.RollbackAsync(ct);
                     return;
@@ -223,6 +247,62 @@ public sealed partial class DatabaseOperationProcessor
             });
         }
     }
+
+    private async Task<string[]> BackupEnvironmentIdsAsync(
+        DatabaseBackupPolicy policy,
+        ManagedDatabase database,
+        CancellationToken ct)
+    {
+        var environmentIds = new HashSet<string>(StringComparer.Ordinal);
+        var sourceAppId = database.AppId ?? database.RecoverySourceAppId;
+        if (sourceAppId is null && database.ServerId is { } serverId)
+        {
+            sourceAppId = await db.ManagedDatabaseServers
+                .Where(x => x.Id == serverId && x.OrganizationId == database.OrganizationId)
+                .Select(x => x.RuntimeAppId)
+                .SingleOrDefaultAsync(ct);
+        }
+
+        if (sourceAppId is not null) { environmentIds.Add(sourceAppId); }
+        if (policy.RepositoryAppId is not null) { environmentIds.Add(policy.RepositoryAppId); }
+
+        var artifactRepositoryIds = await db.DatabaseBackupArtifacts
+            .Where(x => x.DatabaseId == database.Id && x.OrganizationId == database.OrganizationId)
+            .Select(x => x.RepositoryAppId)
+            .Distinct()
+            .ToListAsync(ct);
+        foreach (var repositoryId in artifactRepositoryIds) { environmentIds.Add(repositoryId); }
+
+        return environmentIds.Order(StringComparer.Ordinal).ToArray();
+    }
+
+    private async Task<bool> IsBackupWorkDeferredAsync(IReadOnlyCollection<string> environmentIds, CancellationToken ct)
+    {
+        if (environmentIds.Count == 0) { return false; }
+
+        var environmentNotAwake = await db.EnvironmentSleepSettings.AnyAsync(x =>
+            environmentIds.Contains(x.EnvironmentId) && x.PowerState != EnvironmentPowerStates.Awake, ct);
+        if (environmentNotAwake) { return true; }
+
+        return await db.EnvironmentPowerOperations.AnyAsync(x =>
+            environmentIds.Contains(x.EnvironmentId) &&
+            (x.Status == EnvironmentPowerOperationStatuses.Queued ||
+             x.Status == EnvironmentPowerOperationStatuses.Running ||
+             x.Status == EnvironmentPowerOperationStatuses.Cancelling), ct);
+    }
+
+    private async Task LockBackupEnvironmentsAsync(IReadOnlyCollection<string> environmentIds, CancellationToken ct)
+    {
+        if (!db.Database.IsNpgsql()) { return; }
+
+        foreach (var environmentId in environmentIds)
+        {
+            await db.Apps.FromSqlInterpolated($"SELECT * FROM apps WHERE id = {environmentId} FOR UPDATE")
+                .AsNoTracking()
+                .SingleOrDefaultAsync(ct);
+        }
+    }
+
     private async Task<bool> RestoreBackupAsync(DatabaseOperation operation, ManagedDatabase database, CancellationToken ct)
     {
         var request = JsonSerializer.Deserialize<DatabaseOperationRequest>(operation.RequestJson, Json) ?? throw new InvalidOperationException();
