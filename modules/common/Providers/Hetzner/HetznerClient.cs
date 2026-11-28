@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Selfrun.Common.Providers.Common;
+using Selfrun.Common.Providers.Extensibility;
 using Selfrun.Common.Providers.Models;
 using System.Net.Http;
 
@@ -97,7 +98,10 @@ public sealed partial class HetznerClient : IVpsProviderClient, IVpsProviderSshK
         return MapServerInfo(server);
     }
 
-    public async Task<ProviderServerInfo> CreateServerAsync(CreateServerRequest request, CancellationToken cancellationToken = default)
+    public Task<ProviderServerInfo> CreateServerAsync(CreateServerRequest request, CancellationToken cancellationToken = default) =>
+        CreateServerAsync(request, snapshotId: null, cancellationToken);
+
+    private async Task<ProviderServerInfo> CreateServerAsync(CreateServerRequest request, string? snapshotId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Name);
@@ -109,7 +113,7 @@ public sealed partial class HetznerClient : IVpsProviderClient, IVpsProviderSshK
             Name = request.Name,
             ServerType = request.Plan,
             Location = request.Region,
-            Image = string.IsNullOrWhiteSpace(request.Image) ? "ubuntu-24.04" : request.Image,
+            Image = snapshotId ?? (string.IsNullOrWhiteSpace(request.Image) ? "ubuntu-24.04" : request.Image),
             UserData = request.UserDataCloudInit,
             StartAfterCreate = true,
             Labels = request.Labels != null ? new Dictionary<string, string>(request.Labels) : new Dictionary<string, string>()
@@ -124,6 +128,8 @@ public sealed partial class HetznerClient : IVpsProviderClient, IVpsProviderSshK
         }
 
         using var httpRequest = CreateRequest(HttpMethod.Post, "servers");
+        if (snapshotId is not null)
+            httpRequest.Options.Set(ProviderHttpOptions.NoRetry, true);
         httpRequest.Content = JsonContent.Create(payload);
 
         using var response = await SendAsync(httpRequest, cancellationToken);
