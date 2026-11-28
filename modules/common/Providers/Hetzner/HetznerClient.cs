@@ -104,11 +104,29 @@ public sealed partial class HetznerClient : IVpsProviderClient, IVpsProviderSshK
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Plan);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Region);
 
+        var retainedAddress = request.RetainedAddressId is null
+            ? null
+            : await GetRetainedAddressAsync(request.RetainedAddressId, cancellationToken)
+                ?? throw new ProviderApiException($"Hetzner Primary IP {request.RetainedAddressId} was not found.", provider: Provider);
+        if (retainedAddress is not null && string.IsNullOrWhiteSpace(retainedAddress.Datacenter))
+            throw new ProviderApiException($"Hetzner Primary IP {retainedAddress.Id} has no datacenter.", provider: Provider);
+        long retainedAddressNumericId = 0;
+        if (retainedAddress is not null &&
+            !long.TryParse(retainedAddress.Id, NumberStyles.None, CultureInfo.InvariantCulture, out retainedAddressNumericId))
+            throw new ProviderApiException($"Hetzner Primary IP {retainedAddress.Id} has an invalid ID.", provider: Provider);
+
         var payload = new HetznerCreateServerPayload
         {
             Name = request.Name,
             ServerType = request.Plan,
-            Location = request.Region,
+            Location = retainedAddress is null ? request.Region : null,
+            Datacenter = retainedAddress?.Datacenter,
+            PublicNet = retainedAddress is null
+                ? null
+                : new HetznerCreateServerPublicNet
+                {
+                    Ipv4 = retainedAddressNumericId
+                },
             Image = string.IsNullOrWhiteSpace(request.Image) ? "ubuntu-24.04" : request.Image,
             UserData = request.UserDataCloudInit,
             StartAfterCreate = true,
@@ -242,7 +260,16 @@ public sealed partial class HetznerClient : IVpsProviderClient, IVpsProviderSshK
         public string ServerType { get; set; } = string.Empty;
 
         [JsonPropertyName("location")]
-        public string Location { get; set; } = string.Empty;
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Location { get; set; }
+
+        [JsonPropertyName("datacenter")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Datacenter { get; set; }
+
+        [JsonPropertyName("public_net")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public HetznerCreateServerPublicNet? PublicNet { get; set; }
 
         [JsonPropertyName("image")]
         public string Image { get; set; } = string.Empty;
@@ -259,6 +286,12 @@ public sealed partial class HetznerClient : IVpsProviderClient, IVpsProviderSshK
         [JsonPropertyName("ssh_keys")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public long[]? SshKeys { get; set; }
+    }
+
+    private sealed class HetznerCreateServerPublicNet
+    {
+        [JsonPropertyName("ipv4")]
+        public long Ipv4 { get; set; }
     }
 
     private sealed class HetznerCreateSshKeyPayload
@@ -356,6 +389,9 @@ public sealed partial class HetznerClient : IVpsProviderClient, IVpsProviderSshK
 
     private sealed class HetznerIpDto
     {
+        [JsonPropertyName("id")]
+        public long Id { get; set; }
+
         [JsonPropertyName("ip")]
         public string? Ip { get; set; }
     }
