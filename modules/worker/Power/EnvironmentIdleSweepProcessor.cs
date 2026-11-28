@@ -133,6 +133,11 @@ public sealed class EnvironmentIdleSweepProcessor(
             ((operation.DatabaseId != null && db.ManagedDatabases.Any(database =>
                 database.Id == operation.DatabaseId &&
                 (database.AppId == environmentId || database.RecoverySourceAppId == environmentId))) ||
+             (operation.DatabaseId != null &&
+                (db.DatabaseBackupPolicies.Any(policy =>
+                    policy.DatabaseId == operation.DatabaseId && policy.RepositoryAppId == environmentId) ||
+                 db.DatabaseBackupArtifacts.Any(artifact =>
+                    artifact.DatabaseId == operation.DatabaseId && artifact.RepositoryAppId == environmentId))) ||
              (operation.ServerId != null && db.ManagedDatabaseServers.Any(server =>
                 server.Id == operation.ServerId && server.RuntimeAppId == environmentId))), ct);
         if (databaseOperationActive)

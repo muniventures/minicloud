@@ -146,6 +146,48 @@ public sealed class EnvironmentIdleSweepTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Admission_BlocksDatabaseOperationUsingEnvironmentAsBackupRepository()
+    {
+        var repository = await SeedEnvironmentAsync(lastActivity: _clock.GetUtcNow().AddMinutes(-31));
+        await using var db = _harness.CreateDbContext();
+        const string databaseId = "database_repository_operation";
+        db.ManagedDatabases.Add(new ManagedDatabase
+        {
+            Id = databaseId,
+            OrganizationId = repository.OrganizationId,
+            Name = "source",
+            Engine = "postgres",
+            Status = "ready",
+            CreatedAt = _clock.GetUtcNow(),
+            UpdatedAt = _clock.GetUtcNow()
+        });
+        db.DatabaseBackupPolicies.Add(new DatabaseBackupPolicy
+        {
+            Id = "backup_policy_repository_operation",
+            OrganizationId = repository.OrganizationId,
+            DatabaseId = databaseId,
+            Enabled = true,
+            RepositoryAppId = repository.Id,
+            CreatedAt = _clock.GetUtcNow(),
+            UpdatedAt = _clock.GetUtcNow()
+        });
+        db.DatabaseOperations.Add(new DatabaseOperation
+        {
+            Id = "database_operation_repository",
+            OrganizationId = repository.OrganizationId,
+            DatabaseId = databaseId,
+            Kind = "backup",
+            Status = "running",
+            CreatedAt = _clock.GetUtcNow(),
+            UpdatedAt = _clock.GetUtcNow()
+        });
+        await db.SaveChangesAsync();
+
+        Assert.False(await CreateProcessor(db).TryQueueSleepOperationAsync(repository.Id, default));
+        Assert.Empty(await db.EnvironmentPowerOperations.ToListAsync());
+    }
+
+    [Fact]
     public async Task Admission_RechecksChangedTimeoutAndKeepAwakeDeadline()
     {
         var app = await SeedEnvironmentAsync(lastActivity: _clock.GetUtcNow().AddMinutes(-31));
