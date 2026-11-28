@@ -249,13 +249,15 @@ public sealed partial class CliApplication
                 WritePowerProgress(action, lastStep);
             }
 
+            var operationCancelled = currentOperation?.Status is "cancelled" or "canceled";
             if (sleep.State is "sleep_failed" or "wake_failed" ||
-                currentOperation?.Status is "failed" or "canceled")
+                currentOperation?.Status == "failed" ||
+                operationCancelled)
             {
                 var error = sleep.LastError;
                 return WriteEnvironmentPowerFailure(
                     action,
-                    error?.Code ?? (currentOperation?.Status == "canceled" ? "operation_canceled" : $"{action}_failed"),
+                    error?.Code ?? (operationCancelled ? "operation_cancelled" : $"{action}_failed"),
                     error?.Message ?? $"The {action} operation did not complete.");
             }
 

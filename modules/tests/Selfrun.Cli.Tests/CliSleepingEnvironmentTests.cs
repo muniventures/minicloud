@@ -144,6 +144,21 @@ public sealed class CliSleepingEnvironmentTests
     }
 
     [Fact]
+    public async Task Cancelled_sleep_reports_the_terminal_operation_instead_of_polling_forever()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Handler.CancelPowerOperation = true;
+
+        var exitCode = await fixture.Cli.RunAsync(
+            ["environments", "sleep", "staging", "--config", fixture.Config],
+            default);
+
+        Assert.Equal(CliExitCodes.DeploymentFailed, exitCode);
+        Assert.Contains("operation_cancelled", fixture.Console.Errors);
+        Assert.Equal(1, fixture.Handler.PowerPollCount);
+    }
+
+    [Fact]
     public async Task Retained_address_change_warns_to_repoint_custom_domains()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -229,6 +244,7 @@ public sealed class CliSleepingEnvironmentTests
         public JsonDocument? WakeBody { get; private set; }
         public int PowerPollCount => _powerPollCount;
         public bool FailPowerOperation { get; set; }
+        public bool CancelPowerOperation { get; set; }
         public string AddressMode { get; set; } = "dynamic";
         public string Ipv4 { get; set; } = "203.0.113.10";
         public string? PreviousIpv4 { get; set; }
@@ -281,6 +297,8 @@ public sealed class CliSleepingEnvironmentTests
                 _powerPollCount++;
                 if (FailPowerOperation)
                     return Json(HttpStatusCode.OK, EnvironmentSleepResponse("sleep_failed", error: new { code = "snapshot_failed", message = "snapshot creation failed" }));
+                if (CancelPowerOperation)
+                    return Json(HttpStatusCode.OK, EnvironmentSleepResponse("awake", operationStatus: "cancelled"));
 
                 var listState = ListState;
                 if (_powerKind == "sleep" && _powerPollCount <= 2)
@@ -341,12 +359,15 @@ public sealed class CliSleepingEnvironmentTests
         private object EnvironmentSleepResponse(
             string state,
             bool retainedAddress = false,
-            object? error = null)
+            object? error = null,
+            string? operationStatus = null)
         {
             var isPolling = _powerPollCount > 0;
             if (isPolling && state == "sleeping" && _powerPollCount > 2)
                 state = "asleep";
-            var operation = isPolling && state is "sleeping" or "waking"
+            var operation = operationStatus is not null
+                ? Operation(_powerKind ?? "sleep", operationStatus, "completed")
+                : isPolling && state is "sleeping" or "waking"
                 ? Operation(_powerKind ?? "sleep", "running", _powerKind == "wake" ? "restore_server" : _powerPollCount == 1 ? "stop_services" : "create_snapshot")
                 : null;
             return new
