@@ -230,6 +230,30 @@ public sealed class EnvironmentPowerProcessor(
             if (invalid && preCommit && app is not null && settings is not null)
             {
                 var ineligibleAt = clock.GetUtcNow();
+                var wakeCancelledQueuedSleep =
+                    operation.Step is null &&
+                    settings.PowerState == EnvironmentPowerStates.Awake &&
+                    settings.KeepAwakeUntil is { } keepAwakeUntil &&
+                    keepAwakeUntil > ineligibleAt;
+                if (wakeCancelledQueuedSleep)
+                {
+                    operation.Status = EnvironmentPowerOperationStatuses.Cancelled;
+                    operation.Step = "completed";
+                    operation.ErrorCode = null;
+                    operation.ErrorMessage = null;
+                    operation.CompletedAt = ineligibleAt;
+                    operation.OwnershipToken = null;
+                    operation.LeaseExpiresAt = null;
+                    operation.UpdatedAt = ineligibleAt;
+                    settings.LastErrorCode = null;
+                    settings.LastErrorMessage = null;
+                    settings.StateChangedAt = ineligibleAt;
+                    await authority.EnsureCommitAuthorityAsync(db, ct);
+                    await db.SaveChangesAsync(ct);
+                    await transaction.CommitAsync(ct);
+                    return;
+                }
+
                 operation.Step = Rollback;
                 operation.ErrorCode = operation.Status == EnvironmentPowerOperationStatuses.Cancelling
                     ? "environment_power_cancelled"
@@ -327,7 +351,9 @@ public sealed class EnvironmentPowerProcessor(
         if (!await HasConflictingWorkAsync(operation.EnvironmentId, ct))
         {
             var preCommit = operation.Step is null or Quiesce or PowerOff;
-            return !preCommit || operation.Trigger != "idle" || IsIdleDue(operation, settings);
+            return !preCommit ||
+                (settings.KeepAwakeUntil is not { } keepAwake || keepAwake <= clock.GetUtcNow()) &&
+                (operation.Trigger != "idle" || IsIdleDue(operation, settings));
         }
         return false;
     }

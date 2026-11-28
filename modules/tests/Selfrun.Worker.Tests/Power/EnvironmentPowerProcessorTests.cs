@@ -111,6 +111,24 @@ public sealed class EnvironmentPowerProcessorTests
     }
 
     [Fact]
+    public async Task ExplicitWakeCancelsQueuedSleepBeforeQuiescingServices()
+    {
+        await using var fixture = await CreateFixture(retainedAddress: false, priorSnapshot: false);
+        var settings = await fixture.Db.EnvironmentSleepSettings.SingleAsync();
+        settings.KeepAwakeUntil = DateTimeOffset.UtcNow.AddMinutes(45);
+        await fixture.Db.SaveChangesAsync();
+
+        Assert.False(await fixture.Processor.ProcessNextAsync(default));
+
+        var operation = await fixture.Db.EnvironmentPowerOperations.SingleAsync();
+        Assert.Equal(EnvironmentPowerOperationStatuses.Cancelled, operation.Status);
+        Assert.Equal("completed", operation.Step);
+        Assert.Equal(EnvironmentPowerStates.Awake,
+            (await fixture.Db.EnvironmentSleepSettings.SingleAsync()).PowerState);
+        Assert.Empty(fixture.Events);
+    }
+
+    [Fact]
     public async Task RetainedAddressIsVerifiedBeforeDeletingTheServer()
     {
         await using var fixture = await CreateFixture(retainedAddress: true, priorSnapshot: false);
