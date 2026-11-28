@@ -601,9 +601,9 @@ public sealed class EnvironmentPowerProcessor(
         {
             return JsonSerializer.Deserialize<string[]>(json, JsonOptions) ?? [];
         }
-        catch (JsonException)
+        catch (JsonException error)
         {
-            return [];
+            throw new InvalidDataException("Saved deployment SSH key references are malformed.", error);
         }
     }
 

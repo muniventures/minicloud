@@ -92,6 +92,25 @@ public sealed class EnvironmentPowerProcessorTests
     }
 
     [Fact]
+    public async Task MalformedSshPlacementMetadataRollsBackBeforeDeletingServer()
+    {
+        await using var fixture = await CreateFixture(
+            retainedAddress: false, priorSnapshot: false, sshReferences: "[");
+
+        Assert.True(await fixture.Processor.ProcessNextAsync(default));
+
+        var operation = await fixture.Db.EnvironmentPowerOperations.SingleAsync();
+        Assert.Equal(EnvironmentPowerOperationStatuses.Failed, operation.Status);
+        Assert.Equal(EnvironmentPowerStates.Awake,
+            (await fixture.Db.EnvironmentSleepSettings.SingleAsync()).PowerState);
+        Assert.True(fixture.Provider.ServerExists);
+        Assert.True(fixture.Provider.ServerRunning);
+        Assert.DoesNotContain("create_snapshot", fixture.Events);
+        Assert.DoesNotContain("delete_server", fixture.Events);
+        Assert.Contains("start_services", fixture.Events);
+    }
+
+    [Fact]
     public async Task RetainedAddressIsVerifiedBeforeDeletingTheServer()
     {
         await using var fixture = await CreateFixture(retainedAddress: true, priorSnapshot: false);
@@ -132,7 +151,8 @@ public sealed class EnvironmentPowerProcessorTests
         Assert.True(fixture.Provider.ServerExists);
     }
 
-    private static async Task<Fixture> CreateFixture(bool retainedAddress, bool priorSnapshot)
+    private static async Task<Fixture> CreateFixture(
+        bool retainedAddress, bool priorSnapshot, string? sshReferences = null)
     {
         var harness = new WorkerSqliteTestHarness();
         await harness.InitializeAsync();
@@ -220,6 +240,19 @@ public sealed class EnvironmentPowerProcessorTests
                 ApplyStatus = "applied",
                 SslStatus = "ready",
                 TargetIp = "203.0.113.20"
+            });
+        }
+        if (sshReferences is not null)
+        {
+            db.Deployments.Add(new Deployment
+            {
+                Id = "successful-deployment",
+                OrganizationId = organization.Id,
+                AppId = app.Id,
+                Status = DeploymentStatus.Succeeded,
+                SshProviderReferencesJson = sshReferences,
+                CreatedAt = now,
+                UpdatedAt = now
             });
         }
 
