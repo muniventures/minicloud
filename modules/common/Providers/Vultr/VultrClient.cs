@@ -7,13 +7,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Selfrun.Common.Providers.Common;
+using Selfrun.Common.Providers.Extensibility;
 using Selfrun.Common.Providers.Models;
 using System.Net.Http;
 using System.Globalization;
 
 namespace Selfrun.Common.Providers.Vultr;
 
-public sealed class VultrClient : IVpsProviderClient, IVpsProviderSshKeyClient
+public sealed partial class VultrClient : IVpsProviderClient, IVpsProviderSshKeyClient
 {
     private readonly HttpClient _httpClient;
     private readonly VultrOptions _options;
@@ -101,20 +102,24 @@ public sealed class VultrClient : IVpsProviderClient, IVpsProviderSshKeyClient
         return MapInstanceInfo(instance);
     }
 
-    public async Task<ProviderServerInfo> CreateServerAsync(CreateServerRequest request, CancellationToken cancellationToken = default)
+    public Task<ProviderServerInfo> CreateServerAsync(CreateServerRequest request, CancellationToken cancellationToken = default) =>
+        CreateServerAsync(request, snapshotId: null, cancellationToken);
+
+    private async Task<ProviderServerInfo> CreateServerAsync(CreateServerRequest request, string? snapshotId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Name);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Plan);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Region);
 
-        int osId;
-        if (request.Image is not null)
+        int? osId = null;
+        if (snapshotId is null && request.Image is not null)
         {
-            if (!int.TryParse(request.Image, NumberStyles.None, CultureInfo.InvariantCulture, out osId) || osId <= 0)
+            if (!int.TryParse(request.Image, NumberStyles.None, CultureInfo.InvariantCulture, out var imageId) || imageId <= 0)
             { throw new ArgumentException("Vultr image must be a positive numeric OS ID.", nameof(request.Image)); }
+            osId = imageId;
         }
-        else
+        else if (snapshotId is null)
         {
             osId = await ResolveOsIdAsync(cancellationToken);
         }
@@ -131,6 +136,7 @@ public sealed class VultrClient : IVpsProviderClient, IVpsProviderSshKeyClient
             Region = request.Region,
             Plan = request.Plan,
             OsId = osId,
+            SnapshotId = snapshotId,
             Label = request.Name,
             Hostname = request.Hostname ?? request.Name,
             UserData = base64UserData,
@@ -145,6 +151,8 @@ public sealed class VultrClient : IVpsProviderClient, IVpsProviderSshKeyClient
         }
 
         using var httpRequest = CreateRequest(HttpMethod.Post, "instances");
+        if (snapshotId is not null)
+            httpRequest.Options.Set(ProviderHttpOptions.NoRetry, true);
         httpRequest.Content = JsonContent.Create(payload);
 
         using var response = await SendAsync(httpRequest, cancellationToken);
@@ -292,7 +300,12 @@ public sealed class VultrClient : IVpsProviderClient, IVpsProviderSshKeyClient
         public string Plan { get; set; } = string.Empty;
 
         [JsonPropertyName("os_id")]
-        public int OsId { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? OsId { get; set; }
+
+        [JsonPropertyName("snapshot_id")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? SnapshotId { get; set; }
 
         [JsonPropertyName("label")]
         public string Label { get; set; } = string.Empty;
