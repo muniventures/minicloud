@@ -129,6 +129,8 @@ public sealed class DomainsController : ControllerBase
         [FromServices] DeploymentServiceSetService serviceSets,
         [FromServices] DomainBindingService domains,
         [FromServices] CustomDomainRegistrationService registrations,
+        [FromServices] EnvironmentSleepPolicyService sleepPolicy,
+        [FromServices] DeploymentPreparationService preparations,
         CancellationToken cancellationToken,
         [FromQuery] string? applicationId = null,
         [FromQuery] string? environmentId = null)
@@ -149,6 +151,17 @@ public sealed class DomainsController : ControllerBase
         if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), app.Id, OrganizationAction.WriteApps, cancellationToken))
         {
             return EndpointResults.Forbidden();
+        }
+        if (request.Hostname is not null)
+        {
+            try
+            {
+                await sleepPolicy.EnsureAwakeAsync(app.Id, cancellationToken);
+            }
+            catch (EnvironmentSleepException ex)
+            {
+                return EndpointResults.Problem(ex.Code, ex.Message, ex.StatusCode);
+            }
         }
 
         var activeServices = await serviceSets.BuildActiveServicesAsync(db, targetAppId, cancellationToken);
@@ -183,13 +196,43 @@ public sealed class DomainsController : ControllerBase
             ])));
         }
 
-        try
+        if (result.Binding!.Kind == DomainBindingService.KindCustomDomain)
         {
-            await db.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await preparations.LockedAsync(app.Id, async () =>
+                {
+                    await db.Entry(app).ReloadAsync(cancellationToken);
+                    await sleepPolicy.EnsureAwakeAsync(app.Id, cancellationToken);
+                    await sleepPolicy.EnsureRetainedAddressForCustomDomainAsync(app, cancellationToken);
+                    var retained = await db.EnvironmentRetainedAddresses.AsNoTracking()
+                        .SingleOrDefaultAsync(x => x.EnvironmentId == app.Id &&
+                            x.State != EnvironmentRetainedAddressStates.Released, cancellationToken);
+                    if (retained is not null)
+                        result.Binding.TargetIp = retained.Ipv4;
+                    await db.SaveChangesAsync(cancellationToken);
+                    return true;
+                }, cancellationToken);
+            }
+            catch (EnvironmentSleepException ex)
+            {
+                return EndpointResults.Problem(ex.Code, ex.Message, ex.StatusCode);
+            }
+            catch (DbUpdateException)
+            {
+                return EndpointResults.Conflict("domain_hostname_taken", "Domain is already assigned.");
+            }
         }
-        catch (DbUpdateException)
+        else
         {
-            return EndpointResults.Conflict("domain_hostname_taken", "Domain is already assigned.");
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return EndpointResults.Conflict("domain_hostname_taken", "Domain is already assigned.");
+            }
         }
         await audit.AppendAsync(app.OrganizationId, app.Id, AuditEventService.ActorFor(principal.ToActorIdentity()), "domain.created", result.Binding!.Id, cancellationToken);
         return Results.Created($"/api/domains/{result.Binding!.Id}?appId={Uri.EscapeDataString(targetAppId)}", DomainBindingService.ToResponse(result.Binding));
@@ -201,6 +244,7 @@ public sealed class DomainsController : ControllerBase
         [FromServices] SelfrunDbContext db,
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] CustomDomainVerificationService verification,
+        [FromServices] EnvironmentSleepPolicyService sleepPolicy,
         CancellationToken cancellationToken,
         [FromQuery] string? applicationId = null,
         [FromQuery] string? environmentId = null)
@@ -221,6 +265,14 @@ public sealed class DomainsController : ControllerBase
         {
             return EndpointResults.NotFound("domain_not_found", "Domain binding was not found.");
         }
+        try
+        {
+            await sleepPolicy.EnsureAwakeAsync(targetAppId, cancellationToken);
+        }
+        catch (EnvironmentSleepException ex)
+        {
+            return EndpointResults.Problem(ex.Code, ex.Message, ex.StatusCode);
+        }
         await verification.VerifyAsync(binding, cancellationToken);
         return Results.Ok(DomainBindingService.ToResponse(binding));
     }
@@ -234,6 +286,7 @@ public sealed class DomainsController : ControllerBase
         [FromServices] AuditEventService audit,
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] TimeProvider timeProvider,
+        [FromServices] EnvironmentSleepPolicyService sleepPolicy,
         CancellationToken cancellationToken,
         [FromQuery] string? applicationId = null,
         [FromQuery] string? environmentId = null)
@@ -254,6 +307,17 @@ public sealed class DomainsController : ControllerBase
         if (!await authorization.CanAccessAppAsync(principal.ToActorIdentity(), binding.AppId, OrganizationAction.WriteApps, cancellationToken))
         {
             return EndpointResults.Forbidden();
+        }
+        if (request.Disabled is false)
+        {
+            try
+            {
+                await sleepPolicy.EnsureAwakeAsync(binding.AppId, cancellationToken);
+            }
+            catch (EnvironmentSleepException ex)
+            {
+                return EndpointResults.Problem(ex.Code, ex.Message, ex.StatusCode);
+            }
         }
 
         if (request.Disabled is not null)

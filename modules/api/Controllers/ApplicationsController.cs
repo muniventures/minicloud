@@ -504,6 +504,7 @@ public sealed class ApplicationsController : ControllerBase
         [FromServices] SelfrunDbContext db,
         [FromServices] ControlPlaneAuthorization authorization,
         [FromServices] TimeProvider timeProvider,
+        [FromServices] EnvironmentSleepPolicyService sleepPolicy,
         CancellationToken cancellationToken)
     {
         var principal = RequirePrincipal(HttpContext);
@@ -534,8 +535,9 @@ public sealed class ApplicationsController : ControllerBase
         var now = timeProvider.GetUtcNow();
         var observations = await BuildObservationsByEnvIdAsync(db, [env.Id], now, cancellationToken);
         var (lockedIds, sshLockedIds) = await GetEnvironmentLockIdsAsync(db, [env.Id], cancellationToken);
-        return Results.Ok(env.ToResponse(application.Id, observations.GetValueOrDefault(env.Id),
-            lockedIds.Contains(env.Id), sshLockedIds.Contains(env.Id)));
+        var response = env.ToResponse(application.Id, observations.GetValueOrDefault(env.Id),
+            lockedIds.Contains(env.Id), sshLockedIds.Contains(env.Id));
+        return Results.Ok(response with { Sleep = await sleepPolicy.BuildResponseAsync(env.Id, cancellationToken) });
     }
 
     [HttpPatch("{applicationId}/environments/{environmentId}")]
@@ -549,6 +551,7 @@ public sealed class ApplicationsController : ControllerBase
         [FromServices] ProviderCatalogService catalog,
         [FromServices] DeploymentPreparationService preparations,
         [FromServices] EnvironmentSshAccessService sshAccess,
+        [FromServices] EnvironmentSleepPolicyService sleepPolicy,
         [FromServices] TimeProvider timeProvider,
         [FromServices] AuditEventService audit,
         CancellationToken cancellationToken)
@@ -580,7 +583,7 @@ public sealed class ApplicationsController : ControllerBase
 
         try
         {
-            return await preparations.LockedAsync(env.Id, async () =>
+            var response = await preparations.LockedAsync(env.Id, async () =>
             {
                 await db.Entry(env).ReloadAsync(cancellationToken);
                 await db.Entry(application).ReloadAsync(cancellationToken);
@@ -605,6 +608,8 @@ public sealed class ApplicationsController : ControllerBase
                     return EndpointResults.Problem("environment_name_invalid", "Choose a valid environment name.", StatusCodes.Status400BadRequest);
                 if (request.Plan is not null)
                     await catalog.BindAsync(env, request.Plan, cancellationToken);
+                if (request.Sleep is not null)
+                    await sleepPolicy.ApplyPolicyPatchAsync(env, request.Sleep, cancellationToken);
                 var destinationAccountId = env.SelectedPlan?.ProviderAccountId;
                 // LockedAsync saves tracked changes, so rejected updates must discard the plan binding above.
                 if (request.SshAccess is null && env.SshAccessMode != "none" &&
@@ -664,9 +669,17 @@ public sealed class ApplicationsController : ControllerBase
 
                 var observations = await BuildObservationsByEnvIdAsync(db, [env.Id], now, cancellationToken);
                 var (lockedIds, sshLockedIds) = await GetEnvironmentLockIdsAsync(db, [env.Id], cancellationToken);
-                return Results.Ok(env.ToResponse(application.Id, observations.GetValueOrDefault(env.Id),
-                    lockedIds.Contains(env.Id), sshLockedIds.Contains(env.Id)));
+                var result = env.ToResponse(application.Id, observations.GetValueOrDefault(env.Id),
+                    lockedIds.Contains(env.Id), sshLockedIds.Contains(env.Id));
+                if (request.Sleep is not null)
+                    result = result with { Sleep = await sleepPolicy.BuildResponseAsync(env.Id, cancellationToken) };
+                return Results.Ok(result);
             }, cancellationToken);
+            return response;
+        }
+        catch (EnvironmentSleepException ex)
+        {
+            return EndpointResults.Problem(ex.Code, ex.Message, ex.StatusCode);
         }
         catch (AppEnvironmentException ex)
         {
@@ -686,6 +699,99 @@ public sealed class ApplicationsController : ControllerBase
         catch (SecretStoreUnavailableException)
         {
             return EndpointResults.Problem("secret_store_unavailable", "Provider credentials are temporarily unavailable.", StatusCodes.Status503ServiceUnavailable);
+        }
+    }
+
+    [HttpPost("{applicationId}/environments/{environmentId}/sleep")]
+    public async Task<IResult> SleepEnvironment(
+        [FromRoute] string applicationId,
+        [FromRoute] string environmentId,
+        [FromServices] SelfrunDbContext db,
+        [FromServices] ControlPlaneAuthorization authorization,
+        [FromServices] DeploymentPreparationService preparations,
+        [FromServices] EnvironmentSleepPolicyService sleepPolicy,
+        CancellationToken cancellationToken)
+    {
+        var principal = RequirePrincipal(HttpContext);
+        var application = await db.Applications.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == applicationId, cancellationToken);
+        if (application is null)
+            return EndpointResults.NotFound("app_not_found", "Application was not found.");
+        if (!await authorization.CanAccessApplicationAsync(principal.ToActorIdentity(), applicationId,
+                OrganizationAction.CreateDeployments, cancellationToken))
+            return EndpointResults.Forbidden();
+        var env = await db.Apps.SingleOrDefaultAsync(x => x.Id == environmentId &&
+            x.ApplicationId == applicationId && x.EnvironmentKind != EnvironmentKinds.Internal, cancellationToken);
+        if (env is null)
+            return EndpointResults.NotFound("environment_not_found", "Environment was not found in this application.");
+
+        try
+        {
+            var operation = await preparations.LockedAsync(env.Id, async () =>
+            {
+                await db.Entry(env).ReloadAsync(cancellationToken);
+                return await sleepPolicy.RequestSleepAsync(env, principal.ToActorIdentity(), cancellationToken);
+            }, cancellationToken);
+            return Results.Accepted($"/api/apps/{applicationId}/environments/{environmentId}",
+                new EnvironmentPowerOperationAcceptedResponse(EnvironmentSleepPolicyService.ToResponse(operation!)));
+        }
+        catch (EnvironmentSleepException ex)
+        {
+            return EndpointResults.Problem(ex.Code, ex.Message, ex.StatusCode);
+        }
+        catch (DbUpdateException)
+        {
+            return EndpointResults.Conflict("environment_power_busy",
+                "A power operation is already in progress for this environment.");
+        }
+    }
+
+    [HttpPost("{applicationId}/environments/{environmentId}/wake")]
+    public async Task<IResult> WakeEnvironment(
+        [FromRoute] string applicationId,
+        [FromRoute] string environmentId,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)]
+        WakeEnvironmentRequest? request,
+        [FromServices] SelfrunDbContext db,
+        [FromServices] ControlPlaneAuthorization authorization,
+        [FromServices] DeploymentPreparationService preparations,
+        [FromServices] EnvironmentSleepPolicyService sleepPolicy,
+        CancellationToken cancellationToken)
+    {
+        var principal = RequirePrincipal(HttpContext);
+        var application = await db.Applications.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == applicationId, cancellationToken);
+        if (application is null)
+            return EndpointResults.NotFound("app_not_found", "Application was not found.");
+        if (!await authorization.CanAccessApplicationAsync(principal.ToActorIdentity(), applicationId,
+                OrganizationAction.CreateDeployments, cancellationToken))
+            return EndpointResults.Forbidden();
+        var env = await db.Apps.SingleOrDefaultAsync(x => x.Id == environmentId &&
+            x.ApplicationId == applicationId && x.EnvironmentKind != EnvironmentKinds.Internal, cancellationToken);
+        if (env is null)
+            return EndpointResults.NotFound("environment_not_found", "Environment was not found in this application.");
+
+        try
+        {
+            var operation = await preparations.LockedAsync(env.Id, async () =>
+            {
+                await db.Entry(env).ReloadAsync(cancellationToken);
+                return await sleepPolicy.RequestWakeAsync(env, principal.ToActorIdentity(),
+                    request?.KeepAwakeMinutes, cancellationToken);
+            }, cancellationToken);
+            if (operation is null)
+                return Results.Ok(await sleepPolicy.BuildResponseAsync(env.Id, cancellationToken));
+            return Results.Accepted($"/api/apps/{applicationId}/environments/{environmentId}",
+                new EnvironmentPowerOperationAcceptedResponse(EnvironmentSleepPolicyService.ToResponse(operation)));
+        }
+        catch (EnvironmentSleepException ex)
+        {
+            return EndpointResults.Problem(ex.Code, ex.Message, ex.StatusCode);
+        }
+        catch (DbUpdateException)
+        {
+            return EndpointResults.Conflict("environment_power_busy",
+                "A power operation is already in progress for this environment.");
         }
     }
 
