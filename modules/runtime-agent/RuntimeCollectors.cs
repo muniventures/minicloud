@@ -6,10 +6,16 @@ using System.Text.Json;
 
 namespace Selfrun.RuntimeAgent;
 
+internal static class AgentHttpActivityHeaders
+{
+    public const string SelfrunHealthProbe = "X-Selfrun-Health-Probe";
+}
+
 // One instance per agent cycle. Only successful discovery is shared.
 public sealed class RuntimeCollector(AgentConfig config, IProcessRunner processRunner) : IDisposable
 {
     private JsonDocument? _containers;
+    private ProcessResult? _caddyJournal;
 
     private async Task<JsonDocument> InspectAsync(CancellationToken cancellationToken)
     {
@@ -89,11 +95,15 @@ public sealed class RuntimeCollector(AgentConfig config, IProcessRunner processR
             CollectDockerStream(service, cursorPrefix, logs.Stdout, "stdout ", now);
             CollectDockerStream(service, cursorPrefix, logs.Stderr, "stderr ", now);
         }
-        var caddyLogs = await RuntimeAgentDiagnostics.RunChildAsync(processRunner, "journalctl", ["-u", "caddy", "--since", "20 seconds ago", "--output", "short-iso", "--no-pager"], cancellationToken);
+        var caddyLogs = await ReadCaddyJournalAsync(cancellationToken);
         if (records.Count < AgentRuntimeLimits.MaxBatchRecords)
         {
             foreach (var line in Lines(caddyLogs.ExitCode == 0 ? caddyLogs.Stdout : caddyLogs.Stderr))
             {
+                if (TryParseCaddyAccessLog(line, out _, out _, out _))
+                {
+                    continue;
+                }
                 if (records.Count >= AgentRuntimeLimits.MaxBatchRecords)
                 {
                     break;
@@ -113,7 +123,116 @@ public sealed class RuntimeCollector(AgentConfig config, IProcessRunner processR
         return result;
     }
 
-    public async Task<RuntimeStatusIngestRequest> CollectStatusAsync(string agentVersion, CancellationToken cancellationToken)
+    private async Task<ProcessResult> ReadCaddyJournalAsync(CancellationToken cancellationToken)
+    {
+        return _caddyJournal ??= await RuntimeAgentDiagnostics.RunChildAsync(processRunner, "journalctl",
+            ["-u", "caddy", "--since", "20 seconds ago", "--output", "short-iso", "--no-pager"], cancellationToken);
+    }
+
+    private static bool TryParseCaddyAccessLog(string line, out string hostname, out DateTimeOffset lastRequestAt, out bool isSelfrunProbe)
+    {
+        hostname = string.Empty;
+        lastRequestAt = default;
+        isSelfrunProbe = false;
+        var jsonStart = line.IndexOf('{');
+        if (jsonStart < 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(line.AsMemory(jsonStart));
+            var root = document.RootElement;
+            if (!root.TryGetProperty("logger", out var logger) ||
+                !string.Equals(logger.GetString(), "http.log.access", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (!root.TryGetProperty("request", out var request) ||
+                !request.TryGetProperty("host", out var hostValue) ||
+                !root.TryGetProperty("ts", out var timestamp) ||
+                !timestamp.TryGetDouble(out var unixSeconds))
+            {
+                return true;
+            }
+
+            var rawHost = hostValue.GetString();
+            if (rawHost is null || !TryConvertUnixSeconds(unixSeconds, out lastRequestAt))
+            {
+                return true;
+            }
+
+            hostname = NormalizeHostname(rawHost) ?? string.Empty;
+            isSelfrunProbe = request.TryGetProperty("headers", out var headers) && IsSelfrunHealthProbe(headers);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return false;
+        }
+    }
+
+    private static string? NormalizeHostname(string hostname)
+    {
+        if (!Uri.TryCreate($"http://{hostname}", UriKind.Absolute, out var uri) ||
+            string.IsNullOrWhiteSpace(uri.Host))
+        {
+            return null;
+        }
+
+        return uri.IdnHost.TrimEnd('.').ToLowerInvariant();
+    }
+
+    private static bool TryConvertUnixSeconds(double seconds, out DateTimeOffset timestamp)
+    {
+        try
+        {
+            timestamp = DateTimeOffset.FromUnixTimeMilliseconds(checked((long)Math.Floor(seconds * 1000)));
+            return true;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            timestamp = default;
+            return false;
+        }
+        catch (OverflowException)
+        {
+            timestamp = default;
+            return false;
+        }
+    }
+
+    private static bool IsSelfrunHealthProbe(JsonElement headers)
+    {
+        if (headers.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        foreach (var header in headers.EnumerateObject())
+        {
+            if (!string.Equals(header.Name, AgentHttpActivityHeaders.SelfrunHealthProbe, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            IEnumerable<string?> values = header.Value.ValueKind == JsonValueKind.Array
+                ? header.Value.EnumerateArray().Select(value => value.ValueKind == JsonValueKind.String ? value.GetString() : null)
+                : [header.Value.ValueKind == JsonValueKind.String ? header.Value.GetString() : null];
+            return values.Any(value => string.Equals(value, "true", StringComparison.OrdinalIgnoreCase));
+        }
+
+        return false;
+    }
+
+    public async Task<RuntimeStatusIngestRequest> CollectStatusAsync(string agentVersion, CancellationToken cancellationToken,
+        IReadOnlyCollection<string>? configuredHostnames = null)
     {
         var containers = await InspectAsync(cancellationToken);
         var statuses = containers.RootElement.EnumerateArray().Select(container =>
@@ -125,8 +244,50 @@ public sealed class RuntimeCollector(AgentConfig config, IProcessRunner processR
                 container.GetProperty("Config").GetProperty("Image").GetString(), container.GetProperty("RestartCount").GetInt32());
         }).ToArray();
         var caddy = await RuntimeAgentDiagnostics.RunChildAsync(processRunner, "systemctl", ["is-active", "caddy"], cancellationToken);
+        IReadOnlyList<RuntimeHttpRequestObservation> httpRequests = configuredHostnames is null
+            ? Array.Empty<RuntimeHttpRequestObservation>()
+            : await CollectHttpRequestsAsync(configuredHostnames, cancellationToken);
         return new RuntimeStatusIngestRequest(agentVersion, DateTimeOffset.UtcNow, config.ComposeProject, statuses,
-            new RuntimeCaddyStatusDto(caddy.ExitCode == 0 && caddy.Stdout.Trim() == "active"));
+            new RuntimeCaddyStatusDto(caddy.ExitCode == 0 && caddy.Stdout.Trim() == "active"), httpRequests);
+    }
+
+    private async Task<IReadOnlyList<RuntimeHttpRequestObservation>> CollectHttpRequestsAsync(
+        IReadOnlyCollection<string> configuredHostnames, CancellationToken cancellationToken)
+    {
+        var allowed = configuredHostnames
+            .Select(NormalizeHostname)
+            .Where(hostname => hostname is not null)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (allowed.Count == 0)
+        {
+            return [];
+        }
+
+        var journal = await ReadCaddyJournalAsync(cancellationToken);
+        if (journal.ExitCode != 0)
+        {
+            return [];
+        }
+
+        var latestByHostname = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in Lines(journal.Stdout))
+        {
+            if (!TryParseCaddyAccessLog(line, out var hostname, out var lastRequestAt, out var isSelfrunProbe) ||
+                isSelfrunProbe || !allowed.Contains(hostname))
+            {
+                continue;
+            }
+
+            if (!latestByHostname.TryGetValue(hostname, out var previous) || lastRequestAt > previous)
+            {
+                latestByHostname[hostname] = lastRequestAt;
+            }
+        }
+
+        return latestByHostname
+            .OrderBy(x => x.Key, StringComparer.Ordinal)
+            .Select(x => new RuntimeHttpRequestObservation(x.Key, x.Value))
+            .ToArray();
     }
 
     public void Dispose() => _containers?.Dispose();
@@ -225,7 +386,10 @@ public sealed record RuntimeStatusIngestRequest(
     DateTimeOffset ObservedAt,
     string ComposeProject,
     IReadOnlyList<RuntimeServiceStatusDto> Services,
-    RuntimeCaddyStatusDto Caddy);
+    RuntimeCaddyStatusDto Caddy,
+    IReadOnlyList<RuntimeHttpRequestObservation>? HttpRequests = null);
+
+public sealed record RuntimeHttpRequestObservation(string Hostname, DateTimeOffset LastRequestAt);
 
 public sealed record RuntimeServiceStatusDto(
     string Name,

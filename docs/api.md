@@ -103,6 +103,19 @@ request prevents that sleep from reaching provider power-off.
 Sleeping or waking environments reject server-dependent operations with
 `environment_asleep` or `environment_waking` and a wake hint.
 
+## HTTP activity observations
+
+`POST /api/runtime/ingest/status` accepts optional `httpRequests` entries
+containing only a configured `hostname` and its `lastRequestAt` timestamp.
+The agent excludes Selfrun health probes and unknown hosts locally; ingestion
+also checks the hostname against the runtime's current configured routes and
+ignores missing observations, observations older than one minute, and future
+observations beyond the five-minute clock-skew allowance. In-skew future times
+are clamped to receipt time. This signal is stored in the environment sleep
+record regardless of `httpTrafficIsActivity`; it updates idle activity only
+when that policy setting is enabled. Request paths, headers, bodies, and client
+addresses are not included.
+
 ## Browser accounts
 
 The dashboard uses credentialed requests only to its configured API origin.

@@ -110,7 +110,7 @@ public sealed class RuntimeController : ControllerBase
 
     [HttpPost("ingest/status")]
     [AllowAnonymous]
-    public async Task<IResult> IngestStatus([FromBody] RuntimeStatusIngestRequest request, [FromServices] SelfrunDbContext db, [FromServices] IRuntimeTokenService runtimeTokens, [FromServices] IIdGenerator ids, [FromServices] TimeProvider timeProvider, CancellationToken cancellationToken)
+    public async Task<IResult> IngestStatus([FromBody] RuntimeStatusIngestRequest request, [FromServices] SelfrunDbContext db, [FromServices] IRuntimeTokenService runtimeTokens, [FromServices] IIdGenerator ids, [FromServices] TimeProvider timeProvider, [FromServices] DeploymentServiceSetService serviceSets, CancellationToken cancellationToken)
     {
         using var measurement = RuntimeIngestionDiagnostics.Start("ingest.status", Request.ContentLength ?? -1, request.Services.Count, cancellationToken);
         try
@@ -127,10 +127,60 @@ public sealed class RuntimeController : ControllerBase
             }
 
             var now = timeProvider.GetUtcNow();
+            if (request.HttpRequests is { Count: > RuntimeIngestionLimits.MaxHttpRequestObservations })
+            {
+                return Results.BadRequest(new ErrorResponse(new ErrorBody("validation_failed", "Runtime status request is invalid.",
+                    [new("httpRequests", $"At most {RuntimeIngestionLimits.MaxHttpRequestObservations} host observations can be ingested per request.")])));
+            }
+
+            var acceptedHttpRequests = Array.Empty<RuntimeHttpRequestObservation>();
+            if (request.HttpRequests is { Count: > 0 })
+            {
+                var configured = await LoadConfiguredRoutesAsync(db, auth.Server, serviceSets, cancellationToken);
+                var allowedHostnames = configured.Bindings.Select(binding => binding.Hostname).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                acceptedHttpRequests = request.HttpRequests
+                    .Where(observation =>
+                        observation is not null &&
+                        !string.IsNullOrWhiteSpace(observation.Hostname) &&
+                        observation.Hostname.Length <= 253 &&
+                        allowedHostnames.Contains(observation.Hostname) &&
+                        observation.LastRequestAt >= now.Subtract(RuntimeIngestionLimits.MaxHttpRequestObservationAge) &&
+                        observation.LastRequestAt <= now.Add(RuntimeIngestionLimits.MaxFutureSkew))
+                    .Select(observation => observation.LastRequestAt > now
+                        ? observation with { LastRequestAt = now }
+                        : observation)
+                    .GroupBy(observation => observation.Hostname, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.MaxBy(observation => observation.LastRequestAt)!)
+                    .ToArray();
+
+                var latestHttpRequestAt = acceptedHttpRequests
+                    .Select(observation => (DateTimeOffset?)observation.LastRequestAt)
+                    .Max();
+                if (latestHttpRequestAt is { } observedAt)
+                {
+                    var sleepSettings = await db.EnvironmentSleepSettings
+                        .SingleOrDefaultAsync(settings => settings.EnvironmentId == auth.Server.AppId, cancellationToken);
+                    if (sleepSettings is not null)
+                    {
+                        if (sleepSettings.LastHttpRequestAt is null || observedAt > sleepSettings.LastHttpRequestAt)
+                        {
+                            sleepSettings.LastHttpRequestAt = observedAt;
+                        }
+
+                        if (sleepSettings.HttpTrafficIsActivity &&
+                            (sleepSettings.LastActivityAt is null || observedAt > sleepSettings.LastActivityAt))
+                        {
+                            sleepSettings.LastActivityAt = observedAt;
+                            sleepSettings.LastActivityKind = "http_request";
+                        }
+                    }
+                }
+            }
+
             auth.Server.AgentVersion = request.AgentVersion ?? auth.Server.AgentVersion;
             auth.Server.LastSeenAt = now;
             auth.Server.UpdatedAt = now;
-            var stored = new StoredRuntimeStatus(request.AgentVersion, request.ObservedAt, request.ComposeProject, request.Services, request.Caddy);
+            var stored = new StoredRuntimeStatus(request.AgentVersion, request.ObservedAt, request.ComposeProject, request.Services, request.Caddy, acceptedHttpRequests);
             db.RuntimeStatusSnapshots.Add(new RuntimeStatusSnapshot
             {
                 Id = ids.NewId("rtstat"),
@@ -173,29 +223,15 @@ public sealed class RuntimeController : ControllerBase
             return EndpointResults.Conflict("deployment_in_progress", "Routing reconciliation waits for the active deployment to finish.");
         }
 
-        var services = await serviceSets.BuildActiveServicesAsync(db, auth.Server.AppId, cancellationToken);
-        var serviceByName = services
-            .Where(x => x.Public)
-            .ToDictionary(x => x.Name, StringComparer.Ordinal);
-        var serviceNames = serviceByName.Keys.ToArray();
-        var bindings = await db.Domains.AsNoTracking()
-            .Where(x =>
-                x.AppId == auth.Server.AppId &&
-                (x.Kind == DomainBindingService.KindSelfrunSubdomain ||
-                    (x.Kind == DomainBindingService.KindCustomDomain && x.DnsStatus == DomainBindingService.DnsVerified &&
-                        db.ServerInstances.Any(s => s.AppId == auth.Server.AppId && s.OrganizationId == auth.Server.OrganizationId &&
-                            s.ProviderAccountId == auth.Server.ProviderAccountId && s.Provider.ToLower() == auth.Server.Provider.ToLower() && s.ProviderServerId == auth.Server.ProviderServerId && s.IpAddress == x.TargetIp))) &&
-                x.Status != DomainBindingService.StatusDisabled &&
-                serviceNames.Contains(x.ServiceName))
-            .OrderBy(x => x.Hostname)
-            .ToListAsync(cancellationToken);
+        var configured = await LoadConfiguredRoutesAsync(db, auth.Server, serviceSets, cancellationToken);
+        var bindings = configured.Bindings;
         var routes = bindings.Select(binding =>
             new RuntimeDesiredRouteResponse(
                 binding.Id,
                 binding.Hostname,
                 "/",
                 binding.ServiceName,
-                serviceByName[binding.ServiceName].Port))
+                configured.PublicServicePorts[binding.ServiceName]))
             .ToArray();
         var version = bindings.Count == 0
             ? DateTimeOffset.UnixEpoch.ToString("O")
@@ -203,6 +239,32 @@ public sealed class RuntimeController : ControllerBase
 
         return Results.Ok(new RuntimeDesiredRoutingResponse(version, auth.Server.AppId, $"selfrun-{auth.Server.App.Slug}", routes));
     }
+
+    private static async Task<RuntimeConfiguredRoutes> LoadConfiguredRoutesAsync(
+        SelfrunDbContext db, RuntimeServer server, DeploymentServiceSetService serviceSets, CancellationToken cancellationToken)
+    {
+        var publicServicePorts = (await serviceSets.BuildActiveServicesAsync(db, server.AppId, cancellationToken))
+            .Where(service => service.Public)
+            .ToDictionary(service => service.Name, service => service.Port, StringComparer.Ordinal);
+        var serviceNames = publicServicePorts.Keys.ToArray();
+        var bindings = await db.Domains.AsNoTracking()
+            .Where(x =>
+                x.AppId == server.AppId &&
+                (x.Kind == DomainBindingService.KindSelfrunSubdomain ||
+                    (x.Kind == DomainBindingService.KindCustomDomain && x.DnsStatus == DomainBindingService.DnsVerified &&
+                        db.ServerInstances.Any(s => s.AppId == server.AppId && s.OrganizationId == server.OrganizationId &&
+                            s.ProviderAccountId == server.ProviderAccountId && s.Provider.ToLower() == server.Provider.ToLower() &&
+                            s.ProviderServerId == server.ProviderServerId && s.IpAddress == x.TargetIp))) &&
+                x.Status != DomainBindingService.StatusDisabled &&
+                serviceNames.Contains(x.ServiceName))
+            .OrderBy(x => x.Hostname)
+            .ToListAsync(cancellationToken);
+        return new RuntimeConfiguredRoutes(bindings, publicServicePorts);
+    }
+
+    private sealed record RuntimeConfiguredRoutes(
+        IReadOnlyList<Domain> Bindings,
+        IReadOnlyDictionary<string, int> PublicServicePorts);
 
     [HttpPost("routing/apply-results")]
     [AllowAnonymous]

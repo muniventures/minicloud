@@ -39,6 +39,9 @@ class RoutingTests(unittest.TestCase):
     def test_validates_before_activation_and_skips_unchanged_reload(self):
         routing.apply(self.config, self.request, self.root, self.run_command)
         self.assertIn('127.0.0.1:18080', self.live.read_text())
+        self.assertIn('log {', self.live.read_text())
+        self.assertIn('output stderr', self.live.read_text())
+        self.assertIn('format json', self.live.read_text())
         self.assertEqual(['caddy', 'systemctl'], [call[0] for call in self.calls])
         self.calls.clear()
         routing.apply(self.config, self.request, self.root, self.run_command)

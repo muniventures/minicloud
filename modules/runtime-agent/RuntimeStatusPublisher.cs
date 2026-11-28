@@ -12,7 +12,8 @@ public sealed class RuntimeStatusPublisher(TimeProvider? timeProvider = null)
     {
         if (_published is not null && _clock.GetElapsedTime(_publishedAt) < RefreshInterval &&
             _published.AgentVersion == status.AgentVersion && _published.ComposeProject == status.ComposeProject &&
-            _published.Caddy == status.Caddy && _published.Services.SequenceEqual(status.Services))
+            _published.Caddy == status.Caddy && _published.Services.SequenceEqual(status.Services) &&
+            (_published.HttpRequests ?? []).SequenceEqual(status.HttpRequests ?? []))
         {
             return;
         }
