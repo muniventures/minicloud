@@ -100,7 +100,8 @@ public sealed class RuntimeCollector(AgentConfig config, IProcessRunner processR
         {
             foreach (var line in Lines(caddyLogs.ExitCode == 0 ? caddyLogs.Stdout : caddyLogs.Stderr))
             {
-                if (TryParseCaddyAccessLog(line, out _, out _, out _))
+                if (line.Contains("http.log.access", StringComparison.Ordinal) ||
+                    TryParseCaddyAccessLog(line, out _, out _, out _))
                 {
                     continue;
                 }

@@ -259,7 +259,8 @@ public sealed class RuntimeAgentTests
             AccessLog(newest, "allowed.example.com", "/health", "192.0.2.45"),
             AccessLog(observedAt, "unknown.example.com", "/unknown", "192.0.2.46"),
             AccessLog(observedAt, "203.0.113.4", "/ip", "192.0.2.47"),
-            AccessLog(observedAt, "allowed.example.com", "/health", "192.0.2.48", probe: true)
+            AccessLog(observedAt, "allowed.example.com", "/health", "192.0.2.48", probe: true),
+            "2026-11-28T14:00:00Z caddy[1]: {\"logger\":\"http.log.access\",\"request\":{\"uri\":\"/malformed?token=secret\",\"remote_ip\":\"192.0.2.49\""
         });
         var config = new AgentConfig("srv", "org", "app_1", "https://api.example", "selfrun-demo", "/missing", "/tmp/token", "/tmp/state");
         var runner = new RecordingProcessRunner(new Dictionary<string, ProcessResult>
@@ -285,6 +286,7 @@ public sealed class RuntimeAgentTests
 
         var logs = await collector.CollectLogsAsync(CancellationToken.None);
         Assert.DoesNotContain(logs, record => record.Message.Contains("http.log.access", StringComparison.Ordinal));
+        Assert.DoesNotContain(logs, record => record.Message.Contains("/malformed?token=secret", StringComparison.Ordinal));
     }
 
     [Theory]
