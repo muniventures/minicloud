@@ -3,6 +3,9 @@ using System.Globalization;
 using Selfrun.Cli.Api;
 using Selfrun.Cli.Config;
 using Selfrun.Common.Contracts;
+using CliEnvironmentPowerOperationResponse = Selfrun.Cli.Api.EnvironmentPowerOperationResponse;
+using CliEnvironmentSleepPolicyPatch = Selfrun.Cli.Api.EnvironmentSleepPolicyPatch;
+using CliEnvironmentSleepResponse = Selfrun.Cli.Api.EnvironmentSleepResponse;
 
 namespace Selfrun.Cli.Commands;
 
@@ -154,7 +157,7 @@ public sealed partial class CliApplication
     private static CliCommandException InvalidDuration(string option, int minimum, int maximum) =>
         new(CliExitCodes.ValidationError, $"{option} must be a duration from {minimum} minutes to {maximum} minutes using m, h, or d (for example 2h).");
 
-    private static EnvironmentSleepPolicyPatch BuildSleepPolicyPatch(long revision, string? sleepAfter, string? trafficActivity)
+    private static CliEnvironmentSleepPolicyPatch BuildSleepPolicyPatch(long revision, string? sleepAfter, string? trafficActivity)
     {
         bool? enabled = null;
         int? sleepAfterMinutes = null;
@@ -180,7 +183,7 @@ public sealed partial class CliApplication
             else
                 throw new CliCommandException(CliExitCodes.ValidationError, "--traffic-activity must be 'on' or 'off'.");
         }
-        return new EnvironmentSleepPolicyPatch(enabled, sleepAfterMinutes, httpTrafficIsActivity, revision);
+        return new CliEnvironmentSleepPolicyPatch(enabled, sleepAfterMinutes, httpTrafficIsActivity, revision);
     }
 
     private async Task<int> RunEnvironmentPowerAsync(
@@ -234,7 +237,7 @@ public sealed partial class CliApplication
         string applicationId,
         ApplicationEnvironmentResponse environment,
         string action,
-        EnvironmentPowerOperationResponse operation,
+        CliEnvironmentPowerOperationResponse operation,
         CancellationToken ct)
     {
         var targetState = action == "sleep" ? "asleep" : "awake";
@@ -309,7 +312,7 @@ public sealed partial class CliApplication
 
     private async Task WriteEnvironmentAddressMessageAsync(
         string environmentId,
-        EnvironmentSleepResponse? sleep,
+        CliEnvironmentSleepResponse? sleep,
         CancellationToken ct)
     {
         if (sleep is null)
