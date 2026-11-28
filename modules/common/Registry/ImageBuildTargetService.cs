@@ -13,7 +13,8 @@ public sealed class ImageBuildTargetService(SelfrunDbContext db, IOptions<Regist
 {
     public async Task<ImageBuildTarget> ResolveAsync(SelfrunApp app, CancellationToken ct)
     {
-        var servers = await db.ServerInstances.AsNoTracking().Where(x => x.AppId == app.Id).ToListAsync(ct);
+        var servers = await db.ServerInstances.AsNoTracking()
+            .Where(x => x.AppId == app.Id && x.Status != ServerInstance.RetiredStatus).ToListAsync(ct);
         var runtimes = await db.RuntimeServers.AsNoTracking().Where(x => x.AppId == app.Id).ToListAsync(ct);
         if (servers.Any(x => x.OrganizationId != app.OrganizationId) || runtimes.Any(x => x.OrganizationId != app.OrganizationId))
         {
@@ -35,7 +36,8 @@ public sealed class ImageBuildTargetService(SelfrunDbContext db, IOptions<Regist
         }
         else
         {
-            if (await db.Deployments.AnyAsync(x => x.AppId == app.Id && x.Status == DeploymentStatus.Succeeded, ct))
+            if (await db.Deployments.AnyAsync(x => x.AppId == app.Id && x.Status == DeploymentStatus.Succeeded, ct) ||
+                await db.ServerInstances.AnyAsync(x => x.AppId == app.Id, ct))
             {
                 throw new RegistryImageValidationException(ImagePublicationErrors.PlatformUnknown, "Existing deployment has no verified server registration.");
             }

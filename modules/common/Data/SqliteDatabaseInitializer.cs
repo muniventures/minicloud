@@ -54,13 +54,16 @@ public static class SqliteDatabaseInitializer
             }
             else if (!actual.SequenceEqual(expected))
             {
-                if (!SqliteHistoricalUpgrade.IsSupported(actual))
+                if (actual.SequenceEqual(expected.Where(entry => !SqliteHistoricalUpgrade.IsEnvironmentPowerTable(entry.TableName))))
+                    await SqliteHistoricalUpgrade.AddEnvironmentPowerAsync(connection, transaction, expected, cancellationToken);
+                else if (SqliteHistoricalUpgrade.IsSupported(actual))
+                    await SqliteHistoricalUpgrade.UpgradeAsync(connection, transaction, reference, actual, expected, cancellationToken);
+                else
                     throw new InvalidOperationException(
                         "SQLite schema is not a recognized upgrade prerequisite or the current EF-created schema; " +
-                        "refusing to upgrade or rebuild existing data. Supported historical prerequisite: " +
-                        "the Selfrun SQLite schema based on source feb8073.");
+                        "refusing to upgrade or rebuild existing data. Supported prerequisites: the SQLite schema " +
+                        "immediately before environment power persistence and the Selfrun SQLite schema based on source feb8073.");
 
-                await SqliteHistoricalUpgrade.UpgradeAsync(connection, transaction, reference, actual, expected, cancellationToken);
                 var upgraded = await ReadSchemaAsync(connection, transaction, cancellationToken);
                 upgraded.RemoveAll(entry => entry.Name == "__EFMigrationsHistory");
                 if (!upgraded.SequenceEqual(expected))
@@ -111,16 +114,16 @@ public static class SqliteDatabaseInitializer
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT type, name, sql FROM sqlite_schema
+            SELECT type, name, sql, tbl_name FROM sqlite_schema
             WHERE name NOT GLOB 'sqlite_*'
             ORDER BY type, name
             """;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var schema = new List<SchemaObject>();
         while (await reader.ReadAsync(cancellationToken))
-            schema.Add(new(reader.GetString(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2)));
+            schema.Add(new(reader.GetString(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetString(3)));
         return schema;
     }
 
-    internal sealed record SchemaObject(string Type, string Name, string? Sql);
+    internal sealed record SchemaObject(string Type, string Name, string? Sql, string TableName);
 }

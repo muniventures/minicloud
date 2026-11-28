@@ -346,7 +346,7 @@ Names may follow repository conventions. Responsibilities must stay separate.
 - `environment_retained_addresses` (at most one live row per environment): `id`, `environment_id`, `organization_id`, `provider`, `provider_account_id`, `provider_address_id`, `ipv4`, `region`, `datacenter`, `previous_ipv4`, `state` (`assigned`, `unassigned`, `releasing`, `released`, `failed`), `created_at`, `released_at`. Unique on (`provider_account_id`, `provider_address_id`) and on live `ipv4` per account.
 - `ServerInstance.Status` gains `retired`. All consumers that read "the environment's server" select the single non-retired record. Audit every `db.ServerInstances` consumer: `FindExistingServerAsync`, `SaveServerInstanceAsync`, `EnsureNewAppAsync`, `DomainBindingService`, `CustomDomainVerificationService`, `DomainDnsReconciler`, `DatabaseBackupProcessor`, `DatabaseOperationProcessor`, `DatabaseNetworkProcessor`, `DatabaseMigrationProcessor`, `DatabasesController`, `ApplicationsController`, `DeploymentsController`, `RuntimeController`, `AppDeletionService/Processor`, `AppSummaryReader`, `SshHostKeyTrust`, provider account/catalog services.
 
-The migration is additive. Existing environments get `power_state = awake` and a disabled policy.
+The migration is additive. Existing environments get `power_state = awake` and a disabled policy. The address-mode cache is unset until derived from the domain configuration. Snapshot and retained-address records remain keyed to the environment ID after environment deletion so cleanup can retry; their provider account references are organization-scoped.
 
 ## Workers
 

@@ -455,8 +455,14 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
         var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
         var servers = await db.ServerInstances
             .AsNoTracking()
-            .Where(s => s.OrganizationId == context.OrganizationId && s.AppId == context.AppId)
+            .Where(s => s.OrganizationId == context.OrganizationId && s.AppId == context.AppId && s.Status != ServerInstance.RetiredStatus)
             .ToListAsync(cancellationToken);
+
+        if (servers.Count == 0 && await db.ServerInstances.AnyAsync(s => s.AppId == context.AppId &&
+                s.Status == ServerInstance.RetiredStatus, cancellationToken))
+        {
+            throw new PipelineStepException(FailureCode, "The app's server has been retired; refusing replacement provisioning.");
+        }
 
         var runtimes = await db.RuntimeServers.AsNoTracking()
             .Where(s => s.OrganizationId == context.OrganizationId && s.AppId == context.AppId)
@@ -479,6 +485,7 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
 
         var identity = identities.FirstOrDefault();
         if (identities.Count == 1 && (await db.ServerInstances.AnyAsync(s =>
+                s.Status != ServerInstance.RetiredStatus &&
                 s.ProviderAccountId == identity.Item1 && s.Provider.ToLower() == identity.Item2 && s.ProviderServerId == identity.Item3 &&
                 (s.OrganizationId != context.OrganizationId || s.AppId != context.AppId), cancellationToken) ||
             await db.RuntimeServers.AnyAsync(s =>
@@ -605,7 +612,8 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
         var instanceId = string.Empty;
         await PipelineDb.ExecuteInTransactionAsync(_scopeFactory, async (db, ct) =>
         {
-            if (await db.ServerInstances.AnyAsync(s => s.ProviderAccountId == context.ProviderAccountId && s.Provider.ToLower() == mapping.Provider.ToString().ToLowerInvariant() &&
+            if (await db.ServerInstances.AnyAsync(s => s.Status != ServerInstance.RetiredStatus &&
+                    s.ProviderAccountId == context.ProviderAccountId && s.Provider.ToLower() == mapping.Provider.ToString().ToLowerInvariant() &&
                     s.ProviderServerId == server.Id && (s.AppId != context.AppId || s.OrganizationId != context.OrganizationId), ct) ||
                 await db.RuntimeServers.AnyAsync(s => s.ProviderAccountId == context.ProviderAccountId && s.Provider.ToLower() == mapping.Provider.ToString().ToLowerInvariant() &&
                     s.ProviderServerId == server.Id && (s.AppId != context.AppId || s.OrganizationId != context.OrganizationId), ct))
@@ -613,7 +621,7 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
                 throw new PipelineStepException(FailureCode, "Provider server belongs to another app; refusing deployment.");
             }
             var servers = await db.ServerInstances
-                .Where(s => s.OrganizationId == context.OrganizationId && s.AppId == context.AppId)
+                .Where(s => s.OrganizationId == context.OrganizationId && s.AppId == context.AppId && s.Status != ServerInstance.RetiredStatus)
                 .ToListAsync(ct);
             var existing = servers
                 .OrderByDescending(s => s.CreatedAt)
@@ -639,6 +647,9 @@ public sealed class ResolveProvisionServerStep : IPipelineStep
             }
             else
             {
+                if (await db.ServerInstances.AnyAsync(s => s.AppId == context.AppId && s.Status == ServerInstance.RetiredStatus, ct))
+                { throw new PipelineStepException(FailureCode, "The app's server has been retired; refusing replacement provisioning."); }
+
                 var created = new ServerInstance
                 {
                     Id = enrollment?.ServerInstanceId ?? Guid.NewGuid().ToString("N"),
