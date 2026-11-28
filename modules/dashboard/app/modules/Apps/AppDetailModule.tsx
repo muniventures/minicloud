@@ -60,13 +60,14 @@ import { AppTelemetryPanel } from "./AppTelemetryPanel";
 import { AppDomains } from "./components/AppDomains";
 import { ManageServiceDomainsDialog } from "./components/ManageServiceDomainsDialog";
 import { AppServiceSecretsDialog } from "./components/AppServiceSecretsDialog";
+import { EnvironmentSleepStatus } from "./components/EnvironmentSleepStatus";
 
 import { ServiceRuntimeStatus } from "./components/ServiceRuntimeStatus";
 import { runtimeFresh } from "./serviceRuntime";
 
 import { EnvironmentScopeHeader } from "./EnvironmentScopeHeader";
 import { appSettingsPath } from "./AppsModule";
-import { deleteEnvironment, getApplication } from "../../api/applicationsApi";
+import { deleteEnvironment, getApplication, getEnvironment } from "../../api/applicationsApi";
 import { appsFixtureApplications, appsFixturesEnabled } from "../../api/applicationsFixtures";
 import type { ApplicationEnvironment, Application } from "../../models/application";
 
@@ -200,13 +201,17 @@ function ScopedAppDetail() {
           if (app.id !== applicationId || app.organizationId !== selectedOrganization.id) {
             throw new Error("Application does not belong to the selected organization.");
           }
+          const detailedEnvironment = await getEnvironment(applicationId, environmentId);
+          if (!live) return;
           const env = app.environments.find((e) => e.id === environmentId);
-          if (!env || env.applicationId !== applicationId || env.organizationId !== selectedOrganization.id) {
+          if (!env || env.applicationId !== applicationId || env.organizationId !== selectedOrganization.id ||
+              detailedEnvironment.id !== environmentId || detailedEnvironment.applicationId !== applicationId ||
+              detailedEnvironment.organizationId !== selectedOrganization.id) {
             setError(`Environment ${environmentId} not found in application ${applicationId}.`);
             return;
           }
           setApplication(app);
-          setSelectedEnvironment(env);
+          setSelectedEnvironment(detailedEnvironment);
           // Only the selected, authorized environment can provide runtime data.
           if (env.id) setResolvedRuntimeAppId(env.id);
           else setError(`Environment ${env.id ?? "<unknown>"} has no resolvable identity.`);
@@ -247,21 +252,27 @@ function ScopedAppDetail() {
     if (!runtimeAppId || !selectedOrganization) return;
     setActionError(null);
     try {
-      const [[nextApp, nextSecretServices], , , nextApplication] = await Promise.all([
+      const [[nextApp, nextSecretServices], , , nextApplication, detailedEnvironment] = await Promise.all([
         loadAppDetail(runtimeAppId),
         refreshDeployments(),
         refreshServices(),
         applicationId ? loadScoping(applicationId) : Promise.resolve(null),
+        applicationId && environmentId ? getEnvironment(applicationId, environmentId) : Promise.resolve(null),
       ]);
       if (currentScope.current !== detailScope) return;
       if (nextApplication) {
         if (nextApplication.id !== applicationId || nextApplication.organizationId !== selectedOrganization.id) {
           throw new Error("Application does not belong to the selected organization.");
         }
-        const nextEnvironment = nextApplication.environments.find(env => env.id === environmentId && env.applicationId === applicationId && env.organizationId === selectedOrganization.id);
-        if (!nextEnvironment) throw new Error("The selected environment is no longer available in this application.");
+        const listedEnvironment = nextApplication.environments.find(env => env.id === environmentId && env.applicationId === applicationId && env.organizationId === selectedOrganization.id);
+        if (!listedEnvironment || !detailedEnvironment ||
+            detailedEnvironment.id !== environmentId ||
+            detailedEnvironment.applicationId !== applicationId ||
+            detailedEnvironment.organizationId !== selectedOrganization.id) {
+          throw new Error("The selected environment is no longer available in this application.");
+        }
         setApplication(nextApplication);
-        setSelectedEnvironment(nextEnvironment);
+        setSelectedEnvironment(detailedEnvironment);
       }
       setApp(nextApp);
       setSecretServices(nextSecretServices);
@@ -523,6 +534,7 @@ function ScopedAppDetail() {
       runtimeFresh(service, observedNow) &&
       service.runtime?.state === "running",
   ).length;
+  const environmentAsleep = selectedEnvironment?.sleep?.state === "asleep";
 
   return (
     <PageScaffold
@@ -558,7 +570,7 @@ function ScopedAppDetail() {
         </p>
       ) : null}
       {deploymentError ? <p role="status" className="text-destructive">{deploymentError}</p> : null}
-      {serviceRefreshError ? (
+      {serviceRefreshError && !environmentAsleep ? (
         <p role="status" className="text-destructive">
           {serviceRefreshError}
         </p>
@@ -621,22 +633,36 @@ function ScopedAppDetail() {
         </TabsContent>
 
         <TabsContent className="space-y-4" value="overview">
+          {application && selectedEnvironment ? (
+            <EnvironmentSleepStatus
+              applicationId={application.id}
+              applicationName={application.name}
+              environment={selectedEnvironment}
+              onRefresh={refreshRecord}
+            />
+          ) : null}
           <div className="grid gap-4 md:grid-cols-3">
             <Card>
               <CardHeader>
                 <CardTitle>Runtime</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
-                <p className="text-muted-foreground">
-                  {runtimeRunningCount}/{services.length} observed running
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {services.some((service) => runtimeFresh(service, observedNow) && service.runtime)
-                    ? "Fresh observation"
-                    : serviceRefreshError
-                      ? "Could not refresh. Showing last observation."
-                      : "No fresh observation"}
-                </p>
+                {environmentAsleep ? (
+                  <p className="text-muted-foreground">Runtime unavailable while asleep.</p>
+                ) : (
+                  <>
+                    <p className="text-muted-foreground">
+                      {runtimeRunningCount}/{services.length} observed running
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {services.some((service) => runtimeFresh(service, observedNow) && service.runtime)
+                        ? "Fresh observation"
+                        : serviceRefreshError
+                          ? "Could not refresh. Showing last observation."
+                          : "No fresh observation"}
+                    </p>
+                  </>
+                )}
               </CardContent>
             </Card>
             <Card>
@@ -745,6 +771,7 @@ function ScopedAppDetail() {
                               <ServiceRuntimeStatus
                                 service={service}
                                 now={observedNow}
+                                unavailable={environmentAsleep}
                               />
                             </TableCell>
                             <TableCell data-label="Address">
@@ -805,7 +832,7 @@ function ScopedAppDetail() {
                 onRefresh={() => refreshServices()}
                 loading={serviceLoading}
               />
-              {serviceRefreshError ? (
+              {serviceRefreshError && !environmentAsleep ? (
                 <p role="status" className="text-sm text-destructive">
                   {serviceRefreshError}
                 </p>
@@ -928,6 +955,7 @@ function ScopedAppDetail() {
                               <ServiceRuntimeStatus
                                 service={service}
                                 now={observedNow}
+                                unavailable={environmentAsleep}
                               />
                             </TableCell>
                             <TableCell

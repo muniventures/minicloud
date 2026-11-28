@@ -47,6 +47,33 @@ export type EnvironmentSshAccess = {
 
 export type SshConnection = { address: string; username: string };
 
+export type EnvironmentSleep = {
+  policy: {
+    sleepAfterMinutes: number | null;
+    httpTrafficIsActivity: boolean;
+    revision: number;
+  };
+  state: "awake" | "sleeping" | "asleep" | "waking" | "sleep_failed" | "wake_failed" | string;
+  stateChangedAt: string;
+  lastActivityAt: string | null;
+  lastHttpRequestAt: string | null;
+  keepAwakeUntil: string | null;
+  sleepsAt: string | null;
+  eligible: boolean;
+  ineligibleReason: string | null;
+  addressMode: "dynamic" | "retained" | string;
+  retainedAddress: { ipv4: string; state: string; previousIpv4: string | null } | null;
+  snapshot: { createdAt: string; sizeGb: number | null; pendingPurge: boolean } | null;
+  operation: {
+    id: string;
+    kind: "sleep" | "wake" | string;
+    status: string;
+    step: string | null;
+    trigger: string;
+  } | null;
+  lastError: { code: string; message: string } | null;
+};
+
 export type ApplicationEnvironment = {
   id: string;
   applicationId: string;
@@ -69,6 +96,7 @@ export type ApplicationEnvironment = {
   updatedAt: string;
   sshAccess?: EnvironmentSshAccess | null;
   sshConnection?: SshConnection | null;
+  sleep?: EnvironmentSleep | null;
 };
 
 export type Application = {

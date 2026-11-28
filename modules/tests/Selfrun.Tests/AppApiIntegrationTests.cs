@@ -14,6 +14,8 @@ using Selfrun.Api.Auth;
 using Selfrun.Common.Data;
 using Selfrun.Common.Contracts;
 using Selfrun.Common.Models;
+using Selfrun.Common.Providers;
+using Selfrun.Common.Providers.Extensibility;
 using Selfrun.Api.Services;
 using Selfrun.Common.Services;
 
@@ -70,6 +72,321 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/api/environments/{main.Id}/branches/{staging.Id}")).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", foreign.ApiKeyToken);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync($"/api/apps/{seed.ApplicationId}/environments/{staging.Id}", new UpdateEnvironmentRequest("other"))).StatusCode);
+    }
+
+    [Fact]
+    public async Task SleepPolicyPatchDefaultsPreservesOmittedValuesAndChecksRevision()
+    {
+        var seed = await SeedAsync("org_sleep_policy", "app_sleep_policy", DateTimeOffset.UtcNow);
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+            var app = await db.Apps.SingleAsync(x => x.Id == seed.AppId);
+            await scope.ServiceProvider.GetRequiredService<ProviderCatalogService>()
+                .BindAsync(app, "p0", default);
+            await db.SaveChangesAsync();
+        }
+
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var url = $"/api/apps/{seed.ApplicationId}/environments/{seed.AppId}";
+        var initialResponse = await client.GetAsync(url);
+        Assert.True(initialResponse.IsSuccessStatusCode, await initialResponse.Content.ReadAsStringAsync());
+        var initial = (await initialResponse.Content.ReadFromJsonAsync<ApplicationEnvironmentResponse>())!;
+        Assert.Null(initial.Sleep!.Policy.SleepAfterMinutes);
+        Assert.True(initial.Sleep.Policy.HttpTrafficIsActivity);
+        Assert.Equal(0, initial.Sleep.Policy.Revision);
+        Assert.Equal("dynamic", initial.Sleep.AddressMode);
+
+        var enabled = await client.PatchAsync(url, JsonContent.Create(new
+        {
+            sleep = new { policy = new { enabled = true, httpTrafficIsActivity = false, revision = 0 } }
+        }));
+        Assert.True(enabled.StatusCode == HttpStatusCode.OK, await enabled.Content.ReadAsStringAsync());
+        var enabledEnvironment = (await enabled.Content.ReadFromJsonAsync<ApplicationEnvironmentResponse>())!;
+        Assert.Equal(120, enabledEnvironment.Sleep!.Policy.SleepAfterMinutes);
+        Assert.False(enabledEnvironment.Sleep.Policy.HttpTrafficIsActivity);
+        Assert.Equal(1, enabledEnvironment.Sleep.Policy.Revision);
+        Assert.Null(enabledEnvironment.Sleep.RetainedAddress);
+
+        var preserved = await client.PatchAsync(url, JsonContent.Create(new
+        {
+            sleep = new { policy = new { httpTrafficIsActivity = true, revision = 1 } }
+        }));
+        Assert.Equal(HttpStatusCode.OK, preserved.StatusCode);
+        var preservedEnvironment = (await preserved.Content.ReadFromJsonAsync<ApplicationEnvironmentResponse>())!;
+        Assert.Equal(120, preservedEnvironment.Sleep!.Policy.SleepAfterMinutes);
+        Assert.True(preservedEnvironment.Sleep.Policy.HttpTrafficIsActivity);
+        Assert.Equal(2, preservedEnvironment.Sleep.Policy.Revision);
+
+        var invalid = await client.PatchAsync(url, JsonContent.Create(new
+        {
+            sleep = new { policy = new { sleepAfterMinutes = 29, revision = 2 } }
+        }));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.Contains("sleep_policy_invalid", await invalid.Content.ReadAsStringAsync());
+
+        var stale = await client.PatchAsync(url, JsonContent.Create(new
+        {
+            sleep = new { policy = new { enabled = false, revision = 1 } }
+        }));
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Contains("sleep_policy_revision_conflict", await stale.Content.ReadAsStringAsync());
+
+        var disabled = await client.PatchAsync(url, JsonContent.Create(new
+        {
+            sleep = new { policy = new { enabled = false, revision = 2 } }
+        }));
+        Assert.Equal(HttpStatusCode.OK, disabled.StatusCode);
+        var disabledEnvironment = (await disabled.Content.ReadFromJsonAsync<ApplicationEnvironmentResponse>())!;
+        Assert.Null(disabledEnvironment.Sleep!.Policy.SleepAfterMinutes);
+        Assert.Equal(3, disabledEnvironment.Sleep.Policy.Revision);
+    }
+
+    [Fact]
+    public async Task SleepAddressModeIsRetainedForCustomDomainsAndDynamicEnableDoesNotReserve()
+    {
+        var seed = await SeedAsync("org_sleep_address", "app_sleep_address", DateTimeOffset.UtcNow);
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+            var app = await db.Apps.SingleAsync(x => x.Id == seed.AppId);
+            await scope.ServiceProvider.GetRequiredService<ProviderCatalogService>()
+                .BindAsync(app, "p0", default);
+            db.Domains.Add(new Domain
+            {
+                Id = "sleep_custom_domain",
+                OrganizationId = seed.OrganizationId,
+                AppId = seed.AppId,
+                ServiceName = "web",
+                Hostname = "custom.example.test",
+                Kind = DomainBindingService.KindCustomDomain,
+                DnsStatus = DomainBindingService.DnsVerified,
+                ApplyStatus = DomainBindingService.ApplyApplied,
+                SslStatus = DomainBindingService.SslReady,
+                Status = DomainBindingService.StatusActive,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var url = $"/api/apps/{seed.ApplicationId}/environments/{seed.AppId}";
+        var retainedResponse = await client.GetAsync(url);
+        Assert.True(retainedResponse.IsSuccessStatusCode, await retainedResponse.Content.ReadAsStringAsync());
+        var retained = (await retainedResponse.Content.ReadFromJsonAsync<ApplicationEnvironmentResponse>())!;
+        Assert.Equal("retained", retained.Sleep!.AddressMode);
+        Assert.Null(retained.Sleep.RetainedAddress);
+        Assert.Null(retained.Sleep.Policy.SleepAfterMinutes);
+
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+            db.Domains.Remove(await db.Domains.SingleAsync(x => x.Id == "sleep_custom_domain"));
+            await db.SaveChangesAsync();
+        }
+        var dynamicEnable = await client.PatchAsync(url, JsonContent.Create(new
+        {
+            sleep = new { policy = new { enabled = true, revision = 0 } }
+        }));
+        Assert.True(dynamicEnable.StatusCode == HttpStatusCode.OK, await dynamicEnable.Content.ReadAsStringAsync());
+        var dynamicEnvironment = (await dynamicEnable.Content.ReadFromJsonAsync<ApplicationEnvironmentResponse>())!;
+        Assert.Equal("dynamic", dynamicEnvironment.Sleep!.AddressMode);
+        Assert.Null(dynamicEnvironment.Sleep.RetainedAddress);
+        Assert.Equal(120, dynamicEnvironment.Sleep.Policy.SleepAfterMinutes);
+        await using var verifyScope = _factory.Services.CreateAsyncScope();
+        Assert.False(await verifyScope.ServiceProvider.GetRequiredService<SelfrunDbContext>()
+            .EnvironmentRetainedAddresses.AnyAsync(x => x.EnvironmentId == seed.AppId));
+    }
+
+    [Fact]
+    public async Task ManualWakeKeepsAwakeEnvironmentAndSleepRequiresDeploymentPermission()
+    {
+        var seed = await SeedAsync("org_sleep_actions", "app_sleep_actions", DateTimeOffset.UtcNow);
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var url = $"/api/apps/{seed.ApplicationId}/environments/{seed.AppId}";
+
+        var awake = await client.PostAsJsonAsync(url + "/wake", new WakeEnvironmentRequest(KeepAwakeMinutes: 45));
+        Assert.True(awake.StatusCode == HttpStatusCode.OK, await awake.Content.ReadAsStringAsync());
+        var awakeEnvironment = (await awake.Content.ReadFromJsonAsync<EnvironmentSleepResponse>())!;
+        Assert.Equal("awake", awakeEnvironment.State);
+        Assert.NotNull(awakeEnvironment.KeepAwakeUntil);
+        Assert.Null(awakeEnvironment.Operation);
+        var invalidWake = await client.PostAsJsonAsync(url + "/wake", new WakeEnvironmentRequest(KeepAwakeMinutes: 29));
+        Assert.Equal(HttpStatusCode.BadRequest, invalidWake.StatusCode);
+        Assert.Contains("sleep_policy_invalid", await invalidWake.Content.ReadAsStringAsync());
+
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+            var key = await db.ApiKeys.SingleAsync(x => x.OrganizationId == seed.OrganizationId);
+            key.ScopesJson = JsonSerializer.Serialize(new[] { ApiKeyScopes.AppsRead, ApiKeyScopes.AppsWrite });
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync(url + "/sleep", content: null)).StatusCode);
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+            var key = await db.ApiKeys.SingleAsync(x => x.OrganizationId == seed.OrganizationId);
+            key.ScopesJson = JsonSerializer.Serialize(new[]
+            {
+                ApiKeyScopes.AppsRead, ApiKeyScopes.AppsWrite, ApiKeyScopes.DeploymentsCreate
+            });
+            await db.SaveChangesAsync();
+        }
+        var ineligibleSleep = await client.PostAsync(url + "/sleep", content: null);
+        Assert.Equal(HttpStatusCode.Conflict, ineligibleSleep.StatusCode);
+        Assert.Contains("environment_sleep_ineligible", await ineligibleSleep.Content.ReadAsStringAsync());
+
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+            var settings = await db.EnvironmentSleepSettings.SingleAsync(x => x.EnvironmentId == seed.AppId);
+            settings.PowerState = EnvironmentPowerStates.Asleep;
+            await db.SaveChangesAsync();
+        }
+        var missingSnapshotWake = await client.PostAsJsonAsync(url + "/wake", new WakeEnvironmentRequest());
+        Assert.Equal(HttpStatusCode.Conflict, missingSnapshotWake.StatusCode);
+        Assert.Contains("snapshot_failed", await missingSnapshotWake.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task WakeDuringSleepQueuesWakeBehindTheActiveSleepOperation()
+    {
+        var seed = await SeedAsync("org_wake_during_sleep", "app_wake_during_sleep", DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+            db.EnvironmentSleepSettings.Add(new EnvironmentSleepSettings
+            {
+                EnvironmentId = seed.AppId,
+                PowerState = EnvironmentPowerStates.Sleeping,
+                StateChangedAt = now
+            });
+            db.EnvironmentPowerOperations.Add(new EnvironmentPowerOperation
+            {
+                Id = "sleep_operation_during_wake",
+                OrganizationId = seed.OrganizationId,
+                EnvironmentId = seed.AppId,
+                Kind = "sleep",
+                Trigger = "idle",
+                Status = EnvironmentPowerOperationStatuses.Running,
+                Step = "snapshot",
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var response = await client.PostAsJsonAsync(
+            $"/api/apps/{seed.ApplicationId}/environments/{seed.AppId}/wake",
+            new WakeEnvironmentRequest(KeepAwakeMinutes: 45));
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        var accepted = (await response.Content.ReadFromJsonAsync<EnvironmentPowerOperationAcceptedResponse>())!;
+        Assert.Equal("wake", accepted.Operation.Kind);
+        Assert.Equal(EnvironmentPowerOperationStatuses.Queued, accepted.Operation.Status);
+
+        await using var verifyScope = _factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+        var activeOperations = await verifyDb.EnvironmentPowerOperations
+            .Where(x => x.EnvironmentId == seed.AppId &&
+                x.Status != EnvironmentPowerOperationStatuses.Completed &&
+                x.Status != EnvironmentPowerOperationStatuses.Failed &&
+                x.Status != EnvironmentPowerOperationStatuses.Cancelled)
+            .OrderBy(x => x.Kind)
+            .ToListAsync();
+        Assert.Equal(["sleep", "wake"], activeOperations.Select(x => x.Kind));
+    }
+
+    [Fact]
+    public async Task WakeDuringQueuedSleepKeepsAwakeAndDefersSleepCancellationToWorker()
+    {
+        var seed = await SeedAsync("org_wake_before_sleep_claim", "app_wake_before_sleep_claim", DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+            db.EnvironmentSleepSettings.Add(new EnvironmentSleepSettings
+            {
+                EnvironmentId = seed.AppId,
+                PowerState = EnvironmentPowerStates.Awake,
+                StateChangedAt = now
+            });
+            db.EnvironmentPowerOperations.Add(new EnvironmentPowerOperation
+            {
+                Id = "queued_sleep_before_wake",
+                OrganizationId = seed.OrganizationId,
+                EnvironmentId = seed.AppId,
+                Kind = "sleep",
+                Trigger = "idle",
+                Status = EnvironmentPowerOperationStatuses.Queued,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var response = await client.PostAsJsonAsync(
+            $"/api/apps/{seed.ApplicationId}/environments/{seed.AppId}/wake",
+            new WakeEnvironmentRequest(KeepAwakeMinutes: 45));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var environment = (await response.Content.ReadFromJsonAsync<EnvironmentSleepResponse>())!;
+        Assert.Equal(EnvironmentPowerStates.Awake, environment.State);
+        Assert.True(environment.KeepAwakeUntil > now);
+        Assert.Null(environment.Operation);
+        await using var verifyScope = _factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+        Assert.Equal(EnvironmentPowerOperationStatuses.Queued,
+            (await verifyDb.EnvironmentPowerOperations.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task AsleepCustomDomainVerificationReturnsWakeHintConflict()
+    {
+        var seed = await SeedAsync("org_sleep_guard", "app_sleep_guard", DateTimeOffset.UtcNow);
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+            db.EnvironmentSleepSettings.Add(new EnvironmentSleepSettings
+            {
+                EnvironmentId = seed.AppId,
+                PowerState = EnvironmentPowerStates.Asleep,
+                StateChangedAt = DateTimeOffset.UtcNow
+            });
+            db.Domains.Add(new Domain
+            {
+                Id = "sleep_guard_domain",
+                OrganizationId = seed.OrganizationId,
+                AppId = seed.AppId,
+                ServiceName = "web",
+                Hostname = "custom.example.test",
+                Kind = DomainBindingService.KindCustomDomain,
+                VerificationToken = "synthetic-token",
+                DnsStatus = DomainBindingService.DnsPending,
+                ApplyStatus = DomainBindingService.ApplyPending,
+                SslStatus = DomainBindingService.SslPending,
+                Status = DomainBindingService.StatusPendingDns,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var response = await client.PostAsync($"/api/domains/sleep_guard_domain/verify?appId={seed.AppId}", content: null);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Contains("environment_asleep", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -1036,8 +1353,58 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
                 services.UseSharedSqliteConnection(connection);
                 services.RemoveAll<ISecretStore>();
                 services.AddSingleton<ISecretStore, FixtureSecretStore>();
+                services.RemoveAll<IVpsProviderRegistry>();
+                services.AddSingleton<IVpsProviderRegistry, SnapshotTestProviderRegistry>();
             });
         }
+    }
+
+    private sealed class SnapshotTestProviderRegistry : IVpsProviderRegistry
+    {
+        private readonly IVpsProviderRegistry _inner = VpsProviderRegistry.CreateDefault();
+
+        public IReadOnlyList<ProviderDescriptor> GetAll() => _inner.GetAll();
+        public IReadOnlyList<ProviderDescriptor> GetSupported() => _inner.GetSupported();
+        public bool TryGet(CloudProvider provider, out IVpsProviderRegistration registration)
+        {
+            if (_inner.TryGet(provider, out var inner))
+            {
+                registration = new SnapshotTestProviderRegistration(inner);
+                return true;
+            }
+            registration = null!;
+            return false;
+        }
+        public bool TryGetByWireType(string wireType, out IVpsProviderRegistration registration)
+        {
+            if (_inner.TryGetByWireType(wireType, out var inner))
+            {
+                registration = new SnapshotTestProviderRegistration(inner);
+                return true;
+            }
+            registration = null!;
+            return false;
+        }
+        public bool IsSupported(CloudProvider provider) => _inner.IsSupported(provider);
+        public bool IsSupported(string wireType) => _inner.IsSupported(wireType);
+        public IVpsProviderRegistration GetRequired(CloudProvider provider) =>
+            new SnapshotTestProviderRegistration(_inner.GetRequired(provider));
+        public IVpsProviderRegistration GetRequiredByWireType(string wireType) =>
+            new SnapshotTestProviderRegistration(_inner.GetRequiredByWireType(wireType));
+        public bool TryParseBuiltIn(string wireType, out CloudProvider provider) =>
+            _inner.TryParseBuiltIn(wireType, out provider);
+        public string GetWireType(CloudProvider provider) => _inner.GetWireType(provider);
+    }
+
+    private sealed class SnapshotTestProviderRegistration(IVpsProviderRegistration inner) : IVpsProviderRegistration
+    {
+        public ProviderDescriptor Descriptor => inner.Descriptor with
+        {
+            Capabilities = inner.Descriptor.Capabilities with { SupportsSnapshots = true }
+        };
+        public IProviderErrorClassifier ErrorClassifier => inner.ErrorClassifier;
+        public bool IsEnabledByOptions => inner.IsEnabledByOptions;
+        public IVpsProviderClient CreateClient(ProviderClientCreationContext context) => inner.CreateClient(context);
     }
 
     private sealed class FixtureSecretStore : ISecretStore

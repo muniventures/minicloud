@@ -23,6 +23,7 @@ import type { ProviderPlan } from "../../api/providersApi";
 import type { ApplicationEnvironment, Application, SshAccessRequest } from "../../models/application";
 import { planDescription, usePlanCatalog } from "../Providers/usePlanCatalog";
 import { EnvironmentSshAccessPanel } from "./components/EnvironmentSshAccessPanel";
+import { EnvironmentSleepSettings } from "./components/EnvironmentSleepSettings";
 import { SshAccessFields } from "./components/SshAccessFields";
 import { buildSshAccessRequest, defaultSshAccessDraft, sshErrorMessage, type SshAccessDraft } from "./sshAccess";
 import { formatAge } from "./AppsModule";
@@ -302,6 +303,7 @@ function EnvironmentRow({
   const [name, setName] = useState(env.name);
   const [editingPlan, setEditingPlan] = useState(false);
   const [plan, setPlan] = useState(env.plan);
+  const [sleepSettingsOpen, setSleepSettingsOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmation, setConfirmation] = useState("");
   const isDefault = app.defaultEnvironmentId === env.id;
@@ -320,6 +322,21 @@ function EnvironmentRow({
           {isDefault ? <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs">Dashboard default</span> : null}
           {env.deletionStatus ? <span className="ml-2"><StatusBadge status={env.deletionStatus === "failed" ? "Deletion failed" : "Deleting"} /></span> : null}
           {env.deletionError ? <p role="alert" className="text-xs text-destructive">{env.deletionError}</p> : null}
+          <details className="min-w-0 pt-1" onToggle={(event) => setSleepSettingsOpen(event.currentTarget.open)}>
+            <summary className="w-fit cursor-pointer rounded-sm text-sm text-primary underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              Sleep settings
+            </summary>
+            {sleepSettingsOpen ? (
+              <div className="min-w-0 pt-2">
+                <EnvironmentSleepSettings
+                  applicationId={app.id}
+                  environment={env}
+                  canManage={canEdit}
+                  onSaved={async () => onReload()}
+                />
+              </div>
+            ) : null}
+          </details>
           {renaming ? (
             <div className="flex max-w-64 flex-wrap items-center gap-2 pt-1">
               <Input

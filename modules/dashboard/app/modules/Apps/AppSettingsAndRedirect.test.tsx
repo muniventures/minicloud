@@ -8,6 +8,7 @@ import {
   deleteApplication,
   deleteEnvironment,
   getApplication,
+  getEnvironment,
   updateApplication,
   updateEnvironment,
 } from "../../api/applicationsApi";
@@ -17,6 +18,7 @@ import { ApiError } from "../../models/controlPlane";
 
 vi.mock("../../api/applicationsApi", () => ({
   getApplication: vi.fn(),
+  getEnvironment: vi.fn(),
   updateApplication: vi.fn(),
   createEnvironment: vi.fn(),
   updateEnvironment: vi.fn(),
@@ -103,6 +105,11 @@ describe("AppLandingRedirect & AppSettingsModule", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authState.organization = { id: "org_1", name: "Org", role: "owner" };
+    vi.mocked(getEnvironment).mockImplementation(async (_applicationId, environmentId) => {
+      const environment = sampleApplication().environments.find(item => item.id === environmentId);
+      if (!environment) throw new Error("Environment not found.");
+      return environment;
+    });
     vi.mocked(listPlans).mockResolvedValue([
       {
         id: "plan_1",

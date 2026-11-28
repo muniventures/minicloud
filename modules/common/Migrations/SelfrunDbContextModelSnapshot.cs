@@ -1590,6 +1590,361 @@ namespace Selfrun.Common.Migrations
                     b.ToTable("domains", (string)null);
                 });
 
+            modelBuilder.Entity("Selfrun.Common.Models.EnvironmentPowerOperation", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ActorJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("actor_json");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempt_count");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DeploymentId")
+                        .HasColumnType("text")
+                        .HasColumnName("deployment_id");
+
+                    b.Property<string>("EnvironmentId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("environment_id");
+
+                    b.Property<string>("ErrorCode")
+                        .HasColumnType("text")
+                        .HasColumnName("error_code");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text")
+                        .HasColumnName("error_message");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kind");
+
+                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_expires_at");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("OwnershipToken")
+                        .IsConcurrencyToken()
+                        .HasColumnType("text")
+                        .HasColumnName("ownership_token");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<string>("Step")
+                        .HasColumnType("text")
+                        .HasColumnName("step");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("trigger");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeploymentId");
+
+                    b.HasIndex("EnvironmentId", "Kind")
+                        .IsUnique()
+                        .HasDatabaseName("ux_environment_power_operations_active_kind")
+                        .HasFilter("status NOT IN ('completed', 'failed', 'cancelled')");
+
+                    b.HasIndex("OrganizationId", "EnvironmentId");
+
+                    b.HasIndex("Status", "LeaseExpiresAt", "UpdatedAt");
+
+                    b.ToTable("environment_power_operations", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_environment_power_operation_kind", "kind IN ('sleep', 'wake')");
+
+                            t.HasCheckConstraint("ck_environment_power_operation_status", "status IN ('queued', 'running', 'cancelling') OR status IN ('completed', 'failed', 'cancelled')");
+                        });
+                });
+
+            modelBuilder.Entity("Selfrun.Common.Models.EnvironmentRetainedAddress", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Datacenter")
+                        .HasColumnType("text")
+                        .HasColumnName("datacenter");
+
+                    b.Property<string>("EnvironmentId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("environment_id");
+
+                    b.Property<string>("Ipv4")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("ipv4");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("PreviousIpv4")
+                        .HasColumnType("text")
+                        .HasColumnName("previous_ipv4");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("ProviderAccountId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("provider_account_id");
+
+                    b.Property<string>("ProviderAddressId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("provider_address_id");
+
+                    b.Property<string>("Region")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("region");
+
+                    b.Property<DateTimeOffset?>("ReleasedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("released_at");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("state");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EnvironmentId");
+
+                    b.HasIndex("OrganizationId", "ProviderAccountId");
+
+                    b.HasIndex("ProviderAccountId", "Ipv4")
+                        .IsUnique()
+                        .HasDatabaseName("ux_environment_retained_addresses_live_ipv4")
+                        .HasFilter("state <> 'released'");
+
+                    b.HasIndex("ProviderAccountId", "ProviderAddressId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_environment_retained_addresses_provider_id");
+
+                    b.HasIndex(new[] { "EnvironmentId" }, "LiveAddress")
+                        .IsUnique()
+                        .HasDatabaseName("ux_environment_retained_addresses_live")
+                        .HasFilter("state <> 'released'");
+
+                    b.ToTable("environment_retained_addresses", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_environment_retained_address_state", "state IN ('assigned', 'unassigned', 'releasing', 'released', 'failed')");
+                        });
+                });
+
+            modelBuilder.Entity("Selfrun.Common.Models.EnvironmentSleepSettings", b =>
+                {
+                    b.Property<string>("EnvironmentId")
+                        .HasColumnType("text")
+                        .HasColumnName("environment_id");
+
+                    b.Property<string>("AddressMode")
+                        .HasColumnType("text")
+                        .HasColumnName("address_mode");
+
+                    b.Property<bool>("HttpTrafficIsActivity")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("http_traffic_is_activity");
+
+                    b.Property<DateTimeOffset?>("KeepAwakeUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("keep_awake_until");
+
+                    b.Property<DateTimeOffset?>("LastActivityAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_activity_at");
+
+                    b.Property<string>("LastActivityKind")
+                        .HasColumnType("text")
+                        .HasColumnName("last_activity_kind");
+
+                    b.Property<string>("LastErrorCode")
+                        .HasColumnType("text")
+                        .HasColumnName("last_error_code");
+
+                    b.Property<string>("LastErrorMessage")
+                        .HasColumnType("text")
+                        .HasColumnName("last_error_message");
+
+                    b.Property<DateTimeOffset?>("LastHttpRequestAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_http_request_at");
+
+                    b.Property<string>("PowerState")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("awake")
+                        .HasColumnName("power_state");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision");
+
+                    b.Property<int?>("SleepAfterMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("sleep_after_minutes");
+
+                    b.Property<DateTimeOffset>("StateChangedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("state_changed_at");
+
+                    b.HasKey("EnvironmentId");
+
+                    b.ToTable("environment_sleep_settings", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_environment_sleep_address_mode", "address_mode IN ('dynamic', 'retained')");
+
+                            t.HasCheckConstraint("ck_environment_sleep_power_state", "power_state IN ('awake', 'sleeping', 'asleep', 'waking', 'sleep_failed', 'wake_failed')");
+
+                            t.HasCheckConstraint("ck_environment_sleep_timeout", "sleep_after_minutes BETWEEN 30 AND 43200");
+                        });
+                });
+
+            modelBuilder.Entity("Selfrun.Common.Models.EnvironmentSnapshot", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AddressMode")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("address_mode");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Datacenter")
+                        .HasColumnType("text")
+                        .HasColumnName("datacenter");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<string>("EnvironmentId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("environment_id");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("PlacementJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("placement_json");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("ProviderAccountId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("provider_account_id");
+
+                    b.Property<string>("ProviderImageId")
+                        .HasColumnType("text")
+                        .HasColumnName("provider_image_id");
+
+                    b.Property<string>("Region")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("region");
+
+                    b.Property<string>("ServerName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("server_name");
+
+                    b.Property<int?>("SizeGb")
+                        .HasColumnType("integer")
+                        .HasColumnName("size_gb");
+
+                    b.Property<string>("Sku")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("sku");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EnvironmentId");
+
+                    b.HasIndex("OrganizationId", "ProviderAccountId");
+
+                    b.HasIndex(new[] { "EnvironmentId" }, "CurrentSnapshot")
+                        .IsUnique()
+                        .HasDatabaseName("ux_environment_snapshots_current")
+                        .HasFilter("status = 'current'");
+
+                    b.ToTable("environment_snapshots", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_environment_snapshot_address_mode", "address_mode IN ('dynamic', 'retained')");
+
+                            t.HasCheckConstraint("ck_environment_snapshot_current_image", "status <> 'current' OR provider_image_id IS NOT NULL");
+
+                            t.HasCheckConstraint("ck_environment_snapshot_status", "status IN ('creating', 'pending', 'current', 'superseded', 'deleting', 'deleted', 'failed')");
+                        });
+                });
+
             modelBuilder.Entity("Selfrun.Common.Models.GitHubAppConnection", b =>
                 {
                     b.Property<string>("Id")
@@ -4242,6 +4597,45 @@ namespace Selfrun.Common.Migrations
                     b.Navigation("App");
 
                     b.Navigation("Organization");
+                });
+
+            modelBuilder.Entity("Selfrun.Common.Models.EnvironmentPowerOperation", b =>
+                {
+                    b.HasOne("Selfrun.Common.Models.SelfrunApp", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "EnvironmentId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Selfrun.Common.Models.EnvironmentRetainedAddress", b =>
+                {
+                    b.HasOne("Selfrun.Common.Models.ProviderAccount", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProviderAccountId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Selfrun.Common.Models.EnvironmentSleepSettings", b =>
+                {
+                    b.HasOne("Selfrun.Common.Models.SelfrunApp", null)
+                        .WithOne()
+                        .HasForeignKey("Selfrun.Common.Models.EnvironmentSleepSettings", "EnvironmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Selfrun.Common.Models.EnvironmentSnapshot", b =>
+                {
+                    b.HasOne("Selfrun.Common.Models.ProviderAccount", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProviderAccountId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Selfrun.Common.Models.GitHubAppConnection", b =>

@@ -713,7 +713,7 @@ public sealed class ResolveProvisionServerStepTests : IClassFixture<WorkerSqlite
     }
 
     [Fact]
-    public async Task DisabledCatalogAccountReusesItsRegisteredServerDespiteExternalIdInAnotherAccount()
+    public async Task DisabledCatalogAccountReusesItsCurrentServerDespiteRetiredPlacementAndExternalIdInAnotherAccount()
     {
         var context = await SeedCatalogAsync("catalog-reuse");
         var (otherOrg, otherApp) = await _harness.SeedOrgAndAppAsync("catalog-reuse-other");
@@ -728,13 +728,35 @@ public sealed class ResolveProvisionServerStepTests : IClassFixture<WorkerSqlite
                 Region = "nbg1", Status = "active", BootstrapStatus = "ready" },
                 new ServerInstance { Id = "reuse-other-server", AppId = otherApp.Id, OrganizationId = otherOrg.Id,
                     ProviderAccountId = "reuse-other-account", Provider = "hetzner", ProviderServerId = "same-id",
-                    Region = "nbg1", Status = "active", BootstrapStatus = "ready" });
+                    Region = "nbg1", Status = "active", BootstrapStatus = "ready" },
+                new ServerInstance { Id = "reuse-retired-server", AppId = context.AppId, OrganizationId = context.OrganizationId,
+                    ProviderAccountId = context.ProviderAccountId, PlanId = context.PlanId, Provider = "hetzner", ProviderServerId = "retired-other-id",
+                    Region = "nbg1", Status = ServerInstance.RetiredStatus, BootstrapStatus = "ready", CreatedAt = DateTimeOffset.UtcNow });
             await db.SaveChangesAsync();
         }
         var factory = new AccountFactory(new MockVpsProviderClient(findServer: () => throw new Exception("Registered server must not use discovery.")));
         await CatalogStep(factory).ExecuteAsync(context, default);
         Assert.Equal([context.ProviderAccountId!], factory.RequestedAccounts);
         Assert.Equal("127.0.0.1", context.ServerIp);
+        Assert.Equal("reuse-original-server", context.ServerInstanceId);
+    }
+
+    [Fact]
+    public async Task RetiredOnlyPlacementDoesNotAllowOrdinaryProvisioning()
+    {
+        var context = await SeedCatalogAsync("retired-only");
+        await using (var db = _harness.CreateDbContext())
+        {
+            db.ServerInstances.Add(new ServerInstance { Id = "retired-only-server", AppId = context.AppId, OrganizationId = context.OrganizationId,
+                ProviderAccountId = context.ProviderAccountId, PlanId = context.PlanId, Provider = "hetzner", ProviderServerId = "retired-id",
+                Region = "nbg1", Status = ServerInstance.RetiredStatus, BootstrapStatus = "ready" });
+            await db.SaveChangesAsync();
+        }
+
+        var factory = new AccountFactory(new MockVpsProviderClient());
+        var error = await Assert.ThrowsAsync<PipelineStepException>(() => CatalogStep(factory).ExecuteAsync(context, default));
+        Assert.Contains("refusing replacement provisioning", error.Message);
+        Assert.Empty(factory.RequestedAccounts);
     }
 
     [Fact]

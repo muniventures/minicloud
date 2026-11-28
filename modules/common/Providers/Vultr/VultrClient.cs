@@ -7,13 +7,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Selfrun.Common.Providers.Common;
+using Selfrun.Common.Providers.Extensibility;
 using Selfrun.Common.Providers.Models;
 using System.Net.Http;
 using System.Globalization;
 
 namespace Selfrun.Common.Providers.Vultr;
 
-public sealed class VultrClient : IVpsProviderClient, IVpsProviderSshKeyClient
+public sealed partial class VultrClient : IVpsProviderClient, IVpsProviderSshKeyClient
 {
     private readonly HttpClient _httpClient;
     private readonly VultrOptions _options;
@@ -101,24 +102,32 @@ public sealed class VultrClient : IVpsProviderClient, IVpsProviderSshKeyClient
         return MapInstanceInfo(instance);
     }
 
-    public async Task<ProviderServerInfo> CreateServerAsync(CreateServerRequest request, CancellationToken cancellationToken = default)
+    public Task<ProviderServerInfo> CreateServerAsync(CreateServerRequest request, CancellationToken cancellationToken = default) =>
+        CreateServerAsync(request, snapshotId: null, cancellationToken);
+
+    private async Task<ProviderServerInfo> CreateServerAsync(CreateServerRequest request, string? snapshotId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Name);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Plan);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Region);
 
-        int osId;
-        if (request.Image is not null)
+        int? osId = null;
+        if (snapshotId is null && request.Image is not null)
         {
-            if (!int.TryParse(request.Image, NumberStyles.None, CultureInfo.InvariantCulture, out osId) || osId <= 0)
+            if (!int.TryParse(request.Image, NumberStyles.None, CultureInfo.InvariantCulture, out var imageId) || imageId <= 0)
             { throw new ArgumentException("Vultr image must be a positive numeric OS ID.", nameof(request.Image)); }
+            osId = imageId;
         }
-        else
+        else if (snapshotId is null)
         {
             osId = await ResolveOsIdAsync(cancellationToken);
         }
         var base64UserData = Convert.ToBase64String(Encoding.UTF8.GetBytes(request.UserDataCloudInit ?? string.Empty));
+        var retainedAddress = request.RetainedAddressId is null
+            ? null
+            : await GetRetainedAddressAsync(request.RetainedAddressId, cancellationToken)
+                ?? throw new ProviderApiException($"Vultr reserved IP {request.RetainedAddressId} was not found.", provider: Provider);
 
         var tags = new List<string> { "selfrun" };
         if (request.Tags != null)
@@ -131,9 +140,11 @@ public sealed class VultrClient : IVpsProviderClient, IVpsProviderSshKeyClient
             Region = request.Region,
             Plan = request.Plan,
             OsId = osId,
+            SnapshotId = snapshotId,
             Label = request.Name,
             Hostname = request.Hostname ?? request.Name,
             UserData = base64UserData,
+            ReservedIpv4 = retainedAddress?.Id,
             EnableIpv6 = true,
             ActivationEmail = false,
             Tags = tags.Distinct().ToList()
@@ -145,6 +156,8 @@ public sealed class VultrClient : IVpsProviderClient, IVpsProviderSshKeyClient
         }
 
         using var httpRequest = CreateRequest(HttpMethod.Post, "instances");
+        if (snapshotId is not null || request.RetainedAddressId is not null)
+            httpRequest.Options.Set(ProviderHttpOptions.NoRetry, true);
         httpRequest.Content = JsonContent.Create(payload);
 
         using var response = await SendAsync(httpRequest, cancellationToken);
@@ -157,7 +170,10 @@ public sealed class VultrClient : IVpsProviderClient, IVpsProviderSshKeyClient
         }
 
         _logger?.LogInformation("Created Vultr instance {InstanceLabel} with ID {InstanceId}", request.Name, createResponse.Instance.Id);
-        return MapInstanceInfo(createResponse.Instance);
+        var serverInfo = MapInstanceInfo(createResponse.Instance);
+        return retainedAddress is null
+            ? serverInfo
+            : serverInfo with { Ipv4Address = retainedAddress.Ipv4Address };
     }
 
     public async Task<ProviderServerStatus> GetServerStatusAsync(string serverId, CancellationToken cancellationToken = default)
@@ -292,7 +308,12 @@ public sealed class VultrClient : IVpsProviderClient, IVpsProviderSshKeyClient
         public string Plan { get; set; } = string.Empty;
 
         [JsonPropertyName("os_id")]
-        public int OsId { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? OsId { get; set; }
+
+        [JsonPropertyName("snapshot_id")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? SnapshotId { get; set; }
 
         [JsonPropertyName("label")]
         public string Label { get; set; } = string.Empty;
@@ -302,6 +323,10 @@ public sealed class VultrClient : IVpsProviderClient, IVpsProviderSshKeyClient
 
         [JsonPropertyName("user_data")]
         public string UserData { get; set; } = string.Empty;
+
+        [JsonPropertyName("reserved_ipv4")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ReservedIpv4 { get; set; }
 
         [JsonPropertyName("enable_ipv6")]
         public bool EnableIpv6 { get; set; } = true;

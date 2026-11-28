@@ -71,6 +71,7 @@ public sealed partial class SelfrunDbContext(DbContextOptions<SelfrunDbContext> 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ConfigureGitHubApps(modelBuilder);
+        ConfigureEnvironmentPower(modelBuilder);
         modelBuilder.Entity<MaintenanceAuthorityRecord>(entity =>
         {
             entity.ToTable("maintenance_authority", table => table.HasCheckConstraint(

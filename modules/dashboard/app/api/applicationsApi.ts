@@ -2,6 +2,7 @@ import { apiRequest } from "./apiClient";
 import type {
   ApplicationEnvironment,
   Application,
+  EnvironmentSleep,
   SshAccessRequest,
 } from "../models/application";
 import { appsFixtureApplications, appsFixturesEnabled } from "./applicationsFixtures";
@@ -33,6 +34,14 @@ export type UpdateEnvironmentRequest = {
   plan?: string;
   database?: string;
   setAsDefault?: boolean;
+  sleep?: {
+    policy: {
+      enabled?: boolean;
+      sleepAfterMinutes?: number | null;
+      httpTrafficIsActivity?: boolean;
+      revision?: number;
+    };
+  };
   // Omit to preserve the saved selection; explicit selections require expectedRevision.
   sshAccess?: SshAccessRequest & { expectedRevision: number };
 };
@@ -75,6 +84,23 @@ export function getEnvironment(applicationId: string, environmentId: string, sig
 
 export function updateEnvironment(applicationId: string, environmentId: string, request: UpdateEnvironmentRequest) {
   return apiRequest<ApplicationEnvironment>(`/api/apps/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}`, { method: "PATCH", body: request });
+}
+
+export type EnvironmentPowerOperation = NonNullable<EnvironmentSleep["operation"]>;
+export type EnvironmentPowerOperationAccepted = { operation: EnvironmentPowerOperation };
+
+export function sleepEnvironment(applicationId: string, environmentId: string) {
+  return apiRequest<EnvironmentPowerOperationAccepted>(
+    `/api/apps/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}/sleep`,
+    { method: "POST" },
+  );
+}
+
+export function wakeEnvironment(applicationId: string, environmentId: string, keepAwakeMinutes = 240) {
+  return apiRequest<EnvironmentPowerOperationAccepted | EnvironmentSleep>(
+    `/api/apps/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}/wake`,
+    { method: "POST", body: { keepAwakeMinutes } },
+  );
 }
 
 export function deleteEnvironment(applicationId: string, environmentId: string, confirmation: string) {
