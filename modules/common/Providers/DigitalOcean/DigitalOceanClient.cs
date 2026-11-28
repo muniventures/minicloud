@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Selfrun.Common.Providers.Common;
+using Selfrun.Common.Providers.Extensibility;
 using Selfrun.Common.Providers.Models;
 using System.Net.Http;
 
@@ -99,7 +100,10 @@ public sealed partial class DigitalOceanClient : IVpsProviderClient, IVpsProvide
         return MapDropletInfo(droplet);
     }
 
-    public async Task<ProviderServerInfo> CreateServerAsync(CreateServerRequest request, CancellationToken cancellationToken = default)
+    public Task<ProviderServerInfo> CreateServerAsync(CreateServerRequest request, CancellationToken cancellationToken = default) =>
+        CreateServerAsync(request, snapshotId: null, cancellationToken);
+
+    private async Task<ProviderServerInfo> CreateServerAsync(CreateServerRequest request, long? snapshotId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Name);
@@ -117,7 +121,7 @@ public sealed partial class DigitalOceanClient : IVpsProviderClient, IVpsProvide
             Name = request.Name,
             Region = request.Region,
             Size = request.Plan,
-            Image = string.IsNullOrWhiteSpace(request.Image) ? "ubuntu-24-04-x64" : request.Image,
+            Image = snapshotId is long imageId ? imageId : (string.IsNullOrWhiteSpace(request.Image) ? "ubuntu-24-04-x64" : request.Image),
             UserData = request.UserDataCloudInit,
             Tags = tags.Distinct().ToList()
         };
@@ -131,6 +135,8 @@ public sealed partial class DigitalOceanClient : IVpsProviderClient, IVpsProvide
         }
 
         using var httpRequest = CreateRequest(HttpMethod.Post, "droplets");
+        if (snapshotId is not null)
+            httpRequest.Options.Set(ProviderHttpOptions.NoRetry, true);
         httpRequest.Content = JsonContent.Create(payload);
 
         using var response = await SendAsync(httpRequest, cancellationToken);
@@ -315,7 +321,7 @@ public sealed partial class DigitalOceanClient : IVpsProviderClient, IVpsProvide
         public string Size { get; set; } = string.Empty;
 
         [JsonPropertyName("image")]
-        public string Image { get; set; } = string.Empty;
+        public object Image { get; set; } = string.Empty;
 
         [JsonPropertyName("user_data")]
         public string UserData { get; set; } = string.Empty;

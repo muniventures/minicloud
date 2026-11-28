@@ -380,6 +380,8 @@ public sealed class DeploymentArtifact
 
 public sealed class ServerInstance
 {
+    public const string RetiredStatus = "retired";
+
     public string? ProviderAccountId { get; set; }
     public string? PlanId { get; set; }
     public string? Sku { get; set; }

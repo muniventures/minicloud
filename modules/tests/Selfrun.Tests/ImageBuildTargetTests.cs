@@ -53,6 +53,29 @@ public sealed class ImageBuildTargetTests : IAsyncLifetime
         Assert.NotEqual(first.Version, (await Targets().ResolveAsync(_app, default)).Version);
     }
 
+    [Fact]
+    public async Task Retired_server_cannot_supply_a_build_target_or_block_its_replacement()
+    {
+        var retired = Server();
+        retired.Status = ServerInstance.RetiredStatus;
+        retired.BuildPlatform = "linux/amd64";
+        retired.BuildPlatformObservedAt = DateTimeOffset.UtcNow;
+        _db.ServerInstances.Add(retired);
+        await _db.SaveChangesAsync();
+        var targets = Targets(new RegistryOptions { PlannedPlatforms = { ["Hetzner_cx23"] = "linux/amd64" } });
+        await Assert.ThrowsAsync<RegistryImageValidationException>(() => targets.ResolveAsync(_app, default));
+
+        var replacement = Server();
+        replacement.Id = "server-replacement";
+        replacement.ProviderServerId = "replacement";
+        replacement.BuildPlatform = "linux/arm64";
+        replacement.BuildPlatformObservedAt = DateTimeOffset.UtcNow;
+        _db.ServerInstances.Add(replacement);
+        await _db.SaveChangesAsync();
+
+        Assert.Equal("linux/arm64", (await targets.ResolveAsync(_app, default)).Platform);
+    }
+
     [Theory]
     [InlineData(AppPlan.P0D0, "DigitalOcean_s_1vcpu_512mb_10gb", "linux/amd64")]
     [InlineData(AppPlan.P0D1, "DigitalOcean_s_1vcpu_1gb", "linux/amd64")]

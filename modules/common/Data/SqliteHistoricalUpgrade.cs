@@ -15,6 +15,24 @@ internal static class SqliteHistoricalUpgrade
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n',
             schema.Select(entry => $"{entry.Type}\0{entry.Name}\0{entry.Sql}"))))) == SourceFingerprint;
 
+    internal static bool IsEnvironmentPowerTable(string table) => table is
+        "environment_sleep_settings" or "environment_power_operations" or "environment_snapshots" or "environment_retained_addresses";
+
+    internal static async Task AddEnvironmentPowerAsync(SqliteConnection connection, SqliteTransaction transaction,
+        IReadOnlyList<SchemaObject> target, CancellationToken cancellationToken)
+    {
+        foreach (var entry in target.Where(entry => IsEnvironmentPowerTable(entry.TableName)).OrderBy(entry => entry.Type != "table"))
+            await ExecuteAsync(connection, transaction, entry.Sql!, cancellationToken);
+        await BackfillEnvironmentSleepSettingsAsync(connection, transaction, cancellationToken);
+    }
+
+    private static Task BackfillEnvironmentSleepSettingsAsync(SqliteConnection connection, SqliteTransaction transaction,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(connection, transaction, """
+            INSERT INTO environment_sleep_settings (environment_id, revision, state_changed_at)
+            SELECT id, 0, updated_at FROM apps;
+            """, cancellationToken);
+
     internal static async Task<bool> ValidateHistoryAsync(
         SqliteConnection connection, SqliteTransaction transaction, IEnumerable<string> migrations, CancellationToken cancellationToken)
     {
@@ -92,6 +110,7 @@ internal static class SqliteHistoricalUpgrade
                 ["host_key_enrollment_secret"] = "NULL"
             }, [], cancellationToken);
         await ExecuteAsync(connection, transaction, """DROP TABLE "__sqlite_upgrade_numbers";""", cancellationToken);
+        await BackfillEnvironmentSleepSettingsAsync(connection, transaction, cancellationToken);
 
         foreach (var index in target.Where(entry => entry.Type == "index"))
         {

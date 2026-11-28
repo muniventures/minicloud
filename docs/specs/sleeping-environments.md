@@ -307,7 +307,7 @@ Task<ProviderSnapshot> CreateSnapshotAsync(string serverId, string description, 
 Task<ProviderSnapshot?> GetSnapshotAsync(string snapshotId, CancellationToken ct);
 Task<IReadOnlyList<ProviderSnapshot>> ListSnapshotsAsync(IReadOnlyDictionary<string, string> labels, CancellationToken ct);
 Task DeleteSnapshotAsync(string snapshotId, CancellationToken ct);   // 404 = success
-Task<ProviderServerInfo> CreateServerFromSnapshotAsync(CreateServerRequest request, string snapshotId, string retainedAddressId, CancellationToken ct);
+Task<ProviderServerInfo> CreateServerFromSnapshotAsync(CreateServerRequest request, string snapshotId, string? retainedAddressId, CancellationToken ct);
 ```
 
 And an `IVpsProviderAddressClient` capability interface for retained addresses (`SupportsRetainedAddresses`):
@@ -323,8 +323,10 @@ Task ReleaseRetainedAddressAsync(string addressId, CancellationToken ct);       
 | Provider | Notes to qualify against current provider documentation |
 | --- | --- |
 | Hetzner | `POST /servers/{id}/actions/shutdown` / `poweroff`, `POST /servers/{id}/actions/create_image` (`type: snapshot`, labels), poll the action, `GET/DELETE /images/{id}`, create with `image: <id>`. Snapshots are usable across locations in the project. Volumes auto-detach on server delete. Primary IPs: `GET/PUT/DELETE /primary_ips/{id}` (`auto_delete`), create with `public_net.ipv4` and the Primary IP's `datacenter`. |
-| DigitalOcean | Droplet `shutdown`/`power_off` and `snapshot` actions. Snapshot images are regional; restore in the recorded region. Tags instead of labels. Create with `image: <id>`. Reserved IPs: `POST /reserved_ips` (region), `POST /reserved_ips/{ip}/actions` (`assign`/`unassign`), `DELETE /reserved_ips/{ip}`. Confirm inbound traffic to the reserved address reaches Caddy with no in-guest configuration. |
-| Vultr | `POST /instances/{id}/halt`, `POST /snapshots` with `instance_id`, poll status, create instance with `snapshot_id` (not `os_id`). Tag/description for ownership. Reserved IPs: `POST /reserved-ips/convert` (keep current IPv4), create instance with `reserved_ipv4`, `DELETE /reserved-ips/{id}`. |
+| DigitalOcean | Droplet `shutdown`/`power_off` and `snapshot` actions. Snapshot images are regional; restore in the recorded region. Droplet snapshot creation cannot set tags, so ownership labels are encoded in the snapshot name. Create with numeric `image: <id>`. Reserved IPs: `POST /reserved_ips` (region), `POST /reserved_ips/{ip}/actions` (`assign`/`unassign`), `DELETE /reserved_ips/{ip}`. Confirm inbound traffic to the reserved address reaches Caddy with no in-guest configuration. |
+| Vultr | `POST /instances/{id}/halt` (no separate forced-off endpoint), `POST /snapshots` with `instance_id`, poll status, create instance with `snapshot_id` (not `os_id`). Ownership labels are encoded in the snapshot description. Reserved IPs: `POST /reserved-ips/convert` (keep current IPv4), create instance with `reserved_ipv4`, `DELETE /reserved-ips/{id}`. |
+
+Until retained-address support is implemented, restore requires a null `retainedAddressId`. For DigitalOcean and Vultr, qualification must also verify the provider preserves encoded ownership metadata at production description and label lengths.
 
 Each provider needs fake-HTTP tests in `modules/tests/Selfrun.Worker.Tests/Providers` using `TestHttpMessageHandler`. Live qualification must confirm, per provider:
 
@@ -346,7 +348,7 @@ Names may follow repository conventions. Responsibilities must stay separate.
 - `environment_retained_addresses` (at most one live row per environment): `id`, `environment_id`, `organization_id`, `provider`, `provider_account_id`, `provider_address_id`, `ipv4`, `region`, `datacenter`, `previous_ipv4`, `state` (`assigned`, `unassigned`, `releasing`, `released`, `failed`), `created_at`, `released_at`. Unique on (`provider_account_id`, `provider_address_id`) and on live `ipv4` per account.
 - `ServerInstance.Status` gains `retired`. All consumers that read "the environment's server" select the single non-retired record. Audit every `db.ServerInstances` consumer: `FindExistingServerAsync`, `SaveServerInstanceAsync`, `EnsureNewAppAsync`, `DomainBindingService`, `CustomDomainVerificationService`, `DomainDnsReconciler`, `DatabaseBackupProcessor`, `DatabaseOperationProcessor`, `DatabaseNetworkProcessor`, `DatabaseMigrationProcessor`, `DatabasesController`, `ApplicationsController`, `DeploymentsController`, `RuntimeController`, `AppDeletionService/Processor`, `AppSummaryReader`, `SshHostKeyTrust`, provider account/catalog services.
 
-The migration is additive. Existing environments get `power_state = awake` and a disabled policy.
+The migration is additive. Existing environments get `power_state = awake` and a disabled policy. The address-mode cache is unset until derived from the domain configuration. Snapshot and retained-address records remain keyed to the environment ID after environment deletion so cleanup can retry; their provider account references are organization-scoped.
 
 ## Workers
 
