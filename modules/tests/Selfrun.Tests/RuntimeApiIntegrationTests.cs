@@ -86,6 +86,104 @@ public sealed class RuntimeApiIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RuntimeStatusIngestionStoresAllowlistedFreshRequestsAndRespectsActivityPolicy()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var seed = await SeedAsync("org_runtime_http", "app_runtime_http", now);
+        var previousActivity = now.AddHours(-3);
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+            db.EnvironmentSleepSettings.Add(new EnvironmentSleepSettings
+            {
+                EnvironmentId = seed.AppId,
+                SleepAfterMinutes = 120,
+                HttpTrafficIsActivity = false,
+                PowerState = EnvironmentPowerStates.Awake,
+                StateChangedAt = now,
+                LastActivityAt = previousActivity,
+                LastActivityKind = "deployment"
+            });
+            db.Domains.Add(new Domain
+            {
+                Id = "dom_runtime_http",
+                OrganizationId = seed.OrganizationId,
+                AppId = seed.AppId,
+                ServiceName = "api",
+                Hostname = "http-activity.example.com",
+                Kind = DomainBindingService.KindSelfrunSubdomain,
+                PathPrefix = "/",
+                DnsStatus = DomainBindingService.DnsVerified,
+                ApplyStatus = DomainBindingService.ApplyPending,
+                SslStatus = DomainBindingService.SslPending,
+                Status = DomainBindingService.StatusActive,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.RuntimeToken);
+        var firstRequestAt = now.AddSeconds(-10);
+        var disabledPolicyResponse = await client.PostAsJsonAsync("/api/runtime/ingest/status",
+            new RuntimeStatusIngestRequest("agent", now, "selfrun-app-runtime-http", [], new(true),
+            [
+                new("http-activity.example.com", firstRequestAt),
+                new("unknown.example.com", now.AddSeconds(-2)),
+                new("http-activity.example.com", now.AddMinutes(-2))
+            ]));
+        Assert.Equal(HttpStatusCode.OK, disabledPolicyResponse.StatusCode);
+
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+            var settings = await db.EnvironmentSleepSettings.SingleAsync(row => row.EnvironmentId == seed.AppId);
+            Assert.Equal(firstRequestAt, settings.LastHttpRequestAt);
+            Assert.Equal(previousActivity, settings.LastActivityAt);
+            Assert.Equal("deployment", settings.LastActivityKind);
+        }
+
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+            var settings = await db.EnvironmentSleepSettings.SingleAsync(row => row.EnvironmentId == seed.AppId);
+            settings.HttpTrafficIsActivity = true;
+            await db.SaveChangesAsync();
+        }
+
+        var staleResponse = await client.PostAsJsonAsync("/api/runtime/ingest/status",
+            new RuntimeStatusIngestRequest("agent", now, "selfrun-app-runtime-http", [], new(true),
+                [new("http-activity.example.com", now.AddMinutes(-2))]));
+        Assert.Equal(HttpStatusCode.OK, staleResponse.StatusCode);
+        var missingResponse = await client.PostAsJsonAsync("/api/runtime/ingest/status",
+            new RuntimeStatusIngestRequest("agent", now, "selfrun-app-runtime-http", [], new(true), []));
+        Assert.Equal(HttpStatusCode.OK, missingResponse.StatusCode);
+
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+            var settings = await db.EnvironmentSleepSettings.SingleAsync(row => row.EnvironmentId == seed.AppId);
+            Assert.Equal(firstRequestAt, settings.LastHttpRequestAt);
+            Assert.Equal(previousActivity, settings.LastActivityAt);
+            Assert.Equal("deployment", settings.LastActivityKind);
+        }
+
+        var enabledRequestAt = now.AddSeconds(-5);
+        var enabledPolicyResponse = await client.PostAsJsonAsync("/api/runtime/ingest/status",
+            new RuntimeStatusIngestRequest("agent", now, "selfrun-app-runtime-http", [], new(true),
+                [new("http-activity.example.com", enabledRequestAt)]));
+        Assert.Equal(HttpStatusCode.OK, enabledPolicyResponse.StatusCode);
+
+        await using var verifyScope = _factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+        var verifiedSettings = await verifyDb.EnvironmentSleepSettings.SingleAsync(row => row.EnvironmentId == seed.AppId);
+        Assert.Equal(enabledRequestAt, verifiedSettings.LastHttpRequestAt);
+        Assert.Equal(enabledRequestAt, verifiedSettings.LastActivityAt);
+        Assert.Equal("http_request", verifiedSettings.LastActivityKind);
+    }
+
+    [Fact]
     public async Task RuntimeLogIngestion_DeduplicatesWithoutChangingPruneOrder()
     {
         var now = DateTimeOffset.UtcNow;

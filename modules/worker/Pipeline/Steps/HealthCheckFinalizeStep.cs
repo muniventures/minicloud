@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Diagnostics;
 using System.Text.Json;
+using Selfrun.Common.Contracts;
 using Selfrun.Common.Data;
 using Selfrun.Common.Models;
 using Selfrun.Common.Services;
@@ -149,7 +150,9 @@ public sealed class HealthCheckFinalizeStep : IPipelineStep
                 requestCts.CancelAfter(remainingBudget < TimeSpan.FromSeconds(20)
                     ? remainingBudget
                     : TimeSpan.FromSeconds(20));
-                using var response = await _httpClient.GetAsync(target.Url, HttpCompletionOption.ResponseHeadersRead, requestCts.Token);
+                using var request = new HttpRequestMessage(HttpMethod.Get, target.Url);
+                request.Headers.TryAddWithoutValidation(RuntimeHttpActivityHeaders.SelfrunHealthProbe, "true");
+                using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, requestCts.Token);
                 lastStatus = ((int)response.StatusCode).ToString();
                 if ((int)response.StatusCode is >= 200 and < 500)
                 {

@@ -7,6 +7,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Selfrun.Common.Contracts;
 using Selfrun.Common.Models;
 using Selfrun.Worker.Pipeline;
 using Selfrun.Worker.Pipeline.Steps;
@@ -84,8 +85,11 @@ public sealed class HealthCheckFinalizeStepTests : IClassFixture<WorkerSqliteTes
             await db.SaveChangesAsync();
         }
 
+        var markedAsSelfrunProbe = false;
         var handler = new MockHttpMessageHandler((req, ct) =>
         {
+            markedAsSelfrunProbe = req.Headers.TryGetValues(RuntimeHttpActivityHeaders.SelfrunHealthProbe, out var values) &&
+                values.Contains("true", StringComparer.Ordinal);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent("OK")
@@ -115,6 +119,7 @@ public sealed class HealthCheckFinalizeStepTests : IClassFixture<WorkerSqliteTes
 
         await step.ExecuteAsync(context, CancellationToken.None);
 
+        Assert.True(markedAsSelfrunProbe);
         await using (var db = _harness.CreateDbContext())
         {
             var updated = await db.Deployments.FindAsync("dep-health-pass");

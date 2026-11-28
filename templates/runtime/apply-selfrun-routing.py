@@ -65,7 +65,9 @@ def apply(config, request, root=Path('/'), run=subprocess.run):
                     matches.append(int(match[1]))
             if len(matches) != 1:
                 raise ValueError('Public service target missing or ambiguous; existing routes preserved.')
-            fragments.append(f'{host} {{\n  reverse_proxy 127.0.0.1:{matches[0]}\n}}\n')
+            fragments.append(
+                f'{host} {{\n  log {{\n    output stderr\n    format json\n  }}\n'
+                f'  reverse_proxy 127.0.0.1:{matches[0]}\n}}\n')
         candidate = ''.join(fragments)
         directory = root / 'opt/selfrun/caddy/apps'
         live = directory / f'{slug}.caddy'

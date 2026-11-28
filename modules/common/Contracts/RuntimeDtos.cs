@@ -52,7 +52,15 @@ public sealed record RuntimeStatusIngestRequest(
     DateTimeOffset ObservedAt,
     string ComposeProject,
     IReadOnlyList<RuntimeServiceStatusDto> Services,
-    RuntimeCaddyStatusDto? Caddy);
+    RuntimeCaddyStatusDto? Caddy,
+    IReadOnlyList<RuntimeHttpRequestObservation>? HttpRequests = null);
+
+public sealed record RuntimeHttpRequestObservation(string Hostname, DateTimeOffset LastRequestAt);
+
+public static class RuntimeHttpActivityHeaders
+{
+    public const string SelfrunHealthProbe = "X-Selfrun-Health-Probe";
+}
 
 public sealed record RuntimeCaddyStatusDto(bool Active);
 
@@ -82,4 +90,5 @@ public sealed record StoredRuntimeStatus(
     DateTimeOffset ObservedAt,
     string ComposeProject,
     IReadOnlyList<RuntimeServiceStatusDto> Services,
-    RuntimeCaddyStatusDto? Caddy);
+    RuntimeCaddyStatusDto? Caddy,
+    IReadOnlyList<RuntimeHttpRequestObservation>? HttpRequests = null);

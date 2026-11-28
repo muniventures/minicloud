@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Net;
+using System.Text.Json;
 using Selfrun.RuntimeAgent;
 
 namespace Selfrun.Tests;
@@ -229,6 +230,63 @@ public sealed class RuntimeAgentTests
         Assert.Contains(logs, log => log.Service == "api" && log.Message == "booted");
         Assert.Single(runner.Calls, call => call == DockerPs);
         Assert.Single(runner.Calls, call => call == "docker inspect abc def");
+    }
+
+    [Fact]
+    public async Task CollectorReportsOnlyConfiguredNonProbeHostnamesAndSendsNoRequestDetails()
+    {
+        var observedAt = DateTimeOffset.UtcNow;
+        var older = observedAt.AddSeconds(-5);
+        var newest = observedAt.AddSeconds(-1);
+        static string AccessLog(DateTimeOffset time, string host, string path, string address, bool probe = false)
+        {
+            var headers = probe
+                ? new Dictionary<string, string[]> { ["X-Selfrun-Health-Probe"] = ["true"] }
+                : new Dictionary<string, string[]>();
+            var json = JsonSerializer.Serialize(new
+            {
+                level = "info",
+                ts = time.ToUnixTimeMilliseconds() / 1000d,
+                logger = "http.log.access",
+                request = new { host, uri = path, remote_ip = address, headers }
+            });
+            return $"2026-11-28T14:00:00Z caddy[1]: {json}";
+        }
+
+        var caddyAccessLogs = string.Join('\n', new[]
+        {
+            AccessLog(older, "allowed.example.com:443", "/private?token=secret", "192.0.2.44"),
+            AccessLog(newest, "allowed.example.com", "/health", "192.0.2.45"),
+            AccessLog(observedAt, "unknown.example.com", "/unknown", "192.0.2.46"),
+            AccessLog(observedAt, "203.0.113.4", "/ip", "192.0.2.47"),
+            AccessLog(observedAt, "allowed.example.com", "/health", "192.0.2.48", probe: true),
+            "2026-11-28T14:00:00Z caddy[1]: {\"logger\":\"http.log.access\",\"request\":{\"uri\":\"/malformed?token=secret\",\"remote_ip\":\"192.0.2.49\""
+        });
+        var config = new AgentConfig("srv", "org", "app_1", "https://api.example", "selfrun-demo", "/missing", "/tmp/token", "/tmp/state");
+        var runner = new RecordingProcessRunner(new Dictionary<string, ProcessResult>
+        {
+            [DockerPs] = new(0, "", ""),
+            ["systemctl is-active caddy"] = new(0, "active", ""),
+            ["journalctl -u caddy --since 20 seconds ago --output short-iso --no-pager"] = new(0, caddyAccessLogs, "")
+        });
+        using var collector = new RuntimeCollector(config, runner);
+
+        var status = await collector.CollectStatusAsync("0.2.0", CancellationToken.None, ["allowed.example.com"]);
+        var observation = Assert.Single(status.HttpRequests!);
+        Assert.Equal("allowed.example.com", observation.Hostname);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(newest.ToUnixTimeMilliseconds()), observation.LastRequestAt);
+
+        var payload = JsonSerializer.Serialize(status, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.DoesNotContain("/private?token=secret", payload, StringComparison.Ordinal);
+        Assert.DoesNotContain("192.0.2.", payload, StringComparison.Ordinal);
+        Assert.DoesNotContain("X-Selfrun-Health-Probe", payload, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(payload);
+        var serializedObservation = Assert.Single(document.RootElement.GetProperty("httpRequests").EnumerateArray());
+        Assert.Equal(["hostname", "lastRequestAt"], serializedObservation.EnumerateObject().Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal));
+
+        var logs = await collector.CollectLogsAsync(CancellationToken.None);
+        Assert.DoesNotContain(logs, record => record.Message.Contains("http.log.access", StringComparison.Ordinal));
+        Assert.DoesNotContain(logs, record => record.Message.Contains("/malformed?token=secret", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -571,6 +629,10 @@ public sealed class RuntimeAgentTests
         status = status with { Caddy = new(false) };
         await Cycle();
         Assert.False(sent[3].Caddy.Active);
+
+        status = status with { HttpRequests = [new("app.example.com", clock.GetUtcNow())] };
+        await Cycle();
+        Assert.Single(sent[4].HttpRequests!);
     }
 
     [Theory]
