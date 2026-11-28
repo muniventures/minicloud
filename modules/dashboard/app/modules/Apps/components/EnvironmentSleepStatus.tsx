@@ -45,6 +45,13 @@ export function EnvironmentSleepStatus({ applicationId, applicationName, environ
       setPendingOperation(null);
   }, [pendingOperation, sleep?.operation?.id, sleep?.state, sleep?.keepAwakeUntil]);
 
+  useEffect(() => {
+    setPendingOperation(null);
+    setDialog(null);
+    setError(null);
+    setNotice(null);
+  }, [applicationId, environment.id]);
+
   const operation = sleep?.operation ?? pendingOperation;
   const activeOperation = operation && ["queued", "running"].includes(operation.status);
   const pendingState = pendingOperation && sleep?.operation?.id !== pendingOperation.id

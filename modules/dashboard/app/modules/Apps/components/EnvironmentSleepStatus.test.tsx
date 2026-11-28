@@ -157,6 +157,36 @@ describe("EnvironmentSleepStatus", () => {
     });
   });
 
+  it("does not carry a pending operation across environment changes", async () => {
+    const awake = environment("awake");
+    const { rerender } = render(
+      <EnvironmentSleepStatus
+        applicationId="app_1"
+        applicationName="Sample"
+        environment={awake}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Sleep now" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sleep now" }));
+    expect(await screen.findByText("Sleeping request queued…")).toBeInTheDocument();
+
+    const asleep = { ...environment("asleep"), id: "env_2", name: "production" };
+    rerender(
+      <EnvironmentSleepStatus
+        applicationId="app_1"
+        applicationName="Sample"
+        environment={asleep}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(await screen.findByText(/Asleep since/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Wake" })).toBeInTheDocument();
+    expect(screen.queryByText("Sleeping request queued…")).not.toBeInTheDocument();
+  });
+
   it("sends Keep awake and reports API errors accessibly", async () => {
     vi.mocked(wakeEnvironment).mockRejectedValueOnce(new Error("A power operation is already in progress."));
     render(
