@@ -242,10 +242,14 @@ builder.Services.AddScoped<DatabaseManagementService>();
 builder.Services.AddScoped<DatabaseNetworkService>();
 builder.Services.Configure<Selfrun.Worker.Databases.DatabasePlatformOptions>(builder.Configuration.GetSection(Selfrun.Worker.Databases.DatabasePlatformOptions.SectionName));
 builder.Services.AddHostedService<Selfrun.Worker.Databases.DatabaseOperationWorker>();
+builder.Services.Configure<Selfrun.Worker.Power.EnvironmentPowerOptions>(
+    builder.Configuration.GetSection(Selfrun.Worker.Power.EnvironmentPowerOptions.SectionName));
+builder.Services.AddScoped<Selfrun.Worker.Power.EnvironmentPowerProcessor>();
 
 // Maintenance authority: every claim loop validates this process's epoch/host before claiming work.
 builder.Services.AddSelfrunMaintenanceParticipant(builder.Configuration, "worker");
 builder.Services.AddHostedService<Selfrun.Worker.Maintenance.MaintenanceParticipantRegistrationService>();
+builder.Services.AddHostedService<Selfrun.Worker.Power.EnvironmentPowerWorker>();
 
 // Queue Consumer Background Service
 builder.Services.AddSingleton<PostgresDeploymentQueueConsumer>();

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Selfrun.Common.Data;
+using Selfrun.Common.Models;
 using Selfrun.Common.Providers.Dns;
 using Selfrun.Common.Services;
 
@@ -19,6 +20,9 @@ public sealed class DomainDnsReconciler(
         var candidates = await db.Domains
             .Where(d => d.Kind == DomainBindingService.KindSelfrunSubdomain &&
                 d.Status != DomainBindingService.StatusDisabled && d.App.DeletionStatus == null &&
+                (!db.EnvironmentSleepSettings.Any(settings => settings.EnvironmentId == d.AppId) ||
+                 db.EnvironmentSleepSettings.Any(settings => settings.EnvironmentId == d.AppId &&
+                     settings.PowerState == EnvironmentPowerStates.Awake)) &&
                 (d.TargetIp == null || d.DnsStatus != DomainBindingService.DnsVerified))
             .OrderBy(d => d.Id).Take(100).ToListAsync(cancellationToken);
         foreach (var domain in candidates)
