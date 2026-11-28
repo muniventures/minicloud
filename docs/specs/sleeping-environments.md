@@ -9,7 +9,7 @@ An environment that is not being used stops costing compute. When an environment
 
 The main use is staging and preview environments that are only used during working hours or review. Sleep is opt-in per environment. The sleep timeout (default 2 hours) and whether HTTP traffic counts as activity are set in the dashboard, through the API, and with the CLI.
 
-The environment keeps its public IPv4 address while asleep. Selfrun subdomains, manually managed DNS records, and custom domains keep working after wake without DNS changes. Only one snapshot exists per environment: each sleep replaces it, and it is kept after wake.
+Every hostname keeps working after wake. When all of an environment's hostnames are in DNS that Selfrun manages through Cloudflare, Selfrun points them at the restored server's new address, so no reserved address is needed. When any hostname is managed outside Selfrun, such as a custom domain or a manual record, the environment keeps a reserved public IPv4 address across sleep. See [Addresses](#addresses). Only one snapshot exists per environment: each sleep replaces it, and it is kept after wake.
 
 ## Terms
 
@@ -17,9 +17,10 @@ The environment keeps its public IPv4 address while asleep. Selfrun subdomains, 
 | --- | --- |
 | Sleep policy | Per-environment settings: disabled, or an idle timeout (`sleepAfter`, default 2 hours), plus whether HTTP traffic counts as activity. |
 | Activity | An event that resets the idle timer (see [Idle detection](#idle-detection)). |
-| Retained address | A provider-reserved public IPv4 address owned by the environment, independent of any one server. |
-| Sleep | Stop services → power off → new snapshot → purge old snapshot → delete server (address retained). |
-| Wake | Create server from snapshot on the retained address → verify host key → attach storage → start services. |
+| Address mode | `dynamic`: every hostname is Selfrun-managed Cloudflare DNS, and the restored server may get a new address. `retained`: at least one hostname is managed outside Selfrun, so the environment keeps a reserved address. Derived, not chosen by the user. |
+| Retained address | A provider-reserved public IPv4 address owned by the environment, independent of any one server. Used only in `retained` mode. |
+| Sleep | Stop services → power off → new snapshot → purge old snapshot → remove managed DNS records (dynamic) → delete server. |
+| Wake | Create server from snapshot (on the retained address, if any) → verify host key → attach storage → start services → publish managed DNS records (dynamic). |
 | Snapshot | Provider image of the server's root disk, owned by Selfrun and labeled with the environment identity. At most one per environment. |
 | Power state | `awake`, `sleeping`, `asleep`, `waking`, `sleep_failed`, `wake_failed`. |
 
@@ -36,8 +37,8 @@ These paths describe existing source, not the proposed feature.
 | Provisioning | `modules/worker/Pipeline/Steps/ResolveProvisionServerStep.cs`: `EnsureNewAppAsync` refuses to create a server for any environment that ever had one (succeeded deployment, `ServerInstance`, or `RuntimeServer`). A registered server that is not running fails with "refusing replacement provisioning". | Wake must be an explicit, separately authorized restore path. It must not loosen the replacement guard for ordinary deployments. |
 | First boot | `BuildCloudInit` installs packages, Docker, Caddy, firewall, swap, and runs host-key enrollment. `ServerHostKeyEnrollment` proves the new host key with a one-time secret bound to a `ServerInstance` ID. `PersistHostKeyAsync` refuses to replace a verified pin on the same record. | A restored server gets a new provider instance, so cloud-init regenerates host keys. Wake uses a minimal cloud-init (user, keys, enrollment) and a new `ServerInstance` record with its own enrollment. |
 | Server identity | `ServerInstance` (`ProviderServerId`, `IpAddress`, `Sku`, `Region`, `Image`, host-key pin) and `RuntimeServer` (`ProviderServerId`, agent token) in `modules/common/Models`. `FindExistingServerAsync` rejects registrations with blank provider IDs or a runtime without a server. | Sleep must retire/replace these records under explicit power state. Other consumers must not treat an asleep environment as a broken one. |
-| Routing | `DnsSetupStep` and `DomainDnsReconciler` upsert Cloudflare A records (IPv4 only; `CloudflareDnsClient`) for Selfrun subdomains to `ServerInstance.IpAddress`. Manual-DNS instructions suggest an optional AAAA record. Caddy and its TLS state live on the server. | Retaining the IPv4 address keeps every A record valid. Manual instructions must stop suggesting AAAA for sleep-enabled environments. |
-| Custom domains | `CustomDomainVerificationService` requires every A/AAAA answer to equal the server's IPv4 address. | Custom domains are effectively IPv4-only today, so a retained IPv4 address keeps them verified across sleep. See [Retained addresses](#retained-addresses). |
+| Routing | One operator-configured Cloudflare zone (`CloudflareDnsClient`, `ZoneId`) holds hostnames under the managed suffix (`ManagedDomainOptions.Contains`). When `ManagedDomainOptions.ManageDnsRecords` is true, `DnsSetupStep` and `DomainDnsReconciler` upsert A records (IPv4 only, TTL 120, not proxied by default) to `ServerInstance.IpAddress`, and `ICloudflareDnsClient` can delete them and wait for propagation. Manual-DNS instructions suggest an optional AAAA record. Caddy and its TLS state live on the server. | Managed hostnames can follow a new address on wake, so they need no reserved address. Manual instructions must stop suggesting AAAA for sleep-enabled environments. |
+| Custom domains | Custom domains live in DNS the user controls; Selfrun never writes them. `CustomDomainVerificationService` requires every A/AAAA answer to equal the server's IPv4 address. | Any custom domain, or `ManageDnsRecords = false`, requires a retained address. See [Addresses](#addresses). |
 | Server addresses | Servers use the provider's ephemeral public IP, released when the server is deleted. No reserved/primary IP support exists in the provider clients. | Add address retention per provider. |
 | Durable storage | `AppStorageVolume` stores a `ProviderVolumeId` retained independently of the server. `AppStorageService.EnsureAsync` attaches a detached volume during `SshDeployStep.Storage`. Hetzner only (`SupportsDurableVolumes`). | Volumes survive server deletion and are not in the snapshot. Wake must re-attach and mount them before services start. |
 | Databases on the server | SQLite files and the in-environment `postgres:16-alpine` data directory are on the server's disk (`scripts/github-actions/selfrun-deploy/remote-deploy.sh`). `DatabaseBackupProcessor` SSHes to the environment's `ServerInstance`. Shared/dedicated database servers and backup repositories are internal environments with their own servers. | The snapshot carries app-hosted database data. Database operations must defer while asleep. Internal hosts are never eligible. |
@@ -52,7 +53,7 @@ Included:
 - Per-environment sleep policy (timeout and HTTP-traffic activity setting), power state, and durable sleep/wake operations.
 - Automatic sleep after the idle timeout, manual sleep, and wake on deploy, CLI, or dashboard.
 - HTTP request activity reported by the runtime agent.
-- Retained public IPv4 addresses per environment.
+- Dynamic addresses with managed DNS updates for Cloudflare-managed environments, and retained public IPv4 addresses for environments with other hostnames.
 - Snapshot lifecycle: create, verify, replace (one at a time), delete on environment/application deletion.
 - Hetzner, DigitalOcean, and Vultr support, each enabled only after live qualification.
 - API, CLI, dashboard, and documentation.
@@ -64,7 +65,9 @@ Excluded:
 - Organization-wide default policy.
 - Sleeping internal environments: shared/dedicated database servers, backup repositories, or the control plane itself.
 - Moving an environment to a different plan, region, provider, or account on wake.
-- Retaining IPv6 addresses. Sleep-enabled environments are reachable over IPv4 only, as custom domains already are.
+- Retaining IPv6 addresses. Sleep-enabled environments are reachable over IPv4 only, as managed records and custom domains already are.
+- Writing DNS for custom domains through a user's own Cloudflare account. Custom domains use `retained` mode in v1.
+- Letting the user force `retained` mode for a fully managed environment.
 - Using the snapshot as a backup product. It is a restore image for wake, not a substitute for database backups.
 
 ## Eligibility
@@ -72,13 +75,13 @@ Excluded:
 An environment may enable a sleep policy, and a sleep may start, only when all of these hold:
 
 1. `EnvironmentKind` is `persistent` or `preview` (never `internal`). Production has no structural privilege; any persistent environment may opt in. The confirmation copy explains the downtime.
-2. Its provider descriptor has `SupportsSnapshots = true` and `SupportsRetainedAddresses = true`, and passes `ProviderQualificationGate`.
+2. Its provider descriptor has `SupportsSnapshots = true` and passes `ProviderQualificationGate`. In `retained` mode, it must also have `SupportsRetainedAddresses = true`.
 3. Its provider account is enabled.
 4. It is not the host of a managed database, network, or backup repository used by another environment.
-5. For sleep to start (not to enable the policy): the environment has a retained address assigned to its current server, and on DigitalOcean every verified custom domain resolves to it.
+5. For sleep to start (not to enable the policy): in `retained` mode, a retained address is assigned to the current server, and on DigitalOcean every verified custom domain resolves to it. In `dynamic` mode, managed DNS is reachable (Cloudflare configured and the maintenance fence open).
 6. No deletion is in progress for the environment or its application.
 
-Custom domains and manually managed DNS do not affect eligibility, because the address does not change.
+Custom domains and manually managed DNS do not block sleep. They switch the environment to `retained` mode.
 
 Enabling a policy on an ineligible environment fails with a specific error code that names the blocking reason. If eligibility is lost later, the sweep does not start sleep, and the environment shows the reason.
 
@@ -87,7 +90,7 @@ Enabling a policy on an ineligible environment fails with a specific error code 
 - `sleepAfterMinutes`: `null` (disabled, the default for every environment) or an integer from 30 to 43,200 (30 days). Enabling without a value uses **120 minutes (2 hours)**, in the API, CLI, and dashboard.
 - `httpTrafficIsActivity`: boolean, default `true`. When `true`, HTTP requests to the environment's hostnames reset the idle timer. When `false`, only control-plane activity does, so a server can sleep on schedule even if monitors or crawlers keep hitting it.
 - Stored per environment with a revision. Updates use the existing revision-checked environment PATCH.
-- Enabling the policy also reserves the environment's address (see [Retained addresses](#retained-addresses)). The policy is saved only after the reservation succeeds, or the request fails with the provider error.
+- In `retained` mode, enabling the policy also reserves the environment's address (see [Addresses](#addresses)). The policy is saved only after the reservation succeeds, or the request fails with the provider error. In `dynamic` mode, enabling reserves nothing.
 - Changing the policy takes effect immediately for scheduling. Lowering it may make an environment due at once; the sweep still applies the claim-time rechecks below. Disabling it cancels a not-yet-committed sleep.
 - Policy changes never wake or sleep an environment by themselves.
 
@@ -134,19 +137,24 @@ Reading logs, runtime status, or environment details is observation, not activit
 4. **Create the new snapshot.** Create a snapshot labeled `managed-by=selfrun`, organization, environment ID, and operation ID. Its description names the app/environment. Poll until the image is available, then record the provider image ID, size, region, and creation time as `pending`.
 5. **Verify** the new snapshot exists, is `available`, and belongs to the account. Without a verified snapshot, never delete the server or the old snapshot: power the server back on, start the services, set `awake`, record `snapshot_failed`.
 6. **Purge the old snapshot.** Make the new snapshot `current` and the previous one `superseded`, then delete the previous one from the provider (404 counts as deleted). Retry transient failures within the step. If deletion still fails, continue the sleep. Mark the old snapshot `deleting` for the reconciler and show a warning: a second image exists only until that retry succeeds.
-7. **Delete the server** through the registered provider account, reusing the ownership checks from `AppDeletionProcessor`. Before deleting, confirm that the retained address is configured to survive server deletion. Poll until the server is gone. Confirm durable volumes and the retained address are detached and still exist.
-8. **Retire placement.** Close the `ServerInstance` record (status `retired`, kept for audit). Store the placement needed for wake on the snapshot record: provider, account, region or datacenter, SKU, server name, volume IDs, and personal SSH key references. Clear the `RuntimeServer` provider ID; keep its identity and token. DNS records and domain bindings are untouched; they keep pointing at the retained address. `DomainDnsReconciler` and `CustomDomainVerificationService` skip asleep environments, so bindings are not marked pending or mismatched.
-9. **Finish.** Set `asleep` and `asleepSince`. Emit an audit event.
+7. **Remove or keep addresses.**
+   - In `dynamic` mode, delete the environment's managed A records through `ICloudflareDnsClient.DeleteDnsRecordsAsync` before deleting the server. A record must never point at a released address that the provider can give to another customer. If removal keeps failing, leave the server powered off, set `sleep_failed`, and retry. A stopped server is safe; a stale record is not.
+   - In `retained` mode, confirm that the retained address is configured to survive server deletion. DNS is untouched.
+8. **Delete the server** through the registered provider account, reusing the ownership checks from `AppDeletionProcessor`. Poll until the server is gone. Confirm durable volumes (and the retained address, if any) are detached and still exist.
+9. **Retire placement.** Close the `ServerInstance` record (status `retired`, kept for audit). Store the placement needed for wake on the snapshot record: provider, account, region or datacenter, SKU, server name, volume IDs, personal SSH key references, and the address mode. Clear the `RuntimeServer` provider ID; keep its identity and token. Domain bindings keep their state. `DomainDnsReconciler` and `CustomDomainVerificationService` skip asleep environments, so they do not recreate removed records or mark bindings pending or mismatched.
+10. **Finish.** Set `asleep` and `asleepSince`. Emit an audit event.
 
 ## Wake procedure
 
 1. **Admit.** Wake requests on `asleep`, `sleep_failed` (after deletion), or `wake_failed` create or join the single wake operation. A wake request on `awake` only records keep-awake activity. One on `sleeping` is queued: it waits for the sleep to commit or cancel, then wakes if still needed.
-2. **Recheck** that the provider account is enabled, and that the current snapshot and the retained address still exist.
-3. **Create the server** from the snapshot with the recorded server name, SKU, region or datacenter, labels, and provider SSH key references, on the retained address (see [Retained addresses](#retained-addresses)). Use a minimal wake cloud-init that only ensures the `selfrun` user's authorized key and runs host-key enrollment for a new `ServerInstance` ID. Do not reinstall packages. Before creating, search by name and labels so a retry adopts a server from an interrupted attempt instead of creating a second one.
-4. **Wait, then enroll the host key**, reusing `WaitForServerReadyAsync`, `WaitForSshAsync`, and `EnrollHostKeyAsync`. Wait until the retained address is assigned and reachable. Persist the new `ServerInstance` (active, same IP, new pin) and update `RuntimeServer.ProviderServerId`. `SshHostKeyTrust` already requires that no other active registration shares the IP. The retired record does not count as active.
+2. **Recheck** that the provider account is enabled, that the current snapshot still exists, and in `retained` mode that the retained address still exists.
+3. **Create the server** from the snapshot with the recorded server name, SKU, region or datacenter, labels, and provider SSH key references. In `retained` mode, create it on the retained address (see [Addresses](#addresses)); in `dynamic` mode, accept the provider-assigned address. Use a minimal wake cloud-init that only ensures the `selfrun` user's authorized key and runs host-key enrollment for a new `ServerInstance` ID. Do not reinstall packages. Before creating, search by name and labels so a retry adopts a server from an interrupted attempt instead of creating a second one.
+4. **Wait, then enroll the host key**, reusing `WaitForServerReadyAsync`, `WaitForSshAsync`, and `EnrollHostKeyAsync`. In `retained` mode, wait until the retained address is assigned and reachable. Persist the new `ServerInstance` (active, new pin, and the retained IP or the new provider IP) and update `RuntimeServer.ProviderServerId`. `SshHostKeyTrust` already requires that no other active registration shares the IP. The retired record does not count as active.
 5. **Attach durable volumes** and mount them with the same mount logic used by `SshDeployStep.Storage`.
-6. **Start services** of the current release (`docker compose up -d` per stack, then the runtime agent). Run the existing health checks. Selfrun routes in Caddy and TLS state come from the snapshot. Caddy re-validates certificates as usual.
-7. **Confirm routing.** DNS records already point at the retained address. Verify that managed records still match it, and repair through `DomainDnsReconciler` if they drifted. Re-run custom-domain verification without changing bindings that are already verified.
+6. **Start services** of the current release (`docker compose up -d` per stack, then the runtime agent). Run the existing health checks. Selfrun routes in Caddy and TLS state come from the snapshot; Caddy routes by hostname, so a new address needs no on-server change. Caddy re-validates certificates as usual.
+7. **Publish routing.**
+   - In `dynamic` mode, upsert every managed A record to the new address through the same path as `DomainDnsReconciler`, then wait for propagation with `WaitForPropagationAsync`. Records use the managed TTL (120 seconds by default), so clients that cached the removal see the server within that time.
+   - In `retained` mode, DNS already points at the retained address. Verify managed records still match it, and repair them if they drifted. Re-run custom-domain verification without changing bindings that are already verified.
 8. **Finish.** Set `awake` and `lastActivityAt = now`. Keep the snapshot (see [Snapshot retention](#snapshot-retention)). Emit an audit event.
 
 On failure, delete a server created by this attempt only if it never passed host-key enrollment. Otherwise keep it registered for retry. Set `wake_failed` with the error and keep the snapshot. A retry resumes from the recorded step.
@@ -157,11 +165,25 @@ Deployment admission to an `asleep`/`wake_failed` environment creates the deploy
 
 The reusable GitHub Actions workflow needs no change, but its documented timeout must allow for a wake (several minutes, depending on snapshot size and provider).
 
-## Retained addresses
+## Addresses
 
-Each sleep-enabled environment owns one provider-reserved public IPv4 address. Every server it runs on uses that address, so A records, manually managed DNS, and custom domains never change across sleep and wake. No DNS record ever points at an address that could be reassigned to another provider customer.
+### Address mode
 
-| Provider | Reserve (at policy enable) | Keep through sleep | Use on wake |
+Selfrun derives the mode from the environment's hostnames and recomputes it whenever a domain binding changes:
+
+- **`dynamic`**: every enabled hostname is under the managed suffix (`ManagedDomainOptions.Contains`) and `ManageDnsRecords` is true. Selfrun owns all the DNS, so it removes the records at sleep and publishes them for the new address at wake. Nothing is reserved and there is no address cost while asleep.
+- **`retained`**: at least one enabled hostname is a custom domain, or the operator disabled managed DNS records. Selfrun cannot rewrite those records, so the address must not change.
+
+Mode changes while the policy is enabled:
+
+- Adding a custom domain to a `dynamic` environment reserves an address first, as when the policy is enabled. The binding is created only after the reservation succeeds. The environment must be awake: domain binding already requires the server.
+- Removing the last custom domain keeps the reservation and stays `retained`. This avoids churn and a second address change on DigitalOcean. Releasing then happens only on environment deletion.
+
+### Retained addresses
+
+In `retained` mode the environment owns one provider-reserved public IPv4 address. Every server it runs on uses that address, so A records, manually managed DNS, and custom domains never change across sleep and wake. No DNS record ever points at an address that could be reassigned to another provider customer.
+
+| Provider | Reserve (at policy enable or first custom domain) | Keep through sleep | Use on wake |
 | --- | --- | --- | --- |
 | Hetzner | The server's existing Primary IPv4 becomes the retained address. Same address, no DNS change. | Set the Primary IP's `auto_delete` to `false` before deleting the server. | Create the server with `public_net.ipv4` set to the Primary IP ID, in the Primary IP's datacenter (Primary IPs are datacenter-bound; record it). |
 | Vultr | Convert the instance's current IPv4 to a reserved IP. Same address, no DNS change. | Reserved IPs survive instance deletion. | Create the instance with `reserved_ipv4` set to the reserved IP ID in the same region. |
@@ -169,12 +191,16 @@ Each sleep-enabled environment owns one provider-reserved public IPv4 address. E
 
 Rules:
 
-- Reserving happens when the policy is first enabled, while the environment is awake, so any address change is visible before the first sleep.
-- **DigitalOcean address change.** Selfrun moves managed A records to the reserved address immediately. The dashboard and CLI warn that custom domains and manually managed records must be re-pointed. They show both addresses, and the old one keeps working while the droplet exists. Custom-domain bindings show the new required address. Sleep is not allowed until every verified custom domain resolves to the reserved address, so a domain can never be left pointing at a released IP.
+- Reserving happens while the environment is awake, so any address change is visible before the first sleep.
+- **DigitalOcean address change.** Selfrun moves managed A records to the reserved address immediately. The dashboard and CLI warn that custom domains and manually managed records must be re-pointed. They show both addresses, and the old one keeps working while the droplet exists. Custom-domain bindings show the new required address. Sleep is not allowed until every verified custom domain resolves to the reserved address, so a domain can never be left pointing at a released IP. A custom domain added after reservation is told the reserved address from the start.
 - `ServerInstance.IpAddress` is the address used for SSH, DNS, and domain verification. For DigitalOcean, that is the reserved address once it is assigned and reachable.
 - Disabling the policy keeps the reservation, so re-enabling never changes the address again. Releasing happens only on environment or application deletion, after the server is deleted. Hetzner: delete the Primary IP if no server holds it. Vultr and DigitalOcean: delete the reserved IP. Deletion lists a retained address as a billable resource if releasing fails, like retained volumes.
 - Unassigned reserved addresses are billed by the provider while the environment is asleep. User docs state this without quoting prices.
-- IPv6 is not retained. Manual-DNS instructions for sleep-enabled environments say to remove AAAA records. A restored server's provider-assigned IPv6 is not published.
+
+### Both modes
+
+- IPv6 is not retained or published. Manual-DNS instructions for sleep-enabled environments say to remove AAAA records.
+- While asleep in `dynamic` mode, managed hostnames do not resolve. That is expected; wake-on-request is [future work](#future-work).
 
 ## Snapshot retention
 
@@ -191,7 +217,7 @@ Rules:
 - The runtime agent token in the snapshot stays valid. The agent reconnects after wake. Rotating it on wake is optional hardening, not required for v1.
 - Host-key trust is re-established for every restored server through enrollment, never copied from the old pin.
 - While asleep: `DatabaseBackupProcessor` skips due backups of app-hosted databases and reschedules them for after the next wake. Nothing changes on disk while asleep. Manual database operations, SSH-dependent API actions, and custom-domain verification return `409 environment_asleep` with a wake hint. `DomainDnsReconciler` and `CustomDomainVerificationService` skip asleep environments.
-- Authorization: changing policy requires `apps:write`. Sleep and wake require `deployments:create`. Members without these can see the state. Enabling the policy reserves a billable provider address, so it uses the environment's provider account under the same `apps:write` authorization as plan selection. It does not require `providers:write`.
+- Authorization: changing policy requires `apps:write`. Sleep and wake require `deployments:create`. Members without these can see the state. In `retained` mode, enabling the policy or adding a custom domain reserves a billable provider address. It uses the environment's provider account under the same `apps:write` authorization as plan selection. It does not require `providers:write`.
 
 ## API
 
@@ -209,6 +235,7 @@ Extend `GET/PATCH /api/apps/{applicationId}/environments/{environmentId}`:
     "sleepsAt": null,
     "eligible": true,
     "ineligibleReason": null,
+    "addressMode": "retained",
     "retainedAddress": { "ipv4": "203.0.113.10", "state": "unassigned", "previousIpv4": null },
     "snapshot": { "createdAt": "2026-11-28T18:04:12Z", "sizeGb": 9.4, "pendingPurge": false },
     "operation": { "id": "…", "kind": "wake", "status": "running", "step": "attach_storage", "trigger": "manual_cli" },
@@ -217,7 +244,7 @@ Extend `GET/PATCH /api/apps/{applicationId}/environments/{environmentId}`:
 }
 ```
 
-PATCH accepts `sleep.policy.enabled`, `sleep.policy.sleepAfterMinutes`, and `sleep.policy.httpTrafficIsActivity` with `sleep.policy.revision`. `enabled: false` or `sleepAfterMinutes: null` disables sleep. `enabled: true` without minutes stores 120 on first enable and keeps the stored value afterwards. Omitted fields keep their current values. The first enable reserves the address synchronously; when that changes the address (DigitalOcean), the response includes `retainedAddress.previousIpv4`. The first enable runs the address reservation synchronously; when it changes the address (DigitalOcean), the response includes `retainedAddress.previousIpv4`.
+PATCH accepts `sleep.policy.enabled`, `sleep.policy.sleepAfterMinutes`, and `sleep.policy.httpTrafficIsActivity` with `sleep.policy.revision`. `enabled: false` or `sleepAfterMinutes: null` disables sleep. `enabled: true` without minutes stores 120 on first enable and keeps the stored value afterwards. Omitted fields keep their current values. `addressMode` is `dynamic` or `retained`; `retainedAddress` is `null` in `dynamic` mode. In `retained` mode, the first enable reserves the address synchronously. When that changes the address (DigitalOcean), the response includes `retainedAddress.previousIpv4`. Creating a custom-domain binding on a sleep-enabled `dynamic` environment reserves the address the same way and can fail with `address_reservation_failed`. The first enable runs the address reservation synchronously; when it changes the address (DigitalOcean), the response includes `retainedAddress.previousIpv4`.
 
 New endpoints:
 
@@ -243,10 +270,10 @@ selfrun deploy --environment staging                        # wakes automaticall
 
 - Durations accept `m`, `h`, and `d` units. The CLI validates bounds before the request.
 - `--sleep-after` and `--traffic-activity` can be combined in one update.
-- When enabling reserves a new address (DigitalOcean), the CLI prints the old and new address and the custom domains that must be re-pointed.
+- When enabling (or `domains add`) reserves a new address (DigitalOcean), the CLI prints the old and new address and the custom domains that must be re-pointed. For `dynamic` environments, it says that managed hostnames follow the server automatically.
 - `wake` and `sleep` wait by default, print step progress, and exit non-zero on failure with the error code. `--no-wait` prints the operation ID.
 - `environments update` with only sleep options is valid and does not require SSH options. Today `update` without SSH options is rejected. Relax that rule only when another update option is present.
-- `apps inspect` shows the policy, state, retained address, and snapshot time.
+- `apps inspect` shows the policy, state, address mode, retained address, and snapshot time.
 - Update `docs/cli.md` (environments section and deploy notes) and the command help in `CliApplication.cs`.
 
 ## Dashboard
@@ -256,9 +283,10 @@ Follow [Apps and operations UX](apps-operations-ux.md) and the [environment mode
 - **Environment settings**:
   - **Sleep when idle** switch plus a duration select (30 minutes, 1, **2 (default)**, 4, 8 hours, 1 day, custom).
   - **Count website traffic as activity** switch (default on). Its help text: with it off, the environment sleeps after the timeout even if people or monitors are using it.
-  - General help text says the server is deleted and restored from a snapshot, the address stays the same, waking takes several minutes, and snapshot and reserved-address storage are billed by the provider.
+  - General help text says the server is deleted and restored from a snapshot, waking takes several minutes, and snapshot storage is billed by the provider.
+  - Address text depends on the mode. `dynamic`: "Selfrun updates your *.<suffix> DNS records when the environment wakes. The server's IP address may change." `retained`: "Custom domains need a fixed address. Selfrun keeps a reserved IP for this environment; the provider bills it while the environment is asleep."
   - Ineligible environments show the controls disabled with the reason.
-  - On DigitalOcean, the first enable confirms the address change, lists the custom domains to re-point, and shows their re-point status until they resolve to the new address.
+  - On DigitalOcean in `retained` mode, the first reservation confirms the address change, lists the custom domains to re-point, and shows their re-point status until they resolve to the new address.
 - **Overview**: a status line, using text and the existing status tokens:
   - Awake with a policy: "Sleeps in about 1 h 40 min · Keep awake".
   - Asleep: "Asleep since 18:04 · snapshot 9.4 GB · Wake".
@@ -302,17 +330,17 @@ Each provider needs fake-HTTP tests in `modules/tests/Selfrun.Worker.Tests/Provi
 
 1. Cloud-init runs per-instance modules on a server created from the snapshot, regenerates SSH host keys, and runs the enrollment script.
 2. Services stay stopped on boot until started.
-3. The retained address survives server deletion and serves traffic on the restored server. For Hetzner and Vultr, it is the same address the environment had before opt-in.
+3. `retained`: the retained address survives server deletion and serves traffic on the restored server. For Hetzner and Vultr, it is the same address the environment had before opt-in. `dynamic`: managed records are removed at sleep and resolve to the new address after wake within the managed TTL.
 4. Snapshot and restore times and sizes for a representative environment.
 5. The billing behavior noted in user docs (snapshot storage, unassigned addresses).
 
-Set `SupportsSnapshots = true` and `SupportsRetainedAddresses = true` only for providers that pass.
+Set `SupportsSnapshots = true` only for providers that pass the snapshot checks, and `SupportsRetainedAddresses = true` only for providers that also pass the retained-address checks. A provider with snapshots but no qualified retained addresses supports sleep in `dynamic` mode only.
 
 ## Data model
 
 Names may follow repository conventions. Responsibilities must stay separate.
 
-- `environment_sleep_settings` (1:1 with environment): `sleep_after_minutes`, `http_traffic_is_activity` (default `true`), `revision`, `power_state`, `state_changed_at`, `last_activity_at`, `last_activity_kind`, `last_http_request_at`, `keep_awake_until`, `last_error_code`, `last_error_message`.
+- `environment_sleep_settings` (1:1 with environment): `sleep_after_minutes`, `http_traffic_is_activity` (default `true`), `address_mode` (derived and cached; recomputed on domain binding changes), `revision`, `power_state`, `state_changed_at`, `last_activity_at`, `last_activity_kind`, `last_http_request_at`, `keep_awake_until`, `last_error_code`, `last_error_message`.
 - `environment_power_operations`: `id`, `organization_id`, `environment_id`, `kind` (`sleep`/`wake`), `trigger`, `actor_json`, `status`, `step`, `ownership_token`, `lease_expires_at`, `attempt_count`, `error_code`, `error_message`, `created_at`, `updated_at`, `completed_at`, `deployment_id` (for deployment-triggered wake). Unique partial index: one non-terminal operation per environment.
 - `environment_snapshots`: `id`, `environment_id`, `organization_id`, `provider`, `provider_account_id`, `provider_image_id`, `region`, `datacenter`, `sku`, `server_name`, `size_gb`, `status` (`creating`, `pending`, `current`, `superseded`, `deleting`, `deleted`, `failed`), `placement_json` (volume IDs, SSH key references), `created_at`, `deleted_at`. Unique partial index: at most one `current` snapshot per environment.
 - `environment_retained_addresses` (at most one live row per environment): `id`, `environment_id`, `organization_id`, `provider`, `provider_account_id`, `provider_address_id`, `ipv4`, `region`, `datacenter`, `previous_ipv4`, `state` (`assigned`, `unassigned`, `releasing`, `released`, `failed`), `created_at`, `released_at`. Unique on (`provider_account_id`, `provider_address_id`) and on live `ipv4` per account.
@@ -336,10 +364,10 @@ Proposed native sub-issues under one coordinator issue. Dependencies are explici
 | --- | --- | --- | --- | --- |
 | 1 | Provider snapshot/power capability + Hetzner, DigitalOcean, Vultr clients and fake-HTTP tests | `modules/common/Providers/**`, provider tests | — | Medium |
 | 2 | Data model + migration (settings, operations, snapshots, retained addresses, `retired` servers) and `ServerInstance` consumer audit | `modules/common/Models`, `Migrations`, consumer services | — | Medium / migration |
-| 3 | Provider retained-address capability + Hetzner Primary IP, Vultr reserved IP conversion, DigitalOcean reserved IP, fake-HTTP tests | `modules/common/Providers/**`, provider tests | — | Medium |
-| 4 | API: policy PATCH (incl. traffic setting, 2h default, address reservation on enable, DigitalOcean re-point tracking), wake/sleep endpoints, environment DTO, eligibility, `environment_asleep` guards, deletion of snapshots and addresses | `modules/api`, `modules/contracts`, `modules/common/Services` | 2, 3 | Large |
-| 5 | Power worker: sleep procedure (new snapshot → purge old → delete server) with rollback before commit | `modules/worker/Power/**` | 1, 2, 3 | Large |
-| 6 | Power worker: wake procedure on the retained address, deployment-triggered wake, deployment claim exclusion | `modules/worker/Power/**`, `Queue`, deployment admission | 1, 2, 3, 5 | Large |
+| 3 | Provider retained-address capability + Hetzner Primary IP, Vultr reserved IP conversion, DigitalOcean reserved IP, fake-HTTP tests (needed for `retained` mode only) | `modules/common/Providers/**`, provider tests | — | Medium |
+| 4 | API: policy PATCH (incl. traffic setting, 2h default), address-mode derivation, reservation on enable or first custom domain, DigitalOcean re-point tracking, wake/sleep endpoints, environment DTO, eligibility, `environment_asleep` guards, deletion of snapshots and addresses | `modules/api`, `modules/contracts`, `modules/common/Services` | 2, 3 | Large |
+| 5 | Power worker: sleep procedure (new snapshot → purge old → remove managed DNS or keep address → delete server) with rollback before commit | `modules/worker/Power/**` | 1, 2, 3 | Large |
+| 6 | Power worker: wake procedure (retained address or managed DNS publish), deployment-triggered wake, deployment claim exclusion | `modules/worker/Power/**`, `Queue`, deployment admission | 1, 2, 3, 5 | Large |
 | 7 | Idle sweep, activity recording, database/DNS/domain workers skipping asleep environments, reconciler | `modules/worker`, `modules/common/Services` | 2, 4 | Medium |
 | 8 | Runtime agent per-host HTTP activity signal and ingestion into `last_http_request_at` | `modules/runtime-agent`, runtime ingestion | 2 | Medium |
 | 9 | CLI commands, help, and `docs/cli.md` | `modules/cli`, docs | 4 | Small–Medium |
@@ -355,13 +383,13 @@ Proposed native sub-issues under one coordinator issue. Dependencies are explici
 | S2a | With traffic counting on, requests to the environment's hostnames keep it awake. Requests to the bare IP, unknown hosts, and Selfrun health probes do not. With it off, the same requests do not delay sleep. Toggling takes effect without waiting for new requests. |
 | S3 | Sleep never deletes a server without a verified new snapshot. Snapshot failure restores a running, awake environment and keeps the previous snapshot. |
 | S3a | After each successful sleep exactly one snapshot exists for the environment; the previous one is purged before the server is deleted, or retried by the reconciler with a visible warning. After wake the snapshot is still present. |
-| S4 | After sleep, the provider server is deleted, durable volumes and the retained address are retained and detached, DNS records are unchanged, and the `ServerInstance` is retired. Database backups, domain verification, and DNS reconciliation do not report errors for the asleep environment. |
-| S5 | `selfrun environments wake`, the dashboard Wake button, and `selfrun deploy` each restore the environment. The new server has the same public IPv4 and a newly enrolled host key. It has the same disk data (SQLite and app-hosted PostgreSQL rows written before sleep), re-attached volume data, and running services passing health checks. Managed hostnames and verified custom domains serve it without DNS changes. |
+| S4 | After sleep, the provider server is deleted, durable volumes are retained and detached, and the `ServerInstance` is retired. In `dynamic` mode the managed A records are deleted before the server, and a failed record deletion leaves the server powered off with `sleep_failed`. In `retained` mode the address is retained and detached and DNS is unchanged. Database backups, domain verification, and DNS reconciliation do not report errors for the asleep environment, and the reconciler does not recreate removed records. |
+| S5 | `selfrun environments wake`, the dashboard Wake button, and `selfrun deploy` each restore the environment. The new server has a newly enrolled host key. In `retained` mode it has the same public IPv4, and managed hostnames and verified custom domains serve it without DNS changes. In `dynamic` mode managed hostnames resolve to its new IPv4 before the wake completes. It has the same disk data (SQLite and app-hosted PostgreSQL rows written before sleep), re-attached volume data, and running services passing health checks. |
 | S6 | A deployment to an asleep environment wakes it, then deploys the new release, in one CLI invocation and in the GitHub Actions workflow. |
 | S7 | Interrupted sleep or wake (worker killed at each step) resumes or fails safely: no duplicate servers, no deleted snapshot without a replacement, no environment left without both a server and a snapshot. |
 | S8 | Only one power operation or deployment runs per environment; concurrent wake requests join one operation. |
 | S9 | Deleting an asleep environment or its application deletes its snapshot and releases its retained address, or lists them as retained billable resources with a retry. |
-| S10 | Internal environments can never sleep. Hetzner and Vultr opt-in keeps the existing address. DigitalOcean opt-in moves managed records to the reserved address and blocks sleep until verified custom domains are re-pointed. |
+| S10 | Internal environments can never sleep. An environment with only managed hostnames is `dynamic` and reserves nothing. Adding a custom domain (or disabling managed DNS) makes it `retained` and reserves the address before the binding is created; removing it keeps the reservation. Hetzner and Vultr reservation keeps the existing address. DigitalOcean opt-in moves managed records to the reserved address and blocks sleep until verified custom domains are re-pointed. |
 | S11 | Dashboard shows awake/sleeping/asleep/waking/failed states accessibly at 320–390 px and desktop widths. Runtime observations of an asleep environment read as unavailable, not unhealthy. |
 | S12 | Each enabled provider passed live qualification of the provider checks listed above, with evidence on the qualification issue. |
 
@@ -371,7 +399,7 @@ Verification: focused .NET provider, worker, API, and CLI tests; PostgreSQL migr
 
 Recorded 2026-11-28:
 
-1. **Stable addresses are in v1.** Each sleep-enabled environment keeps one provider-reserved IPv4 address. See [Retained addresses](#retained-addresses).
+1. **Stable addresses only where needed (v1).** Environments whose hostnames are all Selfrun-managed Cloudflare DNS get a new address on wake and their records are updated. Environments with custom domains or manual DNS keep one provider-reserved IPv4 address. See [Addresses](#addresses).
 2. **HTTP traffic counting is a per-environment setting** next to the timeout, default on. The runtime agent signal (issue 8) ships in v1.
 3. **One snapshot at a time, kept after wake.** Each sleep creates and verifies a new snapshot, purges the previous one, then deletes the server.
 4. **Default timeout is 2 hours.**
@@ -384,3 +412,4 @@ Issues 1 and 3 both edit provider clients. Run them sequentially or split owners
 - Scheduled sleep and wake windows.
 - Organization default policy for new preview environments.
 - Retaining IPv6 addresses.
+- Connecting a user's own Cloudflare account so custom domains can also use `dynamic` mode.
