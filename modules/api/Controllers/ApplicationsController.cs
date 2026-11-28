@@ -739,7 +739,7 @@ public sealed class ApplicationsController : ControllerBase
         {
             return EndpointResults.Problem(ex.Code, ex.Message, ex.StatusCode);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex) when (IsActivePowerOperationConflict(ex))
         {
             return EndpointResults.Conflict("environment_power_busy",
                 "A power operation is already in progress for this environment.");
@@ -788,7 +788,7 @@ public sealed class ApplicationsController : ControllerBase
         {
             return EndpointResults.Problem(ex.Code, ex.Message, ex.StatusCode);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex) when (IsActivePowerOperationConflict(ex))
         {
             return EndpointResults.Conflict("environment_power_busy",
                 "A power operation is already in progress for this environment.");
@@ -843,6 +843,18 @@ public sealed class ApplicationsController : ControllerBase
                 x.Status == DeploymentStatus.Dispatching || x.Status == DeploymentStatus.Provisioning ||
                 x.Status == DeploymentStatus.Deploying || x.Status == DeploymentStatus.Verifying) ||
                x.SshRegistrationState == "registering" || x.SshRegistrationState == "unknown"))), ct);
+    }
+
+    private static bool IsActivePowerOperationConflict(DbUpdateException error)
+    {
+        if (error.InnerException is Npgsql.PostgresException
+            { SqlState: "23505", ConstraintName: "ux_environment_power_operations_active" })
+            return true;
+
+        return error.InnerException is Microsoft.Data.Sqlite.SqliteException
+            { SqliteExtendedErrorCode: 2067 } sqlite &&
+            sqlite.Message.Contains(
+                "environment_power_operations.environment_id", StringComparison.OrdinalIgnoreCase);
     }
 
     internal static async Task<IReadOnlyList<ApplicationResponse>> BuildApplicationResponsesAsync(
