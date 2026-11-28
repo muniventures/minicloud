@@ -4,6 +4,7 @@ using Selfrun.Cli.Api;
 using Selfrun.Cli.Config;
 using Selfrun.Common.Contracts;
 using CliEnvironmentPowerOperationResponse = Selfrun.Cli.Api.EnvironmentPowerOperationResponse;
+using CliEnvironmentSleepPatchRequest = Selfrun.Cli.Api.EnvironmentSleepPatchRequest;
 using CliEnvironmentSleepPolicyPatch = Selfrun.Cli.Api.EnvironmentSleepPolicyPatch;
 using CliEnvironmentSleepResponse = Selfrun.Cli.Api.EnvironmentSleepResponse;
 
@@ -84,7 +85,7 @@ public sealed partial class CliApplication
                 var patch = BuildSleepPolicyPatch(sleepPolicy!.Revision, sleepAfterValue, trafficActivityValue);
                 var request = new EnvironmentSleepUpdateRequest(
                     SshAccess: sshUpdate,
-                    Sleep: new EnvironmentSleepPatchRequest(patch));
+                    Sleep: new CliEnvironmentSleepPatchRequest(patch));
                 ApplicationEnvironmentSleepResponse updated;
                 try
                 {
