@@ -103,7 +103,7 @@ public sealed class EnvironmentIdleSweepProcessor(
                     (id, organization_id, environment_id, kind, trigger, actor_json, status, attempt_count, created_at, updated_at)
                 VALUES
                     ({id}, {app.OrganizationId}, {environmentId}, {kind}, {trigger}, {actorJson}, {status}, 0, {now}, {now})
-                ON CONFLICT (environment_id)
+                ON CONFLICT (environment_id, kind)
                     WHERE status NOT IN ('completed', 'failed', 'cancelled')
                 DO NOTHING
                 """, ct);
