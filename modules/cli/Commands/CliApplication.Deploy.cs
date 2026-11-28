@@ -128,6 +128,7 @@ public sealed partial class CliApplication
         var app = await ResolveEnvironmentAsync(application, environmentName, cancellationToken);
         config = config with { AppId = app.Id };
         WriteEnvironmentTarget(app);
+        await WriteDeployWakeMessageAsync(application.Id, app.Id, cancellationToken);
 
         if (branchDeploy)
         {

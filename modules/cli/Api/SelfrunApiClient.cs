@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -15,6 +16,7 @@ public sealed class SelfrunApiClient
     private readonly CliEnvironment _environment;
     private readonly TokenStore _tokenStore;
     private readonly HttpClient _httpClient;
+    private readonly ConcurrentDictionary<(string ApplicationId, string EnvironmentId), bool> _environmentSleepSupport = new();
 
     public SelfrunApiClient(CliEnvironment environment, TokenStore tokenStore)
         : this(environment, tokenStore, new HttpClient())
@@ -56,14 +58,50 @@ public sealed class SelfrunApiClient
     public Task<IReadOnlyList<ApplicationResponse>> GetApplicationsAsync(string organizationId, CancellationToken cancellationToken) =>
         SendAsync<IReadOnlyList<ApplicationResponse>>(HttpMethod.Get, $"/api/apps?organizationId={Uri.EscapeDataString(organizationId)}", null, cancellationToken);
 
-    public Task<ApplicationResponse> GetApplicationAsync(string applicationId, CancellationToken ct) =>
-        SendAsync<ApplicationResponse>(HttpMethod.Get, $"/api/apps/{Uri.EscapeDataString(applicationId)}", null, ct);
+    public async Task<ApplicationResponse> GetApplicationAsync(string applicationId, CancellationToken ct)
+    {
+        var path = $"/api/apps/{Uri.EscapeDataString(applicationId)}";
+        var json = await SendAsync<JsonElement>(HttpMethod.Get, path, null, ct);
+        var application = json.Deserialize<ApplicationResponse>(JsonOptions)
+            ?? throw new ApiException((int)HttpStatusCode.OK, "empty_response", "Selfrun API returned an empty application response.");
+        if (json.ValueKind == JsonValueKind.Object &&
+            json.TryGetProperty("environments", out var environments) &&
+            environments.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var environment in environments.EnumerateArray())
+            {
+                if (environment.ValueKind == JsonValueKind.Object &&
+                    environment.TryGetProperty("id", out var idElement) &&
+                    idElement.GetString() is { } environmentId)
+                {
+                    _environmentSleepSupport[(application.Id, environmentId)] =
+                        environment.TryGetProperty("sleep", out _);
+                }
+            }
+        }
+        return application;
+    }
+
+    internal bool SupportsEnvironmentSleepState(string applicationId, string environmentId) =>
+        _environmentSleepSupport.TryGetValue((applicationId, environmentId), out var supported) && supported;
 
     public Task<ApplicationEnvironmentResponse> CreateEnvironmentAsync(string applicationId, CreateEnvironmentRequest request, CancellationToken ct) =>
         SendAsync<ApplicationEnvironmentResponse>(HttpMethod.Post, $"/api/apps/{Uri.EscapeDataString(applicationId)}/environments", request, ct);
 
     public Task<ApplicationEnvironmentResponse> UpdateEnvironmentAsync(string applicationId, string environmentId, UpdateEnvironmentRequest request, CancellationToken ct) =>
         SendAsync<ApplicationEnvironmentResponse>(HttpMethod.Patch, $"/api/apps/{Uri.EscapeDataString(applicationId)}/environments/{Uri.EscapeDataString(environmentId)}", request, ct);
+
+    internal Task<ApplicationEnvironmentSleepResponse> GetApplicationEnvironmentSleepAsync(string applicationId, string environmentId, CancellationToken ct) =>
+        SendAsync<ApplicationEnvironmentSleepResponse>(HttpMethod.Get, $"/api/apps/{Uri.EscapeDataString(applicationId)}/environments/{Uri.EscapeDataString(environmentId)}", null, ct);
+
+    internal Task<ApplicationEnvironmentSleepResponse> UpdateEnvironmentSleepAsync(string applicationId, string environmentId, EnvironmentSleepUpdateRequest request, CancellationToken ct) =>
+        SendAsync<ApplicationEnvironmentSleepResponse>(HttpMethod.Patch, $"/api/apps/{Uri.EscapeDataString(applicationId)}/environments/{Uri.EscapeDataString(environmentId)}", request, ct);
+
+    internal Task<EnvironmentPowerActionResponse> SleepEnvironmentAsync(string applicationId, string environmentId, CancellationToken ct) =>
+        SendAsync<EnvironmentPowerActionResponse>(HttpMethod.Post, $"/api/apps/{Uri.EscapeDataString(applicationId)}/environments/{Uri.EscapeDataString(environmentId)}/sleep", null, ct);
+
+    internal Task<EnvironmentPowerActionResponse> WakeEnvironmentAsync(string applicationId, string environmentId, WakeEnvironmentRequest request, CancellationToken ct) =>
+        SendAsync<EnvironmentPowerActionResponse>(HttpMethod.Post, $"/api/apps/{Uri.EscapeDataString(applicationId)}/environments/{Uri.EscapeDataString(environmentId)}/wake", request, ct);
 
     public Task<EnvironmentDetailResponse> GetEnvironmentAsync(string environmentId, CancellationToken cancellationToken) =>
         SendAsync<EnvironmentDetailResponse>(HttpMethod.Get, $"/api/environments/{Uri.EscapeDataString(environmentId)}", null, cancellationToken);

@@ -203,7 +203,7 @@ public sealed partial class CliApplication
         _console.WriteLine("  init            Initialize a new application and generate selfrun.yml");
         _console.WriteLine("  add-service     Add a new service configuration to an existing application");
         _console.WriteLine("  deploy          Deploy changed services to Selfrun (or 'all' / '--all' to deploy all)");
-        _console.WriteLine("  environments    List, create, update, or rename application environments");
+        _console.WriteLine("  environments    List, create, update, sleep, wake, or rename application environments");
         _console.WriteLine("  plans           List named plans in an organization");
         _console.WriteLine("  providers       Add provider accounts, list SSH keys, or import legacy bindings");
         _console.WriteLine("  branch          Manage preview environments (deploy branch, branch destroy)");
@@ -290,15 +290,22 @@ public sealed partial class CliApplication
                 return CliExitCodes.Success;
 
             case "environments":
+            case "environments sleep":
+            case "environments wake":
                 _console.WriteLine("selfrun environments list [--config path]");
                 _console.WriteLine($"selfrun environments create <name> --plan <plan> [--database sqlite|postgres] {SshOptionsUsage} [--config path]");
-                _console.WriteLine($"selfrun environments update <name> {SshOptionsUsage} [--config path]");
+                _console.WriteLine($"selfrun environments update <name> [--sleep-after on|off|<duration>] [--traffic-activity on|off] {SshOptionsUsage} [--config path]");
+                _console.WriteLine("selfrun environments sleep <name> [--no-wait] [--config path]");
+                _console.WriteLine("selfrun environments wake <name> [--keep-awake <duration>] [--no-wait] [--config path]");
                 _console.WriteLine("selfrun environments rename <name> <new-name> [--config path]");
                 _console.WriteLine("SSH options select a personal key installed when the environment's VPS is first provisioned:");
                 _console.WriteLine("  --ssh-key <key-id>            Existing key from 'selfrun providers ssh-keys --plan <plan>' (providers:read)");
                 _console.WriteLine("  --ssh-public-key-file <path>  New OpenSSH public key (.pub) registered at provisioning (providers:write)");
                 _console.WriteLine("  --ssh-key-name <name>         Name for the new key (default: key comment or file name)");
+                _console.WriteLine("Sleep timeout durations use m, h, or d units (30m-30d); enabling without a duration defaults to 2h.");
+                _console.WriteLine("Sleep and wake wait for completion and report progress by default; --no-wait prints the operation ID.");
                 _console.WriteLine("Omitting SSH options keeps Selfrun-only access on create and the current selection on update. Selections are immutable after server allocation.");
+                _console.WriteLine("Sleep-only updates do not require SSH options.");
                 return CliExitCodes.Success;
 
             case "plans":
