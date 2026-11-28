@@ -120,6 +120,43 @@ describe("EnvironmentSleepStatus", () => {
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("Custom domains must resolve to the retained address.");
   });
 
+  it("clears a queued sleep when an explicit wake keeps the environment awake", async () => {
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+    const awake = environment("awake");
+    const { rerender } = render(
+      <EnvironmentSleepStatus
+        applicationId="app_1"
+        applicationName="Sample"
+        environment={awake}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Sleep now" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sleep now" }));
+    expect(await screen.findByText("Sleeping request queued…")).toBeInTheDocument();
+
+    rerender(
+      <EnvironmentSleepStatus
+        applicationId="app_1"
+        applicationName="Sample"
+        environment={{
+          ...awake,
+          sleep: {
+            ...awake.sleep!,
+            keepAwakeUntil: new Date(Date.now() + 30 * 60_000).toISOString(),
+          },
+        }}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("Sleeping request queued…")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Sleep now" })).toBeEnabled();
+    });
+  });
+
   it("sends Keep awake and reports API errors accessibly", async () => {
     vi.mocked(wakeEnvironment).mockRejectedValueOnce(new Error("A power operation is already in progress."));
     render(

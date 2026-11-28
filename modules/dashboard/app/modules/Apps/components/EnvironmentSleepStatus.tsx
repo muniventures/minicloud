@@ -35,8 +35,15 @@ export function EnvironmentSleepStatus({ applicationId, applicationName, environ
   }, [sleep]);
 
   useEffect(() => {
-    if (pendingOperation && sleep?.operation?.id === pendingOperation.id) setPendingOperation(null);
-  }, [pendingOperation, sleep?.operation?.id]);
+    const queuedSleepPreventedByWake =
+      pendingOperation?.kind === "sleep" &&
+      sleep?.state === "awake" &&
+      sleep.operation == null &&
+      sleep.keepAwakeUntil != null &&
+      Date.parse(sleep.keepAwakeUntil) > Date.now();
+    if (pendingOperation && (sleep?.operation?.id === pendingOperation.id || queuedSleepPreventedByWake))
+      setPendingOperation(null);
+  }, [pendingOperation, sleep?.operation?.id, sleep?.state, sleep?.keepAwakeUntil]);
 
   const operation = sleep?.operation ?? pendingOperation;
   const activeOperation = operation && ["queued", "running"].includes(operation.status);
