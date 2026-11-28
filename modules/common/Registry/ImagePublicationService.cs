@@ -158,7 +158,8 @@ public sealed class ImagePublicationService(
         {
             return await db.Deployments.AnyAsync(x => x.Id == session.DeploymentId && x.AppId == session.AppId && x.OrganizationId == session.OrganizationId &&
                 x.OwnershipToken == session.OwnershipToken && x.OwnershipToken != null && x.WorkerId == session.SubjectId &&
-                db.ServerInstances.Any(server => server.Id == session.ServerId && server.AppId == session.AppId && server.OrganizationId == session.OrganizationId) &&
+                db.ServerInstances.Any(server => server.Id == session.ServerId && server.AppId == session.AppId &&
+                    server.OrganizationId == session.OrganizationId && server.Status != ServerInstance.RetiredStatus) &&
                 (x.Status == DeploymentStatus.Provisioning || x.Status == DeploymentStatus.Deploying || x.Status == DeploymentStatus.Verifying), ct) ? session : null;
         }
         if (session.ImagePublication.Status is not (ImagePublicationStatus.Pending or ImagePublicationStatus.Uploading) || session.ImagePublication.ExpiresAt <= now) { return null; }
@@ -206,7 +207,8 @@ public sealed class ImagePublicationService(
             ExpiresAt = clock.GetUtcNow().AddMinutes(30)
         };
         if (publication.AppId != deployment.AppId || publication.OrganizationId != deployment.OrganizationId || publication.Status != ImagePublicationStatus.Ready || publication.RetiredAt != null || deployment.OwnershipToken is null ||
-            !await db.ServerInstances.AnyAsync(x => x.Id == serverId && x.AppId == deployment.AppId && x.OrganizationId == deployment.OrganizationId, ct))
+            !await db.ServerInstances.AnyAsync(x => x.Id == serverId && x.AppId == deployment.AppId &&
+                x.OrganizationId == deployment.OrganizationId && x.Status != ServerInstance.RetiredStatus, ct))
         { throw new UnauthorizedAccessException("Image pull scope is invalid."); }
         db.RegistrySessions.Add(session);
         await db.SaveChangesAsync(ct);
