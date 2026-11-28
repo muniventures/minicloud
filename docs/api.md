@@ -97,6 +97,9 @@ operation, or `409 environment_sleep_ineligible` / `environment_power_busy`.
 minutes). It returns `202` with the wake operation, or `200` with the sleep
 state after recording keep-awake activity when the environment is already
 awake. A wake request joining a queued/running wake returns that operation.
+When sleep is already running, wake is durably queued behind it and returns
+`202`; when sleep is queued but the environment is still awake, the keep-awake
+request prevents that sleep from reaching provider power-off.
 Sleeping or waking environments reject server-dependent operations with
 `environment_asleep` or `environment_waking` and a wake hint.
 

@@ -848,7 +848,7 @@ public sealed class ApplicationsController : ControllerBase
     private static bool IsActivePowerOperationConflict(DbUpdateException error)
     {
         if (error.InnerException is Npgsql.PostgresException
-            { SqlState: "23505", ConstraintName: "ux_environment_power_operations_active" })
+            { SqlState: "23505", ConstraintName: "ux_environment_power_operations_active_kind" })
             return true;
 
         return error.InnerException is Microsoft.Data.Sqlite.SqliteException

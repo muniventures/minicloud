@@ -254,6 +254,103 @@ public sealed class AppApiIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WakeDuringSleepQueuesWakeBehindTheActiveSleepOperation()
+    {
+        var seed = await SeedAsync("org_wake_during_sleep", "app_wake_during_sleep", DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+            db.EnvironmentSleepSettings.Add(new EnvironmentSleepSettings
+            {
+                EnvironmentId = seed.AppId,
+                PowerState = EnvironmentPowerStates.Sleeping,
+                StateChangedAt = now
+            });
+            db.EnvironmentPowerOperations.Add(new EnvironmentPowerOperation
+            {
+                Id = "sleep_operation_during_wake",
+                OrganizationId = seed.OrganizationId,
+                EnvironmentId = seed.AppId,
+                Kind = "sleep",
+                Trigger = "idle",
+                Status = EnvironmentPowerOperationStatuses.Running,
+                Step = "snapshot",
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var response = await client.PostAsJsonAsync(
+            $"/api/apps/{seed.ApplicationId}/environments/{seed.AppId}/wake",
+            new WakeEnvironmentRequest(KeepAwakeMinutes: 45));
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        var accepted = (await response.Content.ReadFromJsonAsync<EnvironmentPowerOperationAcceptedResponse>())!;
+        Assert.Equal("wake", accepted.Operation.Kind);
+        Assert.Equal(EnvironmentPowerOperationStatuses.Queued, accepted.Operation.Status);
+
+        await using var verifyScope = _factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+        var activeOperations = await verifyDb.EnvironmentPowerOperations
+            .Where(x => x.EnvironmentId == seed.AppId &&
+                x.Status != EnvironmentPowerOperationStatuses.Completed &&
+                x.Status != EnvironmentPowerOperationStatuses.Failed &&
+                x.Status != EnvironmentPowerOperationStatuses.Cancelled)
+            .OrderBy(x => x.Kind)
+            .ToListAsync();
+        Assert.Equal(["sleep", "wake"], activeOperations.Select(x => x.Kind));
+    }
+
+    [Fact]
+    public async Task WakeDuringQueuedSleepKeepsAwakeAndDefersSleepCancellationToWorker()
+    {
+        var seed = await SeedAsync("org_wake_before_sleep_claim", "app_wake_before_sleep_claim", DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+            db.EnvironmentSleepSettings.Add(new EnvironmentSleepSettings
+            {
+                EnvironmentId = seed.AppId,
+                PowerState = EnvironmentPowerStates.Awake,
+                StateChangedAt = now
+            });
+            db.EnvironmentPowerOperations.Add(new EnvironmentPowerOperation
+            {
+                Id = "queued_sleep_before_wake",
+                OrganizationId = seed.OrganizationId,
+                EnvironmentId = seed.AppId,
+                Kind = "sleep",
+                Trigger = "idle",
+                Status = EnvironmentPowerOperationStatuses.Queued,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", seed.ApiKeyToken);
+        var response = await client.PostAsJsonAsync(
+            $"/api/apps/{seed.ApplicationId}/environments/{seed.AppId}/wake",
+            new WakeEnvironmentRequest(KeepAwakeMinutes: 45));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var environment = (await response.Content.ReadFromJsonAsync<EnvironmentSleepResponse>())!;
+        Assert.Equal(EnvironmentPowerStates.Awake, environment.State);
+        Assert.True(environment.KeepAwakeUntil > now);
+        Assert.Null(environment.Operation);
+        await using var verifyScope = _factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<SelfrunDbContext>();
+        Assert.Equal(EnvironmentPowerOperationStatuses.Queued,
+            (await verifyDb.EnvironmentPowerOperations.SingleAsync()).Status);
+    }
+
+    [Fact]
     public async Task AsleepCustomDomainVerificationReturnsWakeHintConflict()
     {
         var seed = await SeedAsync("org_sleep_guard", "app_sleep_guard", DateTimeOffset.UtcNow);

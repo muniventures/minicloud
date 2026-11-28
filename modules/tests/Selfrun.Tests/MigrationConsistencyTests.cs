@@ -50,6 +50,20 @@ public sealed class MigrationConsistencyTests
     }
 
     [Fact]
+    public void WakeQueueMigrationAllowsOneActiveOperationPerKind()
+    {
+        using var db = CreateContext();
+        var upgrade = db.GetService<IMigrator>().GenerateScript(
+            "20261128131911_EnvironmentPowerPersistence",
+            "20261128144912_EnvironmentPowerWakeQueue");
+
+        Assert.Contains("DROP INDEX ux_environment_power_operations_active", upgrade);
+        Assert.Contains("CREATE UNIQUE INDEX ux_environment_power_operations_active_kind", upgrade);
+        Assert.Contains("(environment_id, kind)", upgrade);
+        Assert.Contains("WHERE status NOT IN ('completed', 'failed', 'cancelled')", upgrade);
+    }
+
+    [Fact]
     public void DomainMigrationCreatesColumnOnceAndReconciliationPreservesIt()
     {
         using var db = CreateContext();

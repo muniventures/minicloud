@@ -62,6 +62,14 @@ public sealed class EnvironmentSleepPolicyService(
             .ToListAsync(ct);
         var operation = operations.OrderByDescending(x => x.CreatedAt)
             .ThenByDescending(x => x.Id, StringComparer.Ordinal).FirstOrDefault();
+        if (state == EnvironmentPowerStates.Awake &&
+            settings?.KeepAwakeUntil is { } keepAwakeUntil &&
+            keepAwakeUntil > timeProvider.GetUtcNow() &&
+            operation?.Kind == "sleep" &&
+            operation.Status == EnvironmentPowerOperationStatuses.Queued)
+        {
+            operation = null;
+        }
         var snapshots = await db.EnvironmentSnapshots.AsNoTracking()
             .Where(x => x.EnvironmentId == environmentId &&
                 (x.Status == EnvironmentSnapshotStatuses.Current || x.Status == EnvironmentSnapshotStatuses.Deleting))
@@ -224,6 +232,8 @@ public sealed class EnvironmentSleepPolicyService(
             throw new EnvironmentSleepException("environment_asleep", "This environment is already asleep. Wake it before requesting sleep.");
         if (settings?.PowerState is EnvironmentPowerStates.Sleeping or EnvironmentPowerStates.Waking)
             throw new EnvironmentSleepException("environment_power_busy", "A power operation is already in progress for this environment.");
+        if (settings is not null)
+            settings.KeepAwakeUntil = null;
 
         var domains = await ActiveDomainsAsync(env.Id, ct);
         var retainedAddress = await db.EnvironmentRetainedAddresses.AsNoTracking()
@@ -283,14 +293,23 @@ public sealed class EnvironmentSleepPolicyService(
             throw InvalidPolicy("keepAwakeMinutes must be between 30 and 1440.");
 
         var settings = await db.EnvironmentSleepSettings.SingleOrDefaultAsync(x => x.EnvironmentId == env.Id, ct);
-        var current = await db.EnvironmentPowerOperations
+        var currentWake = await db.EnvironmentPowerOperations
             .Where(x => x.EnvironmentId == env.Id &&
+                x.Kind == "wake" &&
                 x.Status != EnvironmentPowerOperationStatuses.Completed &&
                 x.Status != EnvironmentPowerOperationStatuses.Failed &&
                 x.Status != EnvironmentPowerOperationStatuses.Cancelled)
             .SingleOrDefaultAsync(ct);
-        if (current?.Kind == "wake")
-            return current;
+        if (currentWake is not null)
+            return currentWake;
+
+        var currentSleep = await db.EnvironmentPowerOperations
+            .Where(x => x.EnvironmentId == env.Id &&
+                x.Kind == "sleep" &&
+                x.Status != EnvironmentPowerOperationStatuses.Completed &&
+                x.Status != EnvironmentPowerOperationStatuses.Failed &&
+                x.Status != EnvironmentPowerOperationStatuses.Cancelled)
+            .SingleOrDefaultAsync(ct);
         if (settings is null || settings.PowerState == EnvironmentPowerStates.Awake)
         {
             var now = timeProvider.GetUtcNow();
@@ -310,12 +329,18 @@ public sealed class EnvironmentSleepPolicyService(
             return null;
         }
 
-        if (settings?.PowerState is EnvironmentPowerStates.Sleeping or EnvironmentPowerStates.Waking)
+        if (settings.PowerState == EnvironmentPowerStates.Sleeping && currentSleep is not null)
+            return AddOperation(env, "wake", actor);
+
+        if (settings.PowerState == EnvironmentPowerStates.SleepFailed && currentSleep is not null)
+            return AddOperation(env, "wake", actor);
+
+        if (settings.PowerState is EnvironmentPowerStates.Sleeping or EnvironmentPowerStates.Waking)
         {
             throw new EnvironmentSleepException("environment_power_busy",
-                "A sleep operation is still in progress. Retry wake after it completes.");
+                "The environment is changing power state without an active sleep operation.");
         }
-        if (current is not null)
+        if (currentSleep is not null)
             throw new EnvironmentSleepException("environment_power_busy",
                 "A power operation is already in progress for this environment.");
 
