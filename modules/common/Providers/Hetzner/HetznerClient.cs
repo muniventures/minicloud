@@ -146,7 +146,7 @@ public sealed partial class HetznerClient : IVpsProviderClient, IVpsProviderSshK
         }
 
         using var httpRequest = CreateRequest(HttpMethod.Post, "servers");
-        if (snapshotId is not null)
+        if (snapshotId is not null || request.RetainedAddressId is not null)
             httpRequest.Options.Set(ProviderHttpOptions.NoRetry, true);
         httpRequest.Content = JsonContent.Create(payload);
 

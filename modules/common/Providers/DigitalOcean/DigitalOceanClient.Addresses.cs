@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using Selfrun.Common.Providers.Common;
+using Selfrun.Common.Providers.Extensibility;
 using Selfrun.Common.Providers.Models;
 
 namespace Selfrun.Common.Providers.DigitalOcean;
@@ -28,6 +29,7 @@ public sealed partial class DigitalOceanClient : IVpsProviderAddressClient
             throw new ProviderApiException($"DigitalOcean Droplet {serverId} did not report a region for Reserved IP creation.", provider: Provider);
 
         using var request = CreateRequest(HttpMethod.Post, "reserved_ips");
+        request.Options.Set(ProviderHttpOptions.NoRetry, true);
         request.Content = JsonContent.Create(new DigitalOceanCreateReservedIpPayload { Region = region });
         using var response = await SendAsync(request, cancellationToken);
         await EnsureSuccessAsync(response, cancellationToken);
@@ -126,6 +128,7 @@ public sealed partial class DigitalOceanClient : IVpsProviderAddressClient
         CancellationToken cancellationToken)
     {
         using var request = CreateRequest(HttpMethod.Post, $"reserved_ips/{Uri.EscapeDataString(addressId)}/actions");
+        request.Options.Set(ProviderHttpOptions.NoRetry, true);
         request.Content = JsonContent.Create(new DigitalOceanReservedIpActionPayload
         {
             Type = actionType,

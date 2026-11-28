@@ -135,7 +135,7 @@ public sealed partial class DigitalOceanClient : IVpsProviderClient, IVpsProvide
         }
 
         using var httpRequest = CreateRequest(HttpMethod.Post, "droplets");
-        if (snapshotId is not null)
+        if (snapshotId is not null || request.RetainedAddressId is not null)
             httpRequest.Options.Set(ProviderHttpOptions.NoRetry, true);
         httpRequest.Content = JsonContent.Create(payload);
 

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using Selfrun.Common.Providers.Common;
+using Selfrun.Common.Providers.Extensibility;
 using Selfrun.Common.Providers.Models;
 
 namespace Selfrun.Common.Providers.Vultr;
@@ -30,6 +31,7 @@ public sealed partial class VultrClient : IVpsProviderAddressClient
                 return MapRetainedAddress(existing);
 
             using var convertRequest = CreateRequest(HttpMethod.Post, "reserved-ips/convert");
+            convertRequest.Options.Set(ProviderHttpOptions.NoRetry, true);
             convertRequest.Content = JsonContent.Create(new VultrConvertReservedIpPayload
             {
                 IpAddress = instance.MainIp,

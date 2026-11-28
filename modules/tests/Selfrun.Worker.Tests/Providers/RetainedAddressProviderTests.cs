@@ -226,6 +226,59 @@ public class RetainedAddressProviderTests
         Assert.Contains("action failed", error.Message);
     }
 
+    [Fact]
+    public async Task DigitalOceanReservedIpCreationAndActionsDoNotRetryMutations()
+    {
+        var createHandler = new TestHttpMessageHandler();
+        createHandler.QueueJsonResponse("""{"reserved_ips":[]}""");
+        createHandler.QueueJsonResponse("""{"droplet":{"id":600,"region":{"slug":"nyc1"}}}""");
+        createHandler.QueueResponse(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+
+        await Assert.ThrowsAsync<ProviderApiException>(
+            () => CreateRetryingDigitalOceanClient(createHandler).RetainServerAddressAsync("600"));
+
+        Assert.Equal(3, createHandler.RecordedRequests.Count);
+        Assert.Equal(HttpMethod.Post, createHandler.RecordedRequests[2].Method);
+
+        var actionHandler = new TestHttpMessageHandler();
+        actionHandler.QueueJsonResponse("""{"reserved_ip":{"ip":"203.0.113.60","droplet":null}}""");
+        actionHandler.QueueResponse(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+
+        await Assert.ThrowsAsync<ProviderApiException>(
+            () => CreateRetryingDigitalOceanClient(actionHandler).AssignRetainedAddressAsync("203.0.113.60", "600"));
+
+        Assert.Equal(2, actionHandler.RecordedRequests.Count);
+        Assert.Equal(HttpMethod.Post, actionHandler.RecordedRequests[1].Method);
+    }
+
+    [Fact]
+    public async Task VultrReservedIpConversionDoesNotRetryMutation()
+    {
+        var handler = new TestHttpMessageHandler();
+        handler.QueueJsonResponse("""{"instance":{"id":"instance-14","main_ip":"192.0.2.14","status":"active"}}""");
+        handler.QueueJsonResponse("""{"reserved_ips":[]}""");
+        handler.QueueResponse(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+
+        await Assert.ThrowsAsync<ProviderApiException>(
+            () => CreateRetryingVultrClient(handler).RetainServerAddressAsync("instance-14"));
+
+        Assert.Equal(3, handler.RecordedRequests.Count);
+        Assert.Equal(HttpMethod.Post, handler.RecordedRequests[2].Method);
+    }
+
+    [Fact]
+    public async Task DigitalOceanCreateWithRetainedAddressDoesNotRetryServerAllocation()
+    {
+        var handler = new TestHttpMessageHandler();
+        handler.QueueResponse(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+
+        await Assert.ThrowsAsync<ProviderApiException>(
+            () => CreateRetryingDigitalOceanClient(handler).CreateServerAsync(
+                new CreateServerRequest("sleeping", "s-1vcpu-1gb", "nyc1", [], "", RetainedAddressId: "203.0.113.60")));
+
+        Assert.Single(handler.RecordedRequests);
+    }
+
     private HetznerClient CreateHetznerClient() =>
         new(new HttpClient(_handler) { BaseAddress = new Uri(HetznerBaseUrl) }, new HetznerOptions { ApiToken = "fixture" });
 
@@ -234,4 +287,14 @@ public class RetainedAddressProviderTests
 
     private DigitalOceanClient CreateDigitalOceanClient() =>
         new(new HttpClient(_handler) { BaseAddress = new Uri(DigitalOceanBaseUrl) }, new DigitalOceanOptions { ApiToken = "fixture" });
+
+    private static DigitalOceanClient CreateRetryingDigitalOceanClient(TestHttpMessageHandler handler) =>
+        new(new HttpClient(new ResilientHttpRetryHandler(handler, maxRetries: 2, baseDelay: TimeSpan.FromMilliseconds(1)))
+            { BaseAddress = new Uri(DigitalOceanBaseUrl) },
+            new DigitalOceanOptions { ApiToken = "fixture" });
+
+    private static VultrClient CreateRetryingVultrClient(TestHttpMessageHandler handler) =>
+        new(new HttpClient(new ResilientHttpRetryHandler(handler, maxRetries: 2, baseDelay: TimeSpan.FromMilliseconds(1)))
+            { BaseAddress = new Uri(VultrBaseUrl) },
+            new VultrOptions { ApiKey = "fixture", DefaultOsId = 2284 });
 }

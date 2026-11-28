@@ -156,7 +156,7 @@ public sealed partial class VultrClient : IVpsProviderClient, IVpsProviderSshKey
         }
 
         using var httpRequest = CreateRequest(HttpMethod.Post, "instances");
-        if (snapshotId is not null)
+        if (snapshotId is not null || request.RetainedAddressId is not null)
             httpRequest.Options.Set(ProviderHttpOptions.NoRetry, true);
         httpRequest.Content = JsonContent.Create(payload);
 
