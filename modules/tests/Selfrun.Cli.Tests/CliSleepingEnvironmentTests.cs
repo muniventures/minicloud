@@ -192,6 +192,21 @@ public sealed class CliSleepingEnvironmentTests
         Assert.Contains("staging\tp0\tsqlite\tawake\t2026-11-28 18:00 UTC", fixture.Console.Output);
     }
 
+    [Fact]
+    public async Task Environment_list_keeps_working_with_an_api_without_sleep_support()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Handler.IncludeSleepSummary = false;
+
+        var exitCode = await fixture.Cli.RunAsync(
+            ["environments", "list", "--config", fixture.Config],
+            default);
+
+        Assert.Equal(CliExitCodes.Success, exitCode);
+        Assert.Contains("staging\tp0\tsqlite\t-\t-", fixture.Console.Output);
+        Assert.Equal(0, fixture.Handler.PowerPollCount);
+    }
+
     private sealed class Fixture(DirectoryInfo directory, string config, Handler handler, TestConsole console, CliApplication cli) : IAsyncDisposable
     {
         public string Config { get; } = config;
@@ -245,6 +260,7 @@ public sealed class CliSleepingEnvironmentTests
         public int PowerPollCount => _powerPollCount;
         public bool FailPowerOperation { get; set; }
         public bool CancelPowerOperation { get; set; }
+        public bool IncludeSleepSummary { get; set; } = true;
         public string AddressMode { get; set; } = "dynamic";
         public string Ipv4 { get; set; } = "203.0.113.10";
         public string? PreviousIpv4 { get; set; }
@@ -266,7 +282,7 @@ public sealed class CliSleepingEnvironmentTests
                     organizationId = "org",
                     name = "Demo",
                     slug = "demo",
-                    environments = new[] { CliApiFixtures.EnvironmentSummary("environment_staging", "staging") }
+                    environments = new[] { EnvironmentSummary("environment_staging", "staging", IncludeSleepSummary) }
                 };
             }
             else if (path == "/api/environments/environment_staging" && request.Method == HttpMethod.Get)
@@ -400,6 +416,19 @@ public sealed class CliSleepingEnvironmentTests
 
         private static object Operation(string kind, string status, string step) =>
             new { id = "operation-1", kind, status, step, trigger = "manual_cli" };
+
+        private static object EnvironmentSummary(string id, string name, bool includeSleep) =>
+            includeSleep
+                ? new
+                {
+                    id, name, kind = "persistent", plan = "p0", database = "sqlite",
+                    deletionStatus = (string?)null, sleep = (object?)null
+                }
+                : new
+                {
+                    id, name, kind = "persistent", plan = "p0", database = "sqlite",
+                    deletionStatus = (string?)null
+                };
 
         private static HttpResponseMessage Json(HttpStatusCode status, object body) =>
             new(status) { Content = JsonContent.Create(body) };

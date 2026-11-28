@@ -114,9 +114,11 @@ public sealed partial class CliApplication
             _console.WriteLine("NAME\tPLAN\tDATABASE\tSTATE\tSLEEPS AT\tID");
             foreach (var environment in application.Environments)
             {
-                var details = await GetApplicationEnvironmentForSleepAsync(application.Id, environment.Id, ct);
-                var state = details.Sleep?.State ?? "-";
-                var sleepsAt = details.Sleep?.SleepsAt is { } dueAt
+                var sleep = _apiClient.SupportsEnvironmentSleepState(application.Id, environment.Id)
+                    ? (await GetApplicationEnvironmentForSleepAsync(application.Id, environment.Id, ct)).Sleep
+                    : null;
+                var state = sleep?.State ?? "-";
+                var sleepsAt = sleep?.SleepsAt is { } dueAt
                     ? dueAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture)
                     : "-";
                 _console.WriteLine($"{environment.Name}\t{environment.Plan}\t{environment.Database}\t{state}\t{sleepsAt}\t{environment.Id}");
