@@ -60,6 +60,32 @@ public sealed class CliEnvironmentDeploymentTests
         Assert.Equal("app_staging", fixture.Handler.SubmittedEnvironment);
     }
 
+    [Fact]
+    public async Task Deploy_reports_automatic_wake_for_a_sleeping_environment()
+    {
+        await using var fixture = await Fixture.CreateAsync(new Handler(false, sleepState: "asleep"));
+
+        var exitCode = await fixture.Cli.RunAsync(
+            ["deploy", "web", "--no-publish", "--config", fixture.Config],
+            default);
+
+        Assert.Equal(CliExitCodes.Success, exitCode);
+        Assert.Contains("Environment is asleep; deployment will wake it automatically.", fixture.Console.Output);
+    }
+
+    [Fact]
+    public async Task Deploy_checks_sleep_state_when_application_summary_sleep_is_null()
+    {
+        await using var fixture = await Fixture.CreateAsync(new Handler(false, sleepState: "asleep", sleepSummaryNull: true));
+
+        var exitCode = await fixture.Cli.RunAsync(
+            ["deploy", "web", "--no-publish", "--config", fixture.Config],
+            default);
+
+        Assert.Equal(CliExitCodes.Success, exitCode);
+        Assert.Contains("Environment is asleep; deployment will wake it automatically.", fixture.Console.Output);
+    }
+
     [Theory]
     [InlineData("list", 0)]
     [InlineData("deploy", 2)]
@@ -107,7 +133,7 @@ public sealed class CliEnvironmentDeploymentTests
         public ValueTask DisposeAsync() { directory.Delete(true); return ValueTask.CompletedTask; }
     }
 
-    private sealed class Handler(bool multiple, bool empty = false) : HttpMessageHandler
+    private sealed class Handler(bool multiple, bool empty = false, string? sleepState = null, bool sleepSummaryNull = false) : HttpMessageHandler
     {
         public string? SubmittedApplication, SubmittedEnvironment, ServicesTarget;
         public bool Created;
@@ -121,7 +147,7 @@ public sealed class CliEnvironmentDeploymentTests
             var environments = new List<object>();
             if (!empty)
             {
-                environments.Add(CliApiFixtures.EnvironmentSummary("app_main", "prod"));
+                environments.Add(EnvironmentSummary("app_main", "prod", sleepSummaryNull ? null : sleepState));
                 if (multiple)
                 {
                     environments.Add(CliApiFixtures.EnvironmentSummary("app_staging", "staging"));
@@ -133,6 +159,34 @@ public sealed class CliEnvironmentDeploymentTests
             if (path == "/api/me") response = new { id = "user", email = "test@example.com", organizations = new[] { new { id = "org", name = "Test", slug = "test", role = "owner" } } };
             else if (path == "/api/apps") response = new[] { application };
             else if (path == "/api/apps/application_demo") response = application;
+            else if (path.StartsWith("/api/apps/application_demo/environments/", StringComparison.Ordinal) && request.Method == HttpMethod.Get)
+            {
+                var environmentId = path.Split('/')[5];
+                var state = environmentId == "app_main" ? sleepState ?? "awake" : "awake";
+                response = new
+                {
+                    id = environmentId,
+                    applicationId = "application_demo",
+                    name = "Environment",
+                    sleep = new
+                    {
+                        policy = new { sleepAfterMinutes = (int?)null, httpTrafficIsActivity = true, revision = 0 },
+                        state,
+                        stateChangedAt = DateTimeOffset.UtcNow,
+                        lastActivityAt = (DateTimeOffset?)null,
+                        lastHttpRequestAt = (DateTimeOffset?)null,
+                        keepAwakeUntil = (DateTimeOffset?)null,
+                        sleepsAt = (DateTimeOffset?)null,
+                        eligible = true,
+                        ineligibleReason = (string?)null,
+                        addressMode = "dynamic",
+                        retainedAddress = (object?)null,
+                        snapshot = (object?)null,
+                        operation = (object?)null,
+                        lastError = (object?)null
+                    }
+                };
+            }
             else if (path.StartsWith("/api/environments/"))
                 response = new { id = path.Split('/')[3], applicationId = "application_demo", organizationId = "org", name = "Environment", slug = "environment", plan = "p0", database = "sqlite", branches = Array.Empty<object>(), domains = Array.Empty<object>() };
             else if (path == "/api/apps/application_demo/environments" && request.Method == HttpMethod.Post)
@@ -176,6 +230,45 @@ public sealed class CliEnvironmentDeploymentTests
             else throw new InvalidOperationException(request.Method + " " + path);
             return new(HttpStatusCode.OK) { Content = JsonContent.Create(response) };
         }
+
+        private static object EnvironmentSummary(string id, string name, string? sleepState) =>
+            sleepState is null
+                ? new
+                {
+                    id,
+                    name,
+                    kind = "persistent",
+                    plan = "p0",
+                    database = "sqlite",
+                    deletionStatus = (string?)null,
+                    sleep = (object?)null
+                }
+                : new
+                {
+                    id,
+                    name,
+                    kind = "persistent",
+                    plan = "p0",
+                    database = "sqlite",
+                    deletionStatus = (string?)null,
+                    sleep = new
+                    {
+                        policy = new { sleepAfterMinutes = 120, httpTrafficIsActivity = true, revision = 2 },
+                        state = sleepState,
+                        stateChangedAt = DateTimeOffset.UtcNow,
+                        lastActivityAt = (DateTimeOffset?)null,
+                        lastHttpRequestAt = (DateTimeOffset?)null,
+                        keepAwakeUntil = (DateTimeOffset?)null,
+                        sleepsAt = (DateTimeOffset?)null,
+                        eligible = true,
+                        ineligibleReason = (string?)null,
+                        addressMode = "dynamic",
+                        retainedAddress = (object?)null,
+                        snapshot = (object?)null,
+                        operation = (object?)null,
+                        lastError = (object?)null
+                    }
+                };
     }
 
     private sealed class Console : IConsole

@@ -757,6 +757,10 @@ retain their runtime and URLs as their `production` environment.
 selfrun environments list
 selfrun environments rename production prod
 selfrun environments create staging --plan p0-v-0
+selfrun environments update staging --sleep-after on --traffic-activity off
+selfrun environments update staging --sleep-after 4h
+selfrun environments sleep staging
+selfrun environments wake staging --keep-awake 4h --no-wait
 selfrun deploy --environment staging
 selfrun deploy all --environment prod
 selfrun deploy api --environment staging
@@ -780,6 +784,38 @@ changing runtime IDs or existing URLs. New environments start with empty secrets
 configure secrets and domains using the environment's runtime ID shown by
 `environments list`. Branch previews remain a separate lifecycle and cannot be
 combined with `deploy --environment`.
+
+Sleep is opt-in. `environments list` includes the power state and next scheduled
+sleep time. Set the idle timeout and whether HTTP requests count as activity with
+`environments update`:
+
+```sh
+selfrun environments update staging --sleep-after on
+selfrun environments update staging --sleep-after 4h --traffic-activity off
+selfrun environments update staging --sleep-after off
+```
+
+`--sleep-after` accepts `on`, `off`, or a duration using `m`, `h`, or `d`
+(30 minutes to 30 days). Enabling without a duration uses the API's default of
+120 minutes on first enable and keeps the saved timeout on later enables.
+`--traffic-activity on|off` controls whether HTTP traffic to the environment's
+hostnames resets its idle timer. Sleep options can be used without SSH options,
+or combined with the existing SSH selection update.
+
+Run `environments sleep <name>` or `environments wake <name>` to request a
+manual operation. Both commands wait for completion and print operation-step
+progress by default; `--no-wait` returns the queued operation ID. Wake accepts
+`--keep-awake <duration>` from 30 minutes to 24 hours. An operation failure
+prints its API error code and exits non-zero. Deploying to a sleeping environment
+requests a wake automatically; the CLI says when it is asleep or already waking.
+
+Sleep-enabled environments derive their address mode from their hostnames:
+`dynamic` means Selfrun-managed hostnames follow the server's address after
+wake, while `retained` keeps a public IPv4 address across sleep. Enabling sleep
+can reserve an address. If that changes the address (including on DigitalOcean),
+the CLI prints the old and new addresses and warns that custom domains must be
+manually repointed to the new address. DNS records managed by Selfrun follow the
+server automatically in either mode.
 
 Deleting the main application deletes all its environments and branch previews.
 Deleting a child environment through its app detail affects only that environment.
@@ -812,9 +848,10 @@ selfrun environments update staging --ssh-key <key-id>
   then the file name) and is only valid with a file. Adding a new key requires
   `providers:write` (organization owner or admin).
 - The two options are mutually exclusive. Omitting them creates an environment
-  with Selfrun-only access; `environments update` without them is rejected,
-  and `rename` never changes the saved selection. Updates send the current
-  selection revision and fail if it changed concurrently.
+  with Selfrun-only access. SSH-only `environments update` requires one of these
+  options; sleep-policy-only updates do not. `rename` never changes the saved
+  selection. Updates send the current selection revision and fail if it changed
+  concurrently.
 - Nothing is registered with the provider when you save. The key is registered
   and installed when Selfrun first provisions the environment's VPS. The
   selection is immutable once server allocation starts and never changes keys
