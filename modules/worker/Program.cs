@@ -200,6 +200,8 @@ builder.Services.AddScoped<ResolveProvisionServerStep>();
 builder.Services.Configure<ManagedDomainOptions>(builder.Configuration.GetSection(ManagedDomainOptions.SectionName));
 builder.Services.AddScoped<DnsSetupStep>();
 builder.Services.AddScoped<DomainDnsReconciler>();
+builder.Services.AddScoped<Selfrun.Worker.Power.EnvironmentIdleSweepProcessor>();
+builder.Services.AddHostedService<Selfrun.Worker.Power.EnvironmentIdleSweepWorker>();
 builder.Services.AddHostedService<Selfrun.Worker.Maintenance.RuntimeLogRetentionWorker>();
 builder.Services.AddHostedService<DomainDnsWorker>();
 builder.Services.AddHostedService<CustomDomainDnsWorker>();
