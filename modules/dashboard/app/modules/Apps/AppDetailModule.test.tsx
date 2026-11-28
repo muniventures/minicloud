@@ -19,11 +19,11 @@ import {
   setAppServiceSecret,
   updateAppServiceSecret
 } from "../../api/environmentsApi";
-import { getApplication } from "../../api/applicationsApi";
+import { getApplication, getEnvironment } from "../../api/applicationsApi";
 import type { Application } from "../../models/application";
 import { listDeployments } from "../../api/deploymentsApi";
 
-vi.mock("../../api/applicationsApi", () => ({ getApplication: vi.fn() }));
+vi.mock("../../api/applicationsApi", () => ({ getApplication: vi.fn(), getEnvironment: vi.fn() }));
 vi.mock("../../api/applicationsFixtures", () => ({ appsFixturesEnabled: () => false }));
 
 vi.mock("../../api/environmentsApi", () => ({
@@ -59,6 +59,91 @@ vi.mock("./AppConsolePanel", () => ({
 }));
 
 describe("AppDetailModule", () => {
+  it("shows asleep runtime as unavailable and marks the environment selector", async () => {
+    const sleeping = {
+      policy: { sleepAfterMinutes: 120, httpTrafficIsActivity: true, revision: 1 },
+      state: "asleep",
+      stateChangedAt: "2026-11-28T18:04:00Z",
+      lastActivityAt: null,
+      lastHttpRequestAt: null,
+      keepAwakeUntil: null,
+      sleepsAt: null,
+      eligible: true,
+      ineligibleReason: null,
+      addressMode: "dynamic",
+      retainedAddress: null,
+      snapshot: { createdAt: "2026-11-28T18:04:00Z", sizeGb: 9, pendingPurge: false },
+      operation: null,
+      lastError: null,
+    };
+    vi.mocked(getApplication).mockResolvedValue({
+      id: "application_123",
+      organizationId: "org_123",
+      name: "Demo",
+      slug: "demo",
+      defaultEnvironmentId: "app_123",
+      deletionStatus: null,
+      deletionError: null,
+      environmentCount: 1,
+      persistentEnvironmentCount: 1,
+      previewEnvironmentCount: 0,
+      createdAt: "2026-05-18T12:00:00Z",
+      updatedAt: "2026-05-18T12:00:00Z",
+      environments: [{
+        id: "app_123",
+        applicationId: "application_123",
+        organizationId: "org_123",
+        name: "production",
+        kind: "persistent",
+        runtimeSlug: "demo",
+        plan: "p0",
+        planId: null,
+        database: "sqlite",
+        sourceBranch: null,
+        sourceEnvironmentId: null,
+        deletionStatus: null,
+        deletionError: null,
+        placementLocked: false,
+        domains: [],
+        latestDeployment: null,
+        runtimeObservation: { state: "unknown", connected: false, stale: false, observedAt: null, lastSeenAt: null, totalServices: 0, healthyServices: 0 },
+        createdAt: "2026-05-18T12:00:00Z",
+        updatedAt: "2026-05-18T12:00:00Z",
+      }],
+    } as Application);
+    vi.mocked(getEnvironment).mockResolvedValue({
+      id: "app_123",
+      applicationId: "application_123",
+      organizationId: "org_123",
+      name: "production",
+      kind: "persistent",
+      runtimeSlug: "munipages",
+      plan: "Small NB",
+      planId: "plan_1",
+      database: "postgres",
+      sourceBranch: null,
+      sourceEnvironmentId: null,
+      deletionStatus: null,
+      deletionError: null,
+      placementLocked: false,
+      domains: [],
+      latestDeployment: null,
+      runtimeObservation: { state: "unknown", connected: false, stale: false, observedAt: null, lastSeenAt: null, totalServices: 0, healthyServices: 0 },
+      createdAt: "2026-05-18T12:00:00Z",
+      updatedAt: "2026-05-18T12:00:00Z",
+      sleep: sleeping,
+    });
+
+    render(<MemoryRouter initialEntries={["/apps/application_123/environments/app_123/overview"]}><Routes>
+      <Route path="/apps/:applicationId/environments/:environmentId/:tab" element={<AppDetailModule />} />
+    </Routes></MemoryRouter>);
+
+    expect(await screen.findByText("Runtime unavailable while asleep.")).toBeInTheDocument();
+    expect(screen.getAllByText("Unavailable while asleep").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("combobox", { name: "Environment for Demo" }));
+    expect(await screen.findByRole("option", { name: /production.*Asleep/ })).toBeInTheDocument();
+  });
+
   it.each([
     ["legacy_provider_import_required: Import or reconcile production before retrying deletion.", "legacy_provider_import_required: Import or reconcile production before retrying deletion."],
     [null, "Environment deletion failed. Review environment settings for recovery."],
@@ -87,6 +172,28 @@ describe("AppDetailModule", () => {
       deletionStatus: null, deletionError: null, environmentCount: 1, persistentEnvironmentCount: 1, previewEnvironmentCount: 0, createdAt: "2026-05-18T12:00:00Z", updatedAt: "2026-05-18T12:00:00Z",
       environments: [{ id: "app_123", applicationId: "application_123", organizationId: "org_123", name: "production", kind: "persistent", runtimeSlug: "demo", plan: "p0", planId: null, database: "sqlite", sourceBranch: null, sourceEnvironmentId: null, domains: [], latestDeployment: null, deletionStatus: null, deletionError: null, placementLocked: false, createdAt: "2026-05-18T12:00:00Z", updatedAt: "2026-05-18T12:00:00Z", runtimeObservation: { state: "unprovisioned", connected: false, stale: false, observedAt: null, lastSeenAt: null, totalServices: 0, healthyServices: 0 } }]
     } as Application);
+    vi.mocked(getEnvironment).mockResolvedValue({
+      id: "app_123",
+      applicationId: "application_123",
+      organizationId: "org_123",
+      name: "production",
+      kind: "persistent",
+      runtimeSlug: "demo",
+      plan: "p0",
+      planId: null,
+      database: "sqlite",
+      sourceBranch: null,
+      sourceEnvironmentId: null,
+      deletionStatus: null,
+      deletionError: null,
+      placementLocked: false,
+      domains: [],
+      latestDeployment: null,
+      runtimeObservation: { state: "unknown", connected: false, stale: false, observedAt: null, lastSeenAt: null, totalServices: 0, healthyServices: 0 },
+      createdAt: "2026-05-18T12:00:00Z",
+      updatedAt: "2026-05-18T12:00:00Z",
+      sleep: null,
+    });
 
     vi.mocked(getEnvironmentDetail).mockResolvedValue({
       id: "app_123",

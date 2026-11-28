@@ -3,7 +3,7 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppDetailModule } from "./AppDetailModule";
 import { createAppServiceSecretService, deleteAppServiceSecretService, getEnvironmentDetail, listAppServices, listAppServiceSecrets, listAppServiceSecretServices, renameAppServiceSecretService } from "../../api/environmentsApi";
-import { deleteEnvironment } from "../../api/applicationsApi";
+import { deleteEnvironment, getEnvironment } from "../../api/applicationsApi";
 import { listDeployments } from "../../api/deploymentsApi";
 import { getTelemetrySettings, listTelemetryCredentials, queryApplicationLogs } from "../../api/telemetryApi";
 import type { AppServiceSecretServiceResponse } from "../../models/controlPlane";
@@ -28,6 +28,7 @@ vi.mock("../../api/deploymentsApi", () => ({
 
 vi.mock("../../api/applicationsApi", () => ({
   getApplication: vi.fn(),
+  getEnvironment: vi.fn(),
   deleteEnvironment: vi.fn(),
 }));
 
@@ -79,6 +80,12 @@ describe("EnvironmentScope (UX-01)", () => {
   beforeEach(() => {
     sessionStorage.clear();
     vi.clearAllMocks();
+    vi.mocked(getEnvironment).mockImplementation(async (applicationId, environmentId) => {
+      const app = appsFixtureApplications().find(item => item.id === applicationId);
+      const environment = app?.environments.find(item => item.id === environmentId);
+      if (!environment) throw new Error("Environment not found.");
+      return environment;
+    });
     vi.mocked(listDeployments).mockResolvedValue([]);
     vi.mocked(listAppServiceSecretServices).mockResolvedValue([]);
     vi.mocked(listAppServiceSecrets).mockResolvedValue([]);

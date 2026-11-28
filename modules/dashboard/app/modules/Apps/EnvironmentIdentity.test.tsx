@@ -2,12 +2,12 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppDetailModule } from "./AppDetailModule";
-import { getApplication } from "../../api/applicationsApi";
+import { getApplication, getEnvironment } from "../../api/applicationsApi";
 import { getEnvironmentDetail, listAppServices, listAppServiceSecretServices } from "../../api/environmentsApi";
 import { listDeployments } from "../../api/deploymentsApi";
 import type { Application } from "../../models/application";
 
-vi.mock("../../api/applicationsApi", () => ({ getApplication: vi.fn() }));
+vi.mock("../../api/applicationsApi", () => ({ getApplication: vi.fn(), getEnvironment: vi.fn() }));
 vi.mock("../../api/applicationsFixtures", () => ({ appsFixturesEnabled: () => false }));
 vi.mock("../../api/environmentsApi", () => ({
   getEnvironmentDetail: vi.fn(),
@@ -88,6 +88,11 @@ describe("EnvironmentIdentity (regression)", () => {
     sessionStorage.clear();
     vi.clearAllMocks();
     vi.mocked(getApplication).mockResolvedValue(customApp());
+    vi.mocked(getEnvironment).mockImplementation(async (_applicationId, environmentId) => {
+      const environment = customApp().environments.find(item => item.id === environmentId);
+      if (!environment) throw new Error("Environment not found.");
+      return environment;
+    });
     vi.mocked(listDeployments).mockResolvedValue([]);
     vi.mocked(listAppServiceSecretServices).mockResolvedValue([]);
     vi.mocked(listAppServices).mockResolvedValue([]);
@@ -106,6 +111,7 @@ describe("EnvironmentIdentity (regression)", () => {
     vi.mocked(getApplication).mockResolvedValue({ ...customApp(), organizationId: "org_other" });
     render(<RouterProvider router={scopedRouter()} />);
     await screen.findByText("Application does not belong to the selected organization.");
+    expect(getEnvironment).not.toHaveBeenCalled();
     await waitFor(() => expect(getEnvironmentDetail).not.toHaveBeenCalled());
     expect(listAppServices).not.toHaveBeenCalled();
   });

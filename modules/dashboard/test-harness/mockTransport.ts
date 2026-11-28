@@ -69,8 +69,23 @@ const LOGS = Array.from({ length: 6 }, (_, i) => ({
   content: `runtime line ${i + 1}: GET /api/health 200`,
 }));
 
-function json(data: unknown) {
-  return new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
+}
+
+function telemetryResponse(environmentId: string) {
+  return {
+    appId: environmentId,
+    organizationId: "org_fixture_01",
+    tenantId: "mcl_abc",
+    ingestionUrl: "https://ingest.operator.test/otlp/v1/logs",
+    enabled: true,
+    retentionPolicy: "7d",
+    provisioningStatus: "ready",
+    lastAcceptedAt: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
 }
 
 //  fixtures mirror the backend contract (env id == retained runtime id).
@@ -78,6 +93,29 @@ import { appsFixtureApplications } from "../app/api/applicationsFixtures";
 
 export function installMockTransport() {
   const realFetch = window.fetch.bind(window);
+  const sleepStates = new Map<string, ReturnType<typeof sleepState>>();
+  function sleepState(environment: { id: string; name: string }) {
+    const asleep = environment.name === "staging";
+    const retained = environment.name === "production";
+    return {
+      policy: { sleepAfterMinutes: 120, httpTrafficIsActivity: true, revision: 1 },
+      state: asleep ? "asleep" : "awake",
+      stateChangedAt: NOW,
+      lastActivityAt: NOW,
+      lastHttpRequestAt: null,
+      keepAwakeUntil: null,
+      sleepsAt: asleep ? null : new Date(Date.now() + 100 * 60_000).toISOString(),
+      eligible: true,
+      ineligibleReason: null,
+      addressMode: retained ? "retained" : "dynamic",
+      retainedAddress: retained
+        ? { ipv4: "203.0.113.20", state: "assigned", previousIpv4: "203.0.113.10" }
+        : null,
+      snapshot: asleep ? { createdAt: NOW, sizeGb: 9.4, pendingPurge: false } : null,
+      operation: null as null | { id: string; kind: string; status: string; step: string | null; trigger: string },
+      lastError: null,
+    };
+  }
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input), "http://localhost/");
     const path = url.pathname;
@@ -86,7 +124,60 @@ export function installMockTransport() {
     if (path === "/api/apps") return json(appsFixtureApplications());
     const application = appsFixtureApplications().find(app => path === `/api/apps/${app.id}`);
     if (application) return json(application);
-    if (path === `/api/environments/${APP_ID}`) return json(APP);
+    const environmentRoute = path.match(/^\/api\/apps\/([^/]+)\/environments\/([^/]+)(?:\/(sleep|wake))?$/);
+    if (environmentRoute) {
+      const [, encodedApplicationId, encodedEnvironmentId, action] = environmentRoute;
+      const applicationId = decodeURIComponent(encodedApplicationId);
+      const environmentId = decodeURIComponent(encodedEnvironmentId);
+      const targetApp = appsFixtureApplications().find(app => app.id === applicationId);
+      const environment = targetApp?.environments.find(item => item.id === environmentId);
+      if (!environment) return new Response(JSON.stringify({ error: { code: "not_found", message: "Environment not found.", details: [] } }), { status: 404, headers: { "content-type": "application/json" } });
+      const current = sleepStates.get(environmentId) ?? sleepState(environment);
+      if (method === "GET" && !action) return json({ ...environment, sleep: current });
+      if (method === "PATCH" && !action) {
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) as { sleep?: { policy?: Record<string, unknown> } } : {};
+        const policy = body.sleep?.policy ?? {};
+        const enabled = policy.enabled === true || policy.sleepAfterMinutes != null;
+        const minutes = typeof policy.sleepAfterMinutes === "number" ? policy.sleepAfterMinutes : current.policy.sleepAfterMinutes;
+        const updated = {
+          ...current,
+          policy: {
+            ...current.policy,
+            sleepAfterMinutes: enabled ? minutes : null,
+            httpTrafficIsActivity: typeof policy.httpTrafficIsActivity === "boolean" ? policy.httpTrafficIsActivity : current.policy.httpTrafficIsActivity,
+            revision: current.policy.revision + 1,
+          },
+        };
+        sleepStates.set(environmentId, updated);
+        return json({ ...environment, sleep: updated });
+      }
+      if (method === "POST" && action === "sleep") {
+        const updated = { ...current, state: "sleeping", stateChangedAt: new Date().toISOString(), operation: { id: `op_${environmentId}`, kind: "sleep", status: "queued", step: null, trigger: "manual_dashboard" } };
+        sleepStates.set(environmentId, updated);
+        return json({ operation: updated.operation }, 202);
+      }
+      if (method === "POST" && action === "wake") {
+        if (current.state === "awake") {
+          const updated = { ...current, keepAwakeUntil: new Date(Date.now() + 4 * 60 * 60_000).toISOString() };
+          sleepStates.set(environmentId, updated);
+          return json(updated);
+        }
+        const updated = { ...current, state: "waking", stateChangedAt: new Date().toISOString(), operation: { id: `op_${environmentId}`, kind: "wake", status: "queued", step: null, trigger: "manual_dashboard" } };
+        sleepStates.set(environmentId, updated);
+        return json({ operation: updated.operation }, 202);
+      }
+    }
+    const environmentApiRoute = path.match(/^\/api\/environments\/([^/]+)(?:\/(telemetry|telemetry\/credentials|logs|storage))?$/);
+    if (environmentApiRoute) {
+      const [, environmentId, endpoint] = environmentApiRoute;
+      const knownEnvironment = appsFixtureApplications().some(app => app.environments.some(environment => environment.id === environmentId));
+      if (knownEnvironment) {
+        if (endpoint === "telemetry") return json(telemetryResponse(environmentId));
+        if (endpoint === "telemetry/credentials" || endpoint === "storage") return json([]);
+        if (endpoint === "logs") return json({ state: "ok", entries: [], truncated: false, truncationReason: null, retentionCutoff: null, lastAcceptedAt: null });
+        return json({ ...APP, id: environmentId });
+      }
+    }
     if (path === "/api/domains/services") return json(SERVICES);
     if (path === "/api/secrets/services") return json([]);
     if (path === "/api/deployments") return json([{
@@ -94,21 +185,6 @@ export function installMockTransport() {
       status: "succeeded", websiteUrl: "https://app.example.com", consoleUrl: "https://console.example.test",
       services: [], createdAt: NOW, startedAt: NOW, completedAt: new Date(Date.now() - 15 * 60_000).toISOString(),
     }]);
-    if (path === `/api/environments/${APP_ID}/telemetry` && method === "PUT") {
-      return json({
-        appId: APP_ID, organizationId: "org_fixture_01", tenantId: "mcl_abc",
-        ingestionUrl: "https://ingest.operator.test/otlp/v1/logs", enabled: true,
-        retentionPolicy: "7d", provisioningStatus: "ready",
-        lastAcceptedAt: null, createdAt: NOW, updatedAt: NOW,
-      });
-    }
-    if (path === `/api/environments/${APP_ID}/telemetry`) return json({
-      appId: APP_ID, organizationId: "org_fixture_01", tenantId: "mcl_abc",
-      ingestionUrl: "https://ingest.operator.test/otlp/v1/logs", enabled: true,
-      retentionPolicy: "7d", provisioningStatus: "ready",
-      lastAcceptedAt: null, createdAt: NOW, updatedAt: NOW,
-    });
-    if (path === `/api/environments/${APP_ID}/logs`) return json({ state: "ok", entries: [], truncated: false, truncationReason: null, retentionCutoff: null, lastAcceptedAt: null });
     if (path === "/api/runtime/status") return json(RUNTIME_STATUS);
     if (path === "/api/runtime/log-sources") return json([{ source: "docker-compose", service: "web", count: 6 }]);
     if (path === "/api/runtime/logs") return json(LOGS);
@@ -117,8 +193,6 @@ export function installMockTransport() {
       { id: "reg_1", appId: APP_ID, hostname: "example.com", status: "verified", verificationToken: "vt-1", lastCheckedAt: NOW, createdAt: NOW, updatedAt: NOW },
       { id: "reg_2", appId: APP_ID, hostname: "unverified.example.org", status: "pending", verificationToken: "vt-2", lastCheckedAt: null, createdAt: NOW, updatedAt: NOW },
     ]);
-    if (path === `/api/environments/${APP_ID}/storage`) return json([]);
-    if (path === `/api/environments/${APP_ID}/telemetry/credentials`) return json([]);
     if (path === "/api/plans") return json([]);
     if (path === "/me" || path === "/api/me") return json({
       id: "user_shot", email: "shot@example.test", displayName: "Shot",
