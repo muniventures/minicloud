@@ -124,6 +124,10 @@ public sealed partial class VultrClient : IVpsProviderClient, IVpsProviderSshKey
             osId = await ResolveOsIdAsync(cancellationToken);
         }
         var base64UserData = Convert.ToBase64String(Encoding.UTF8.GetBytes(request.UserDataCloudInit ?? string.Empty));
+        var retainedAddress = request.RetainedAddressId is null
+            ? null
+            : await GetRetainedAddressAsync(request.RetainedAddressId, cancellationToken)
+                ?? throw new ProviderApiException($"Vultr reserved IP {request.RetainedAddressId} was not found.", provider: Provider);
 
         var tags = new List<string> { "selfrun" };
         if (request.Tags != null)
@@ -140,6 +144,7 @@ public sealed partial class VultrClient : IVpsProviderClient, IVpsProviderSshKey
             Label = request.Name,
             Hostname = request.Hostname ?? request.Name,
             UserData = base64UserData,
+            ReservedIpv4 = retainedAddress?.Id,
             EnableIpv6 = true,
             ActivationEmail = false,
             Tags = tags.Distinct().ToList()
@@ -151,7 +156,7 @@ public sealed partial class VultrClient : IVpsProviderClient, IVpsProviderSshKey
         }
 
         using var httpRequest = CreateRequest(HttpMethod.Post, "instances");
-        if (snapshotId is not null)
+        if (snapshotId is not null || request.RetainedAddressId is not null)
             httpRequest.Options.Set(ProviderHttpOptions.NoRetry, true);
         httpRequest.Content = JsonContent.Create(payload);
 
@@ -165,7 +170,10 @@ public sealed partial class VultrClient : IVpsProviderClient, IVpsProviderSshKey
         }
 
         _logger?.LogInformation("Created Vultr instance {InstanceLabel} with ID {InstanceId}", request.Name, createResponse.Instance.Id);
-        return MapInstanceInfo(createResponse.Instance);
+        var serverInfo = MapInstanceInfo(createResponse.Instance);
+        return retainedAddress is null
+            ? serverInfo
+            : serverInfo with { Ipv4Address = retainedAddress.Ipv4Address };
     }
 
     public async Task<ProviderServerStatus> GetServerStatusAsync(string serverId, CancellationToken cancellationToken = default)
@@ -315,6 +323,10 @@ public sealed partial class VultrClient : IVpsProviderClient, IVpsProviderSshKey
 
         [JsonPropertyName("user_data")]
         public string UserData { get; set; } = string.Empty;
+
+        [JsonPropertyName("reserved_ipv4")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ReservedIpv4 { get; set; }
 
         [JsonPropertyName("enable_ipv6")]
         public bool EnableIpv6 { get; set; } = true;

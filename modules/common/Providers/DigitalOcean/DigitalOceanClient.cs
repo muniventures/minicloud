@@ -135,7 +135,7 @@ public sealed partial class DigitalOceanClient : IVpsProviderClient, IVpsProvide
         }
 
         using var httpRequest = CreateRequest(HttpMethod.Post, "droplets");
-        if (snapshotId is not null)
+        if (snapshotId is not null || request.RetainedAddressId is not null)
             httpRequest.Options.Set(ProviderHttpOptions.NoRetry, true);
         httpRequest.Content = JsonContent.Create(payload);
 
@@ -170,7 +170,28 @@ public sealed partial class DigitalOceanClient : IVpsProviderClient, IVpsProvide
             }
         }
 
-        return MapDropletInfo(droplet);
+        string? retainedAddressIp = null;
+        if (request.RetainedAddressId is not null)
+        {
+            try
+            {
+                await AssignRetainedAddressAsync(request.RetainedAddressId, droplet.Id.ToString(), cancellationToken);
+                retainedAddressIp = (await GetRetainedAddressAsync(request.RetainedAddressId, cancellationToken))?.Ipv4Address
+                    ?? throw new ProviderApiException($"DigitalOcean Reserved IP {request.RetainedAddressId} disappeared after assignment.", provider: Provider);
+            }
+            catch (ProviderApiException ex)
+            {
+                throw new ProviderApiException(
+                    $"DigitalOcean Droplet {droplet.Id} was created, but Reserved IP assignment failed. Reconcile the existing Droplet before retrying.",
+                    provider: Provider,
+                    innerException: ex,
+                    category: Extensibility.ProviderErrorCategory.PartialAllocationAmbiguous,
+                    providerWireType: "digital-ocean",
+                    isAmbiguousOutcome: true);
+            }
+        }
+
+        return MapDropletInfo(droplet, retainedAddressIp);
     }
 
     public async Task AssignToProjectAsync(string dropletId, string projectId, CancellationToken cancellationToken = default)
@@ -277,11 +298,11 @@ public sealed partial class DigitalOceanClient : IVpsProviderClient, IVpsProvide
         }
     }
 
-    private static ProviderServerInfo MapDropletInfo(DigitalOceanDropletDto droplet)
+    private static ProviderServerInfo MapDropletInfo(DigitalOceanDropletDto droplet, string? ipv4Override = null)
     {
         var id = droplet.Id.ToString();
         var name = droplet.Name ?? string.Empty;
-        var publicV4 = droplet.Networks?.V4?.FirstOrDefault(n => string.Equals(n.Type, "public", StringComparison.OrdinalIgnoreCase))?.IpAddress ?? string.Empty;
+        var publicV4 = ipv4Override ?? droplet.Networks?.V4?.FirstOrDefault(n => string.Equals(n.Type, "public", StringComparison.OrdinalIgnoreCase))?.IpAddress ?? string.Empty;
         var publicV6 = droplet.Networks?.V6?.FirstOrDefault(n => string.Equals(n.Type, "public", StringComparison.OrdinalIgnoreCase))?.IpAddress;
         var status = droplet.Status ?? "unknown";
 

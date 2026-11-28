@@ -9,4 +9,5 @@ public record CreateServerRequest(
     IReadOnlyDictionary<string, string>? Labels = null,
     IReadOnlyList<string>? Tags = null,
     string? Hostname = null,
-    string? Image = null);
+    string? Image = null,
+    string? RetainedAddressId = null);
